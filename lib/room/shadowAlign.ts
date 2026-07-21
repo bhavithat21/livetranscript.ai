@@ -29,3 +29,62 @@ export function alignIndex(sourceWords: string[], spokenText: string): number {
   }
   return Math.min(pos, src.length)
 }
+
+// ── Adaptive highlight band ──────────────────────────────────────────────────
+// The band ("what to read next") should cover a consistent amount of SPEAKING
+// TIME, not a fixed word count — otherwise filler-heavy text over-highlights and
+// dense text under-highlights. We estimate speaking time by syllables (pure local
+// math, zero latency) and light words ahead until we've covered ~a breath-sized
+// phrase, clamped to a sensible word range so it never looks like a blob.
+
+// Rough syllable estimate: count vowel groups, drop a silent trailing 'e'. Good
+// enough to pace the highlight; it never needs to be linguistically exact.
+export function syllables(word: string): number {
+  const w = word.toLowerCase().replace(/[^a-z]/g, '')
+  if (!w) return 1
+  const groups = w.match(/[aeiouy]+/g)
+  let n = groups ? groups.length : 1
+  if (w.length > 2 && w.endsWith('e') && !w.endsWith('le')) n -= 1
+  return Math.max(1, n)
+}
+
+// ~1.5s of shadowed speech ≈ 6 syllables at a deliberate repeating pace.
+const TARGET_BAND_SYLLABLES = 6
+const MIN_BAND_WORDS = 2
+const MAX_BAND_WORDS = 6
+
+// How many words to highlight AHEAD of the lead word so the band spans roughly
+// TARGET_BAND_SYLLABLES of speech, clamped to [MIN,MAX] words.
+export function bandWordCount(
+  words: string[],
+  from: number,
+  targetSyllables = TARGET_BAND_SYLLABLES,
+): number {
+  let syl = 0
+  let count = 0
+  for (let i = from; i < words.length && count < MAX_BAND_WORDS; i++) {
+    syl += syllables(words[i])
+    count++
+    if (count >= MIN_BAND_WORDS && syl >= targetSyllables) break
+  }
+  return Math.max(MIN_BAND_WORDS, count)
+}
+
+// Salient words from the source line, fed to the reader's ASR as keyterms so it
+// recognizes exactly the words being read (biggest accuracy win, zero per-word
+// latency — keyterms are sent once at connection). Skips short/function words,
+// dedupes, caps so it can merge under the provider's 100-term budget.
+export function sourceKeyterms(source: string, cap = 60): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const raw of source.split(/\s+/)) {
+    const w = raw.replace(/[^A-Za-z0-9'-]/g, '')
+    if (w.length < 4) continue
+    const key = w.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(w)
+    if (out.length >= cap) break
+  }
+  return out
+}

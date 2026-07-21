@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 import { useMicStream } from '@/lib/audio/useMicStream'
 import { connectWithFallback } from '@/lib/transcription'
-import { alignIndex } from '@/lib/room/shadowAlign'
+import { alignIndex, sourceKeyterms } from '@/lib/room/shadowAlign'
 import { ShadowFollow } from '@/components/transcript/ShadowFollow'
 import type { TranscriptionProvider } from '@/lib/transcription/types'
 
@@ -39,9 +39,13 @@ export function FollowAlong({
     try {
       let provider: TranscriptionProvider | null = null
       const rate = await start((pcm) => provider?.sendAudio(pcm), () => {}, { source: 'mic' })
-      // Fastest engine — this is a local alignment aid, accuracy of the reader's
-      // echo matters less than immediacy.
-      const res = await connectWithFallback({ keyterms, sampleRate: rate, maxSpeakers: 1 }, undefined, 'Deepgram')
+      // Accuracy win at zero latency cost: bias the engine toward the EXACT words
+      // in the line being read (sent once at open, not per word). Source terms
+      // first so they survive the 100-cap, then the user's packs.
+      const boosted = [...sourceKeyterms(source), ...keyterms]
+      // Fastest engine — immediacy matters most here; the source-term bias keeps
+      // positioning accurate even on the fast path.
+      const res = await connectWithFallback({ keyterms: boosted, sampleRate: rate, maxSpeakers: 1 }, undefined, 'Deepgram')
       provider = res.provider
       providerRef.current = provider
       // Partials advance the cursor immediately; we track the latest line only.

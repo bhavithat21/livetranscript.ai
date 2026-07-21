@@ -2,6 +2,7 @@
 import { useEffect, useRef } from 'react'
 import { motion, useReducedMotion } from 'framer-motion'
 import { cn } from '@/lib/utils'
+import { bandWordCount } from '@/lib/room/shadowAlign'
 
 // Speech-shadowing follow-along. Shows the source text and highlights a rolling
 // BAND of a few words (Otter-style) around where the repeater is — driven by
@@ -13,14 +14,12 @@ import { cn } from '@/lib/utils'
 // color, background, transform) on a short critically-damped tween (no spring
 // overshoot → no wobble).
 
-const DEFAULT_WINDOW = 4 // rolling highlight band size (clamped to 3–5)
-
 type WordState = 'lead' | 'band' | 'past' | 'upcoming'
 
 interface ShadowFollowProps {
   words: string[]
   activeIndex: number
-  /** How many words to highlight at once (3–5). */
+  /** Override the adaptive band with a fixed word count (used by the demo). */
   windowSize?: number
   theme?: 'light' | 'dark'
   className?: string
@@ -29,13 +28,17 @@ interface ShadowFollowProps {
 export function ShadowFollow({
   words,
   activeIndex,
-  windowSize = DEFAULT_WINDOW,
+  windowSize,
   theme = 'light',
   className,
 }: ShadowFollowProps) {
   const leadRef = useRef<HTMLSpanElement>(null)
   const reduce = useReducedMotion()
-  const w = Math.min(5, Math.max(3, windowSize))
+  // Adaptive band: light words ahead until ~a breath-sized phrase (~1.5s of
+  // speech) is covered, so dense and filler-heavy text both feel consistent. A
+  // fixed windowSize still wins when explicitly passed. Ends the band right at
+  // the lead word (count includes the lead).
+  const w = windowSize ?? bandWordCount(words, activeIndex)
 
   // Keep the highlighted band in view as the repeater advances.
   useEffect(() => {
