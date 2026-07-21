@@ -24,15 +24,25 @@ export default function Home() {
           Faster and more readable than the rest — with a distraction-free Reader Mode that colors
           every speaker.
         </p>
-        <div className="mt-10 flex items-center gap-5">
+        <div className="mt-10 flex flex-wrap items-center gap-5">
           <Link
             href="/record"
             className="rounded-full bg-emerald-700 px-7 py-3 font-medium text-white transition-colors hover:bg-emerald-800"
           >
             Start transcribing
           </Link>
+          <Link
+            href="/room/new"
+            className="rounded-full border border-black/15 px-7 py-3 font-medium transition-colors hover:bg-black/5"
+          >
+            Open a shadowing room
+          </Link>
           <span className="text-sm text-black/50">No install. Works in your browser.</span>
         </div>
+        <p className="mt-4 text-sm text-black/50">
+          Shadowing rooms sync two people on different computers — one reads, the other repeats,
+          with the repeater&rsquo;s words shown large. Use any room name in the URL to share it.
+        </p>
       </section>
     </main>
   )

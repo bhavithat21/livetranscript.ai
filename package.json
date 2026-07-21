@@ -13,6 +13,7 @@
   "dependencies": {
     "@clerk/nextjs": "^7.5.20",
     "@neondatabase/serverless": "^1.1.0",
+    "ably": "^2.25.0",
     "drizzle-orm": "^0.45.2",
     "next": "16.2.10",
     "openai": "^6.48.0",
