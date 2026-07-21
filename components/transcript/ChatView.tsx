@@ -6,7 +6,15 @@ import type { Segment } from '@/lib/transcript/store'
 // Chat-bubble view of a meeting transcript. Consecutive lines from the same
 // speaker are grouped into one bubble, labeled with their display name (from
 // login) and colored by speaker slot. Auto-scrolls to the newest message.
-export function ChatView({ segments, theme = 'light' }: { segments: Segment[]; theme?: 'light' | 'dark' }) {
+export function ChatView({
+  segments,
+  theme = 'light',
+  fill = false,
+}: {
+  segments: Segment[]
+  theme?: 'light' | 'dark'
+  fill?: boolean
+}) {
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -29,8 +37,8 @@ export function ChatView({ segments, theme = 'light' }: { segments: Segment[]; t
   return (
     <div
       ref={scrollRef}
-      className="overflow-y-auto overscroll-contain"
-      style={{ maxHeight: 'calc(100dvh - 160px)' }}
+      className={fill ? 'h-full overflow-y-auto overscroll-contain' : 'overflow-y-auto overscroll-contain'}
+      style={fill ? undefined : { maxHeight: 'calc(100dvh - 160px)' }}
     >
       <div className="mx-auto flex max-w-3xl flex-col gap-4 px-6 py-8">
         {groups.map((g) => {

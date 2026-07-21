@@ -13,6 +13,7 @@ export function TranscriptView({
   autoScroll = false,
   fade = false,
   flow = false,
+  fill = false,
 }: {
   segments: Segment[]
   theme: 'light' | 'dark'
@@ -25,6 +26,9 @@ export function TranscriptView({
   // Let the PAGE own the scroll (static views like session detail) instead of a
   // capped inner scroll region (live views).
   flow?: boolean
+  // Fill the parent's height (h-full) instead of a fixed 100dvh cap — use inside
+  // a flex column so there's exactly one scrollbar (no page + inner double scroll).
+  fill?: boolean
 }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   // Only follow the live edge when the reader is already near the bottom, so
@@ -38,6 +42,12 @@ export function TranscriptView({
     if (nearBottom) el.scrollTop = el.scrollHeight
   }, [segments, autoScroll])
 
+  // Color by SENDER identity (consistent across all clients), not the racy wire
+  // slot. MUST run before any early return — Rules of Hooks: an early return that
+  // skips this hook changes the hook count when the first segment arrives and
+  // crashes the component (that was kicking everyone out of live meetings).
+  const colors = useMemo(() => colorMap(segments), [segments])
+
   if (segments.length === 0) {
     return (
       <div className="px-6 py-16 text-center text-black/30">
@@ -50,14 +60,17 @@ export function TranscriptView({
 
   const inkBody = theme === 'dark' ? 'text-[#f5f4f2]' : 'text-ink'
   const shadow = emphasizeSpeaker != null
-  // Color by SENDER identity (consistent across all clients), not the racy wire slot.
-  const colors = useMemo(() => colorMap(segments), [segments])
 
   return (
     <div
       ref={scrollRef}
-      className={cn(!flow && 'overflow-y-auto overscroll-contain', fade && 'reading-fade')}
-      style={flow ? undefined : { maxHeight: 'calc(100dvh - 72px)' }}
+      className={cn(
+        !flow && 'overflow-y-auto overscroll-contain',
+        fill && 'h-full',
+        fade && 'reading-fade',
+      )}
+      // fill → grow to the flex parent (one scrollbar); else the legacy 100dvh cap.
+      style={flow || fill ? undefined : { maxHeight: 'calc(100dvh - 72px)' }}
     >
       {/* Always a measured reading column (~70ch) — live AND reader — so lines
           never run 120+ chars on wide displays. */}

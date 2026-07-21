@@ -252,7 +252,9 @@ function Meeting({ roomId }: { roomId: string }) {
   const me = speakerColor(mySlot < 0 ? 0 : mySlot, 'light')
 
   return (
-    <main className="relative min-h-dvh bg-[#faf9f7] pb-32 text-[#16151a]">
+    // Lock the meeting to ONE viewport: header fixed, transcript is the only
+    // scroll region — otherwise the page AND the transcript both scroll ("two scrolls").
+    <main className="relative flex h-dvh flex-col overflow-hidden bg-[#faf9f7] text-[#16151a]">
       {/* Top bar: identity + copyable meeting id + status on the left, End on the right. */}
       <header className="flex flex-wrap items-center gap-3 px-6 py-4">
         {!full && (
@@ -295,11 +297,16 @@ function Meeting({ roomId }: { roomId: string }) {
         <p className="px-6 text-sm text-red-700">{startError ?? error ?? roomError}</p>
       )}
 
-      {view === 'chat' ? (
-        <ChatView segments={segments} theme="light" />
-      ) : (
-        <TranscriptView segments={segments} theme="light" readerMode autoScroll fade />
-      )}
+      {/* The transcript owns the ONLY scrollbar. `fill` makes it grow to the
+          remaining viewport (flex-1) instead of a fixed 100dvh cap, so it fits
+          under the header + above the dock without a second page scrollbar. */}
+      <div className="min-h-0 flex-1">
+        {view === 'chat' ? (
+          <ChatView segments={segments} theme="light" fill />
+        ) : (
+          <TranscriptView segments={segments} theme="light" readerMode autoScroll fade fill />
+        )}
+      </div>
 
       {/* Bottom-center control dock: source, mic mute, start/stop. */}
       <div className="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex justify-center px-4">
