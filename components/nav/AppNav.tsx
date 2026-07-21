@@ -8,7 +8,7 @@ import { Show, SignInButton, SignUpButton, UserButton } from '@clerk/nextjs'
 // room, session detail, the public share view, and auth pages) so nothing
 // competes with the transcript for attention. Each of those carries its own
 // lightweight back-link instead.
-const HIDDEN_PREFIXES = ['/record', '/room', '/s/', '/session/', '/sign-in', '/sign-up']
+const HIDDEN_PREFIXES = ['/record', '/room', '/s/', '/session/', '/settings', '/sign-in', '/sign-up']
 
 export function AppNav({ clerkConfigured }: { clerkConfigured: boolean }) {
   const pathname = usePathname()

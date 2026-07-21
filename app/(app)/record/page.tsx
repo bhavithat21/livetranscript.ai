@@ -10,7 +10,7 @@ import { HomeMenu } from '@/components/nav/HomeMenu'
 import { saveSession } from './actions'
 import { createShare } from '../session-actions'
 import { logError } from '@/lib/log'
-import { KEYTERMS } from '@/lib/transcription/keyterms'
+import { useKeytermPrefs } from '@/lib/transcription/useKeytermPrefs'
 import type { TranscriptionProvider, TranscriptEvent } from '@/lib/transcription/types'
 
 
@@ -28,13 +28,14 @@ async function correctLine(
   id: number,
   e: TranscriptEvent,
   context: string,
+  keyterms: string[],
   setSegments: (fn: (s: Segment[]) => Segment[]) => void,
 ) {
   try {
     const r = await fetch('/api/correct', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: e.text, context, keyterms: KEYTERMS }),
+      body: JSON.stringify({ text: e.text, context, keyterms }),
     })
     if (!r.ok) return
     const { text } = await r.json()
@@ -46,6 +47,7 @@ async function correctLine(
 
 export default function RecordPage() {
   const { start, stop, error } = useMicStream()
+  const { keyterms } = useKeytermPrefs() // user-selected vocab packs (base + overlays)
   const [segments, setSegments] = useState<Segment[]>([])
   const [level, setLevel] = useState(0)
   const [recording, setRecording] = useState(false)
@@ -67,6 +69,10 @@ export default function RecordPage() {
   // state (not a stale closure snapshot from when the callback was created).
   const segmentsRef = useRef<Segment[]>([])
   segmentsRef.current = segments
+  // Latest keyterms outside the render cycle, so the onFinal closure uses the
+  // current pack selection without being recreated.
+  const keytermsRef = useRef<string[]>(keyterms)
+  keytermsRef.current = keyterms
 
   const onStart = useCallback(async () => {
     setSegments([])
@@ -84,7 +90,7 @@ export default function RecordPage() {
         isMuted: () => mutedRef.current,
       })
       const res = await connectWithFallback(
-        { keyterms: KEYTERMS, sampleRate: actualRate, maxSpeakers: 5 },
+        { keyterms: keytermsRef.current, sampleRate: actualRate, maxSpeakers: 5 },
         undefined,
         providerChoice,
       )
@@ -97,7 +103,7 @@ export default function RecordPage() {
           const merged = mergeSegments(s, e)
           const id = merged[merged.length - 1].id
           const context = transcriptText(merged.slice(-4, -1)) // recent finals for context
-          void correctLine(id, e, context, setSegments)
+          void correctLine(id, e, context, keytermsRef.current, setSegments)
           return merged
         })
       })

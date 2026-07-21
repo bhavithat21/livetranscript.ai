@@ -1,6 +1,6 @@
 'use client'
 import Link from 'next/link'
-import { Home, LayoutGrid, Mic, Users } from 'lucide-react'
+import { Home, LayoutGrid, Mic, Settings, Users } from 'lucide-react'
 
 // Compact navigation for the FOCUSED pages (record / room / session) where the
 // full AppNav is hidden. A glass logo pill that opens a dropdown so you can jump
@@ -11,6 +11,7 @@ const LINKS = [
   { href: '/dashboard', label: 'Library', icon: LayoutGrid },
   { href: '/record', label: 'New transcript', icon: Mic },
   { href: '/room/new', label: 'New meeting', icon: Users },
+  { href: '/settings', label: 'Settings', icon: Settings },
 ]
 
 export function HomeMenu() {

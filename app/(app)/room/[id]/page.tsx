@@ -9,7 +9,7 @@ import { useRoom } from '@/lib/room/useRoom'
 import { useDisplayName } from '@/lib/auth/useDisplayName'
 import { mergeRoomSegments, MAX_SPEAKERS, isStrongRoomId } from '@/lib/room/roomStore'
 import { newRoomId } from '@/lib/room/roomId'
-import { KEYTERMS } from '@/lib/transcription/keyterms'
+import { useKeytermPrefs } from '@/lib/transcription/useKeytermPrefs'
 import { speakerColor } from '@/lib/speakers/palette'
 import { TranscriptView } from '@/components/transcript/TranscriptView'
 import { ChatView } from '@/components/transcript/ChatView'
@@ -162,6 +162,7 @@ function CopyMeetingId({ roomId }: { roomId: string }) {
 function Meeting({ roomId }: { roomId: string }) {
   const router = useRouter()
   const displayName = useDisplayName()
+  const { keyterms } = useKeytermPrefs()
   const { start, stop, error } = useMicStream()
   const { connected, error: roomError, publish, onPeer, onEnd: onRoomEnd, endMeeting, roster, mySlot, myClientId } =
     useRoom(roomId, displayName)
@@ -191,7 +192,7 @@ function Meeting({ roomId }: { roomId: string }) {
         source,
         isMuted: () => mutedRef.current,
       })
-      const res = await connectWithFallback({ keyterms: KEYTERMS, sampleRate: rate, maxSpeakers: 1 })
+      const res = await connectWithFallback({ keyterms, sampleRate: rate, maxSpeakers: 1 })
       provider = res.provider
       providerRef.current = provider
       const relay = (e: Parameters<typeof publish>[0]) => {
@@ -207,7 +208,7 @@ function Meeting({ roomId }: { roomId: string }) {
       stop()
       setStartError(e instanceof Error ? e.message : 'Failed to start')
     }
-  }, [start, stop, publish, mySlot, myClientId, displayName, source])
+  }, [start, stop, publish, mySlot, myClientId, displayName, source, keyterms])
 
   const onStop = useCallback(async () => {
     stop()
