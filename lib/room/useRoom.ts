@@ -21,7 +21,10 @@ export function useRoom(roomId: string, role: RoomRole) {
   useEffect(() => {
     if (!roomId) return
     let closed = false
-    const client = new Ably.Realtime({ authUrl: '/api/ably-token' })
+    // Token is scoped server-side to exactly this room's channel.
+    const client = new Ably.Realtime({
+      authUrl: `/api/ably-token?room=${encodeURIComponent(roomId)}`,
+    })
     clientRef.current = client
     const channel = client.channels.get(`room:${roomId}`)
     chanRef.current = channel

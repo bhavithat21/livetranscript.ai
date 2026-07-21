@@ -1,5 +1,6 @@
 'use client'
 import { use, useCallback, useEffect, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { useMicStream } from '@/lib/audio/useMicStream'
 import { connectWithFallback } from '@/lib/transcription'
 import { type Segment } from '@/lib/transcript/store'
@@ -11,21 +12,52 @@ import type { TranscriptionProvider } from '@/lib/transcription/types'
 
 const KEYTERMS = ['Kubernetes', 'idempotency', 'quantization', 'Kafka', 'AWS Lambda', 'system design']
 
+// A short, unguessable, url-safe room id.
+function newRoomId(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(9))
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
 export default function RoomPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
+  const router = useRouter()
   const [role, setRole] = useState<RoomRole | null>(null)
+
+  // "/room/new" is a request for a fresh room — mint a unique id and redirect so
+  // each pair gets their own channel instead of everyone colliding in "room:new".
+  useEffect(() => {
+    if (id === 'new') router.replace(`/room/${newRoomId()}`)
+  }, [id, router])
+
+  if (id === 'new') {
+    return (
+      <main className="mx-auto max-w-md px-6 py-24 text-center text-black/50">
+        Creating your room…
+      </main>
+    )
+  }
 
   if (!role) return <RolePicker roomId={id} onPick={setRole} />
   return <Room roomId={id} role={role} />
 }
 
 function RolePicker({ roomId, onPick }: { roomId: string; onPick: (r: RoomRole) => void }) {
+  const [copied, setCopied] = useState(false)
+  const copyInvite = () => {
+    navigator.clipboard.writeText(window.location.href)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
   return (
     <main className="mx-auto max-w-md px-6 py-24 text-center">
       <h1 className="font-[family-name:var(--font-serif)] text-3xl">Join shadowing room</h1>
-      <p className="mt-2 text-black/60">Room {roomId}</p>
+      <p className="mt-2 font-mono text-sm text-black/50">Room {roomId}</p>
+      <button onClick={copyInvite} className="btn-ghost mt-4 text-sm">
+        {copied ? 'Invite link copied ✓' : 'Copy invite link'}
+      </button>
       <p className="mt-6 text-sm text-black/60">
-        Be on a separate voice call so you can hear each other. Pick your role:
+        Send the invite link to the other person, get on a separate voice call so you can hear each
+        other, then pick your role:
       </p>
       <div className="mt-6 flex justify-center gap-4">
         <button
