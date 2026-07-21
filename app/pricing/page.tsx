@@ -38,8 +38,8 @@ export default function PricingPage() {
           name="Free"
           price="$0"
           cadence="forever"
-          highlight="5 minutes / month"
-          features={['5 min of transcription each month', 'Speaker labels + Reader Mode', 'Join meetings', 'Save & share transcripts']}
+          highlight="30 minutes / month"
+          features={['30 min of transcription each month', 'Speaker labels + Reader Mode', 'Join meetings', 'Save & share transcripts']}
           cta={<Link href="/record" className="btn-ghost block w-full py-2.5 text-center">Start free</Link>}
         />
         <Tier

@@ -3,7 +3,14 @@ import { useEffect, useMemo, useRef } from 'react'
 import { speakerColor } from '@/lib/speakers/palette'
 import { colorMap, segmentSlot } from '@/lib/room/roomStore'
 import { cn } from '@/lib/utils'
-import type { Segment } from '@/lib/transcript/store'
+import { splitSentences, type Segment } from '@/lib/transcript/store'
+
+// Sentences for a segment; never empty so a blank/whitespace interim still holds
+// its place in the list (avoids a line vanishing then reappearing mid-speech).
+function sentencesOf(s: Segment): string[] {
+  const lines = splitSentences(s.text)
+  return lines.length ? lines : ['']
+}
 
 export function TranscriptView({
   segments,
@@ -73,8 +80,16 @@ export function TranscriptView({
       style={flow || fill ? undefined : { maxHeight: 'calc(100dvh - 72px)' }}
     >
       {/* Always a measured reading column (~70ch) — live AND reader — so lines
-          never run 120+ chars on wide displays. */}
-      <div className={cn('mx-auto max-w-3xl px-6', readerMode ? 'py-10' : 'py-6')}>
+          never run 120+ chars on wide displays. Live views (fade/fill) carry a
+          fixed bottom dock, so pad the column so the last lines clear it instead
+          of scrolling behind the controls. */}
+      <div
+        className={cn(
+          'mx-auto max-w-3xl px-6',
+          readerMode ? 'pt-10' : 'pt-6',
+          fade || fill ? 'pb-40' : readerMode ? 'pb-10' : 'pb-6',
+        )}
+      >
         {segments.map((s, i) => {
           const slot = segmentSlot(s, colors)
           const speaker = speakerColor(slot, theme)
@@ -92,27 +107,32 @@ export function TranscriptView({
           if (shadow) {
             const emphasized = slot === emphasizeSpeaker
             return (
-              <p
-                key={s.id}
-                className={cn(
-                  inkBody,
-                  emphasized
-                    ? 'text-3xl font-medium leading-snug transition-all sm:text-4xl'
-                    : 'text-base leading-relaxed transition-all',
-                  newTurn ? 'mt-5' : 'mt-1',
-                )}
-                style={{ opacity: emphasized ? (s.isFinal ? 1 : 0.6) : 0.4 }}
-              >
+              <div key={s.id} className={cn(newTurn ? 'mt-5' : 'mt-1')}>
                 {newTurn && s.speaker != null && (
                   <span
-                    className="mr-2 align-middle font-[family-name:var(--font-serif)] text-sm font-semibold"
+                    className="mb-0.5 block font-[family-name:var(--font-serif)] text-sm font-semibold"
                     style={{ color }}
                   >
                     {name}
                   </span>
                 )}
-                <span>{s.text}</span>
-              </p>
+                {/* One statement per line so the person repeating reads a clean
+                    sentence at a time rather than chasing a run-on block. */}
+                {sentencesOf(s).map((line, li) => (
+                  <p
+                    key={li}
+                    className={cn(
+                      inkBody,
+                      emphasized
+                        ? 'text-3xl font-medium leading-snug transition-all sm:text-4xl'
+                        : 'text-base leading-relaxed transition-all',
+                    )}
+                    style={{ opacity: emphasized ? (s.isFinal ? 1 : 0.6) : 0.4 }}
+                  >
+                    {line}
+                  </p>
+                ))}
+              </div>
             )
           }
 
@@ -131,16 +151,25 @@ export function TranscriptView({
                   <span className="h-px flex-1" style={{ background: `${color}22` }} aria-hidden />
                 </div>
               )}
-              <p
-                className={cn('text-lg leading-relaxed transition-opacity', inkBody)}
+              {/* One statement per line — split the turn into sentences so it
+                  reads (and repeats) cleanly instead of one run-on block. */}
+              <div
+                className="flex flex-col gap-1"
                 style={{
-                  opacity: s.isFinal ? 1 : 0.55,
                   borderLeft: s.speaker != null ? `2px solid ${color}33` : undefined,
                   paddingLeft: s.speaker != null ? '0.75rem' : undefined,
                 }}
               >
-                {s.text}
-              </p>
+                {sentencesOf(s).map((line, li) => (
+                  <p
+                    key={li}
+                    className={cn('text-lg leading-relaxed transition-opacity', inkBody)}
+                    style={{ opacity: s.isFinal ? 1 : 0.55 }}
+                  >
+                    {line}
+                  </p>
+                ))}
+              </div>
             </div>
           )
         })}

@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useRef } from 'react'
 import { speakerColor } from '@/lib/speakers/palette'
-import type { Segment } from '@/lib/transcript/store'
+import { splitSentences, type Segment } from '@/lib/transcript/store'
 
 // Chat-bubble view of a meeting transcript. Consecutive lines from the same
 // speaker are grouped into one bubble, labeled with their display name (from
@@ -40,7 +40,8 @@ export function ChatView({
       className={fill ? 'h-full overflow-y-auto overscroll-contain' : 'overflow-y-auto overscroll-contain'}
       style={fill ? undefined : { maxHeight: 'calc(100dvh - 160px)' }}
     >
-      <div className="mx-auto flex max-w-3xl flex-col gap-4 px-6 py-8">
+      {/* pb-40 so the last bubble clears the fixed bottom control dock. */}
+      <div className="mx-auto flex max-w-3xl flex-col gap-4 px-6 pt-8 pb-40">
         {groups.map((g) => {
           const speaker = speakerColor(g.speaker ?? 0, theme)
           const name = g.name?.trim() || speaker.name
@@ -54,10 +55,13 @@ export function ChatView({
                 {name}
               </span>
               <div
-                className="glass max-w-[85%] self-start rounded-2xl rounded-tl-md px-4 py-2.5 leading-relaxed"
+                className="glass flex max-w-[85%] flex-col gap-1 self-start rounded-2xl rounded-tl-md px-4 py-2.5 leading-relaxed"
                 style={{ borderLeft: `3px solid ${speaker.color}`, opacity: pending ? 0.75 : 1 }}
               >
-                {g.segments.map((s) => s.text).join(' ')}
+                {/* One statement per line inside the bubble instead of a run-on paragraph. */}
+                {splitSentences(g.segments.map((s) => s.text).join(' ')).map((line, li) => (
+                  <p key={li}>{line}</p>
+                ))}
               </div>
             </div>
           )

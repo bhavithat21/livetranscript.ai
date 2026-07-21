@@ -2,6 +2,7 @@
 import { getDb, sessions } from '@/lib/db'
 import { currentUserId } from '@/lib/auth'
 import { posthogServer } from '@/lib/analytics'
+import { sanitizeSegments } from '@/lib/transcript/store'
 
 // Share/revoke live in ../session-actions (shared with dashboard + detail);
 // the record screen imports them from there directly.
@@ -27,7 +28,7 @@ export async function saveSession(input: SaveInput): Promise<{ id: string }> {
       title: input.title || 'Untitled session',
       language: input.language || 'en',
       durationSeconds: input.durationSeconds,
-      segments: input.segments as object,
+      segments: sanitizeSegments(input.segments),
       summary: input.summary as object,
     })
     .returning({ id: sessions.id })

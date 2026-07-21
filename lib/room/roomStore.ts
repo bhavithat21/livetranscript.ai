@@ -15,6 +15,10 @@ export function mergeRoomSegments(prev: Segment[], m: RoomMessage): Segment[] {
   for (let i = prev.length - 1; i >= 0; i--) {
     if (prev[i].sender === m.sender) {
       if (!prev[i].isFinal) {
+        // Identical re-emit of this sender's interim → no-op, skip the copy + re-render.
+        if (prev[i].text === m.text && prev[i].isFinal === m.isFinal && prev[i].speaker === m.speaker) {
+          return prev
+        }
         const next = prev.slice()
         next[i] = { ...prev[i], speaker: m.speaker, text: m.text, isFinal: m.isFinal }
         return next
