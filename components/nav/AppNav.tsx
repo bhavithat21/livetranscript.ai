@@ -35,6 +35,7 @@ export function AppNav({ clerkConfigured }: { clerkConfigured: boolean }) {
               </NavLink>
             </Show>
           )}
+          <NavLink href="/pricing" active={pathname === '/pricing'}>Pricing</NavLink>
           <NavLink href="/room/new">New room</NavLink>
           <Link href="/record" className="btn-signal ml-1 px-4 py-1.5 text-sm">
             New transcript
