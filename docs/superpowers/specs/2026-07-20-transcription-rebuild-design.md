@@ -56,6 +56,8 @@ interface TranscriptionProvider {
 }
 ```
 
+Two-track adds an `onCorrected(cb)` event (see section 3a) emitted by the correction track, keyed to the finalized segment it replaces.
+
 `TranscriptEvent` normalizes across providers: `{ text, isFinal, speaker, startMs, endMs }`.
 
 | Rank | Provider | Role | Model | Notes |
@@ -89,6 +91,17 @@ components/transcript/  # TranscriptView, SpeakerLabel, AudioMeter, SummaryPanel
 **Audio pipeline upgrade:** old app used deprecated `createScriptProcessor(256,1,1)` (main-thread churn). v1 uses an **AudioWorklet** at 16kHz — lower latency, no main-thread jank. Same Float32->Int16 linear16 conversion.
 
 ---
+
+## 3a. Two-Track Transcription (accuracy + minimal latency)
+
+The core technique for feeling instant *and* reading clean: split the work into two tracks so perceived latency stays ~200-300ms while final accuracy is high.
+
+- **Live track (latency-optimized):** mic → Opus (24kbps, vs 256kbps raw PCM) → streaming provider (AssemblyAI/Deepgram) with `interim_results` + `no_delay` + aggressive endpointing. Interim words shown dimmed within ~200-300ms. Keyterm prompting ON (free accuracy, zero latency cost).
+- **Correction track (accuracy-optimized):** per-utterance audio is buffered; on finalize it is sent to a heavier batch model (OpenAI `gpt-4o-transcribe` / diarize) that uses full context to fix phonetically-close jargon errors. When the corrected text returns (~1-2s later), it quietly replaces the committed line. Latency is irrelevant here because it is not the live caption.
+
+The `TranscriptionProvider` interface already separates `onPartial` (fast track) from `onFinal`; the correction track adds an `onCorrected` event the UI uses to upgrade a committed line in place.
+
+**Latency floor:** ~200-300ms to first interim word (below this is model inference, not controllable). **Accuracy ceiling:** batch second-pass over full-context audio. WebRTC only helps if OpenAI Realtime becomes a live provider (its endpoint is WebRTC-native); AssemblyAI/Deepgram are WebSocket-only, so WebRTC there would add a relay hop, not remove one.
 
 ## 4. Data Flow (one session)
 

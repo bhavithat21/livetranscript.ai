@@ -4,7 +4,7 @@
 
 **Goal:** Build a Next.js live-transcription web app with a swappable provider layer, 5-speaker diarization, AI summaries, an Otter-style workspace, and a text-only Reader Mode — faster and more readable than Otter.ai.
 
-**Architecture:** Next.js App Router on Vercel. The browser captures mic audio via an AudioWorklet (16kHz Int16 PCM), fetches a short-lived scoped token from a server route, and streams audio **directly** to the transcription provider over WebSocket (Approach A — lowest latency, keys never in browser). A provider-neutral `TranscriptionProvider` interface abstracts AssemblyAI (primary), Deepgram (fallback), and OpenAI (server-side accuracy pass). After a session, server routes generate summaries and an optional diarized final transcript (Approach C).
+**Architecture:** Next.js App Router on Vercel. The browser captures mic audio via an AudioWorklet (16kHz Int16 PCM), fetches a short-lived scoped token from a server route, and streams audio **directly** to the transcription provider over WebSocket (Approach A — lowest latency, keys never in browser). A provider-neutral `TranscriptionProvider` interface abstracts AssemblyAI (primary), Deepgram (fallback), and OpenAI (server-side accuracy pass). **Two-track transcription:** the live track shows interim words in ~200-300ms; a correction track re-transcribes each finalized utterance server-side with a heavier model and upgrades the committed line in place (`onCorrected`). After a session, server routes generate summaries.
 
 **Tech Stack:** Next.js 15 (App Router), React 19, TypeScript, Tailwind CSS v4, Vitest for unit tests. Providers: AssemblyAI `u3-rt-pro`, Deepgram `nova-3`, OpenAI `gpt-4o-transcribe-diarize` + a chat model for summaries.
 
@@ -17,6 +17,7 @@
 - AudioWorklet only — no deprecated `createScriptProcessor`.
 - Transcript body font is a humanist sans/mono; headings/speaker-names a serif. Never Inter/Roboto/Arial.
 - All boundaries validate input; no swallowed errors.
+- **Two-track:** live track = fast interim words; correction track = per-utterance server re-transcription that replaces the committed line via `onCorrected`. Correction failure must never lose the original live text.
 - Node 20, pnpm. Commit after every task.
 
 ---
@@ -65,6 +66,42 @@ Expected: dev server boots; `pnpm test` reports "No test files found" (exit 0 is
 ```bash
 git add -A && git commit -m "chore: scaffold Next.js app with Vitest"
 ```
+
+---
+
+### Task 1b: Clerk authentication
+
+**Files:** created/modified by `clerk init` (SDK install, `middleware.ts` [Next 15] or `proxy.ts` [Next 16+], `<ClerkProvider>` in `app/layout.tsx`, `.env.local` keys).
+
+**Interfaces:**
+- Consumes: scaffolded app (Task 1).
+- Produces: working sign-in/sign-up/UserButton controls; `await auth()` available server-side to gate routes.
+
+- [ ] **Step 1: Install/upgrade Clerk CLI, then auth**
+
+```bash
+command -v clerk && clerk --version || npm install -g clerk
+clerk auth login   # opens browser; pause for user to complete
+```
+
+- [ ] **Step 2: Init into the existing project**
+
+```bash
+clerk init
+```
+Detects Next.js + pnpm, installs `@clerk/nextjs`, adds middleware + `<ClerkProvider>`. Do not pass `--framework`/`--pm`/`--app` unless the CLI asks.
+
+- [ ] **Step 3: Add visible auth controls**
+
+Ensure `app/layout.tsx` shows `SignInButton`/`SignUpButton` when signed out and `UserButton` when signed in (inside `<ClerkProvider>`, inside `<body>`). Reuse if already added by init.
+
+- [ ] **Step 4: Verify + commit**
+
+```bash
+clerk doctor
+git add -A && git commit -m "feat: Clerk authentication"
+```
+Note: middleware filename follows Next version (`proxy.ts` on 16+, `middleware.ts` on ≤15). Never expose `CLERK_SECRET_KEY` client-side. `.env.local` stays gitignored.
 
 ---
 
@@ -133,6 +170,8 @@ export interface TranscriptionProvider {
   disconnect(): Promise<void>
 }
 ```
+
+> Note: the correction track (Task 9b) is a separate module, not part of `TranscriptionProvider`. Providers emit `onFinal`; the record screen owns wiring finals to the correction endpoint and applying `onCorrected` results.
 
 `lib/speakers/palette.ts` (colors chosen for AA contrast on both themes, deuteranopia/protanopia-separated):
 ```ts
@@ -729,6 +768,69 @@ git add app/api/summarize/ package.json pnpm-lock.yaml && git commit -m "feat: s
 
 ---
 
+### Task 9b: Correction-track endpoint (accuracy second pass)
+
+**Files:**
+- Create: `app/api/correct/route.ts`
+
+**Interfaces:**
+- Consumes: OpenAI SDK (Task 9).
+- Produces: `POST /api/correct` body `{ text: string; context?: string; keyterms?: string[] }` → `{ text: string }`. Uses an LLM to fix jargon/homophone/punctuation errors in a finalized live-transcript line, given recent context and the domain keyterm list. **Fail-soft:** on missing key or any error, returns `{ text }` echoing the original — a correction failure must never lose or blank the live line. 400 only if `text` is empty.
+
+Rationale: the live track showed words fast; this pass cleans the finalized line using full context the streaming model lacked. v1 uses **text correction** (no audio machinery). *v2 upgrade:* re-transcribe per-utterance audio with `gpt-4o-transcribe` for acoustic-level fixes (needs per-utterance audio slicing — deferred).
+
+- [ ] **Step 1: Implement**
+
+`app/api/correct/route.ts`:
+```ts
+import { NextRequest, NextResponse } from 'next/server'
+import OpenAI from 'openai'
+
+export async function POST(req: NextRequest) {
+  let body: { text?: string; context?: string; keyterms?: string[] }
+  try { body = await req.json() } catch { return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 }) }
+  const text = body.text?.trim()
+  if (!text) return NextResponse.json({ error: 'Empty text' }, { status: 400 })
+
+  const key = process.env.OPENAI_API_KEY
+  if (!key) return NextResponse.json({ text }) // fail-soft: keep live line
+
+  try {
+    const client = new OpenAI({ apiKey: key })
+    const terms = (body.keyterms ?? []).join(', ')
+    const completion = await client.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: `Correct transcription errors in the user's line: fix homophones, punctuation, capitalization, and misheard technical jargon. Preserve meaning and speaker wording — do NOT paraphrase or add content. Domain terms that may appear: ${terms || 'none'}. Respond ONLY with JSON: {"text": string}.` },
+        { role: 'user', content: `Recent context: ${body.context ?? ''}\n\nLine to correct: ${text}` },
+      ],
+      response_format: { type: 'json_object' },
+    })
+    const raw = completion.choices[0]?.message?.content ?? '{}'
+    const parsed = JSON.parse(raw)
+    return NextResponse.json({ text: typeof parsed.text === 'string' && parsed.text.trim() ? parsed.text : text })
+  } catch {
+    return NextResponse.json({ text }) // fail-soft: never lose or blank the live line
+  }
+}
+```
+
+- [ ] **Step 2: Verify empty-text guard**
+
+Run: `pnpm dev`, then:
+```bash
+curl -s -X POST localhost:3000/api/correct -H 'Content-Type: application/json' -d '{"text":""}'
+```
+Expected: `{"error":"Empty text"}` HTTP 400.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add app/api/correct/ && git commit -m "feat: correction-track endpoint (fail-soft text accuracy pass)"
+```
+
+---
+
 ### Task 10: Transcript store + record screen
 
 **Files:**
@@ -736,10 +838,12 @@ git add app/api/summarize/ package.json pnpm-lock.yaml && git commit -m "feat: s
 
 **Interfaces:**
 - Consumes: `useMicStream` (Task 4), `connectWithFallback` (Task 8), `speakerColor` (Task 2), `TranscriptEvent` (Task 2).
+- Consumes also: `POST /api/correct` (Task 9b).
 - Produces:
-  - `function mergeSegments(prev: Segment[], e: TranscriptEvent): Segment[]` where `type Segment = { speaker: number | null; text: string; isFinal: boolean }` — appends a new final segment, or replaces the trailing interim.
+  - `function mergeSegments(prev: Segment[], e: TranscriptEvent): Segment[]` where `type Segment = { id: number; speaker: number | null; text: string; isFinal: boolean }` — appends a new final segment, or replaces the trailing interim (reusing its id).
+  - `function applyCorrection(prev: Segment[], id: number, text: string): Segment[]`.
   - `function transcriptText(segments: Segment[]): string`.
-  - A working `/record` page: Record button → live captions with per-speaker colors + audio meter → Stop → summary.
+  - A working `/record` page: Record button → live captions with per-speaker colors + audio meter → correction track upgrades finalized lines in place → Stop → summary.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -780,16 +884,21 @@ Expected: FAIL — cannot find `./store`.
 ```ts
 import type { TranscriptEvent } from '@/lib/transcription/types'
 
-export type Segment = { speaker: number | null; text: string; isFinal: boolean }
+let SEG_SEQ = 0
+export type Segment = { id: number; speaker: number | null; text: string; isFinal: boolean }
 
 export function mergeSegments(prev: Segment[], e: TranscriptEvent): Segment[] {
-  const seg: Segment = { speaker: e.speaker, text: e.text, isFinal: e.isFinal }
   const last = prev[prev.length - 1]
   if (last && !last.isFinal) {
-    // replace the trailing interim
-    return [...prev.slice(0, -1), seg]
+    // replace the trailing interim (reuse its id)
+    return [...prev.slice(0, -1), { id: last.id, speaker: e.speaker, text: e.text, isFinal: e.isFinal }]
   }
-  return [...prev, seg]
+  return [...prev, { id: ++SEG_SEQ, speaker: e.speaker, text: e.text, isFinal: e.isFinal }]
+}
+
+// correction track: replace a finalized segment's text in place, by id
+export function applyCorrection(prev: Segment[], id: number, text: string): Segment[] {
+  return prev.map((s) => (s.id === id ? { ...s, text } : s))
 }
 
 export function transcriptText(segments: Segment[]): string {
@@ -798,6 +907,16 @@ export function transcriptText(segments: Segment[]): string {
     .map((s) => (s.speaker != null ? `Speaker ${s.speaker + 1}: ${s.text}` : s.text))
     .join('\n')
 }
+```
+
+Update the test's event helper and expectations to account for the `id` field: segments now carry an `id`; assert on `.text`/`.isFinal` as before, and add one case for `applyCorrection`:
+```ts
+it('applyCorrection replaces text of the matching segment id', () => {
+  let s: Segment[] = []
+  s = mergeSegments(s, ev('helo wrld', true))
+  s = applyCorrection(s, s[0].id, 'hello world')
+  expect(s[0].text).toBe('hello world')
+})
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -854,12 +973,25 @@ export function TranscriptView({ segments, theme, readerMode }: {
 import { useCallback, useRef, useState } from 'react'
 import { useMicStream } from '@/lib/audio/useMicStream'
 import { connectWithFallback } from '@/lib/transcription'
-import { mergeSegments, transcriptText, type Segment } from '@/lib/transcript/store'
+import { mergeSegments, applyCorrection, transcriptText, type Segment } from '@/lib/transcript/store'
 import { TranscriptView } from '@/components/transcript/TranscriptView'
 import { AudioMeter } from '@/components/transcript/AudioMeter'
-import type { TranscriptionProvider } from '@/lib/transcription/types'
+import type { TranscriptionProvider, TranscriptEvent } from '@/lib/transcription/types'
 
 const KEYTERMS = ['Kubernetes', 'idempotency', 'quantization', 'Kafka', 'AWS Lambda', 'system design']
+
+// correction track: on each finalized line, re-clean it server-side and swap in place. Fail-soft.
+async function correctLine(id: number, e: TranscriptEvent, context: string, setSegments: (fn: (s: Segment[]) => Segment[]) => void) {
+  try {
+    const r = await fetch('/api/correct', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: e.text, context, keyterms: KEYTERMS }),
+    })
+    if (!r.ok) return
+    const { text } = await r.json()
+    if (text && text !== e.text) setSegments((s) => applyCorrection(s, id, text))
+  } catch { /* fail-soft: keep the live line */ }
+}
 
 export default function RecordPage() {
   const { start, stop, error } = useMicStream()
@@ -878,7 +1010,15 @@ export default function RecordPage() {
       providerRef.current = provider
       setEngine(name)
       provider.onPartial((e) => setSegments((s) => mergeSegments(s, e)))
-      provider.onFinal((e) => setSegments((s) => mergeSegments(s, e)))
+      provider.onFinal((e) => {
+        setSegments((s) => {
+          const merged = mergeSegments(s, e)
+          const id = merged[merged.length - 1].id
+          const context = transcriptText(merged.slice(-4, -1)) // recent finals for context
+          void correctLine(id, e, context, setSegments)
+          return merged
+        })
+      })
       await start((pcm) => provider.sendAudio(pcm), setLevel)
       setRecording(true)
     } catch (e) {
@@ -990,15 +1130,16 @@ git add app/ && git commit -m "feat: landing page and typographic system"
 - AudioWorklet (not ScriptProcessor) → Task 4
 - 5-speaker diarization + AA color-blind-safe palette → Task 2, rendered Task 10
 - Keyterm prompting on by default → Tasks 6, 7, 10
+- Two-track (live + correction) → Task 9b endpoint + Task 10 wiring (`applyCorrection`, `correctLine`)
+- Clerk auth → Task 1b
 - AI summary + action items → Tasks 9, 10
 - Otter-style workspace + Reader Mode → Task 10
 - Readability-first typography (serif+sans, not Inter) → Task 11
-- Error handling (token fail, WS fallback, mic denied, AI fail) → Tasks 5, 8, 4, 10
-- Deferred v2 (auth/billing/persistence) → not in plan, correct
-- OpenAI diarized final-transcript pass (Approach C, `/api/final-transcript`) → **deferred**: spec lists it as optional; v1 ships summary only. Add as a follow-up task when wanted.
+- Error handling (token fail, WS fallback, mic denied, AI fail, correction fail-soft) → Tasks 5, 8, 4, 10, 9b
+- Deferred v2 (billing/persistence, audio-level re-transcription correction, OpenAI Realtime WebRTC premium tier, Cluely-class native app) → not in plan, correct
 
 **Placeholder scan:** no TBD/TODO; every code step has full code.
 
-**Type consistency:** `TranscriptEvent`, `TranscriptionConfig`, `TranscriptionProvider`, `Segment`, `speakerColor`, `connectWithFallback`, `mergeSegments`, `transcriptText`, `floatTo16BitPCM` used consistently across tasks.
+**Type consistency:** `TranscriptEvent`, `TranscriptionConfig`, `TranscriptionProvider`, `Segment` (now with `id`), `speakerColor`, `connectWithFallback`, `mergeSegments`, `applyCorrection`, `transcriptText`, `floatTo16BitPCM` used consistently across tasks.
 
 **Note:** provider WebSocket message shapes (AssemblyAI `Turn`, Deepgram `channel.alternatives`) and the AssemblyAI v3 token endpoint should be confirmed against current provider docs at implementation time (Context7 / vendor docs) — they evolve. The structure holds regardless.
