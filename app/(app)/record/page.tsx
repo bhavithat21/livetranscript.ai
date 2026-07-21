@@ -40,6 +40,8 @@ export default function RecordPage() {
   const [recording, setRecording] = useState(false)
   const [engine, setEngine] = useState<string | null>(null)
   const [reader, setReader] = useState(false)
+  const [shadow, setShadow] = useState(false)
+  const [shadowSpeaker, setShadowSpeaker] = useState(1) // Speaker 2 (the repeater) by default
   const [summary, setSummary] = useState<Summary | null>(null)
   const [busy, setBusy] = useState(false)
   const [savedId, setSavedId] = useState<string | null>(null)
@@ -157,9 +159,34 @@ export default function RecordPage() {
           )}
           <AudioMeter level={level} />
           {engine && <span className="text-sm text-black/50">Engine: {engine}</span>}
+          <label className="ml-auto flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={shadow}
+              onChange={(e) => setShadow(e.target.checked)}
+            />
+            Shadow Mode
+          </label>
+          {shadow && (
+            <div className="flex items-center gap-1 text-sm">
+              <span className="text-black/50">Highlight:</span>
+              <button
+                onClick={() => setShadowSpeaker(0)}
+                className={`rounded-full px-3 py-1 ${shadowSpeaker === 0 ? 'bg-black text-white' : 'border border-black/15'}`}
+              >
+                Speaker 1
+              </button>
+              <button
+                onClick={() => setShadowSpeaker(1)}
+                className={`rounded-full px-3 py-1 ${shadowSpeaker === 1 ? 'bg-black text-white' : 'border border-black/15'}`}
+              >
+                Speaker 2
+              </button>
+            </div>
+          )}
           <button
             onClick={() => setReader(true)}
-            className="ml-auto text-sm underline underline-offset-4"
+            className="text-sm underline underline-offset-4"
           >
             Reader Mode
           </button>
@@ -174,7 +201,13 @@ export default function RecordPage() {
           Exit Reader
         </button>
       )}
-      <TranscriptView segments={segments} theme="light" readerMode={reader} />
+      <TranscriptView
+        segments={segments}
+        theme="light"
+        readerMode={reader}
+        emphasizeSpeaker={shadow ? shadowSpeaker : null}
+        autoScroll={recording}
+      />
       {savedId && !reader && (
         <section className="mx-6 mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-black/10 bg-white p-4">
           <span className="text-sm font-medium">Share transcript:</span>
