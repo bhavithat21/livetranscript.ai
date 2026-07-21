@@ -1,5 +1,5 @@
 'use client'
-import { use, useCallback, useRef, useState } from 'react'
+import { use, useCallback, useEffect, useRef, useState } from 'react'
 import { useMicStream } from '@/lib/audio/useMicStream'
 import { connectWithFallback } from '@/lib/transcription'
 import { type Segment } from '@/lib/transcript/store'
@@ -56,8 +56,13 @@ function Room({ roomId, role }: { roomId: string; role: RoomRole }) {
   // The repeater always gets the emphasis (their words big + dark), regardless of my role.
   const emphasizeSpeaker = 1
 
-  const onStart = useCallback(async () => {
+  // Subscribe to the peer's transcript on mount, so User 2 sees User 1's words
+  // the moment they join — before starting their own mic.
+  useEffect(() => {
     onPeer((m) => setSegments((s) => mergeRoomSegments(s, m)))
+  }, [onPeer])
+
+  const onStart = useCallback(async () => {
     try {
       let provider: TranscriptionProvider | null = null
       const rate = await start((pcm) => provider?.sendAudio(pcm), setLevel)
@@ -76,7 +81,7 @@ function Room({ roomId, role }: { roomId: string; role: RoomRole }) {
       stop()
       alert(e instanceof Error ? e.message : 'Failed to start')
     }
-  }, [start, stop, publish, onPeer, role])
+  }, [start, stop, publish, role])
 
   const onStop = useCallback(async () => {
     stop()

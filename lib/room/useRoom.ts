@@ -6,7 +6,7 @@ import type { TranscriptEvent } from '@/lib/transcription/types'
 export type RoomRole = 'reader' | 'repeater'
 export type RoomMessage = TranscriptEvent & { role: RoomRole }
 
-const INTERIM_THROTTLE_MS = 150
+const INTERIM_THROTTLE_MS = 100
 
 // Syncs this client's transcript to the peer over an Ably channel (text only).
 // Each client publishes under its own role; both render both streams via Shadow Mode.
