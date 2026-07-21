@@ -6,6 +6,7 @@ import { connectWithFallback, type ProviderChoice } from '@/lib/transcription'
 import { mergeSegments, applyCorrection, transcriptText, type Segment } from '@/lib/transcript/store'
 import { TranscriptView } from '@/components/transcript/TranscriptView'
 import { Waveform } from '@/components/transcript/Waveform'
+import { HomeMenu } from '@/components/nav/HomeMenu'
 import { saveSession } from './actions'
 import { createShare } from '../session-actions'
 import { logError } from '@/lib/log'
@@ -14,6 +15,13 @@ import type { TranscriptionProvider, TranscriptEvent } from '@/lib/transcription
 const KEYTERMS = ['Kubernetes', 'idempotency', 'quantization', 'Kafka', 'AWS Lambda', 'system design']
 
 type Summary = { summary: string; keyPoints: string[]; actionItems: string[] }
+
+// Never surface the underlying vendor/model — show what the engine is good at.
+function engineLabel(name: string): string {
+  if (name === 'AssemblyAI') return 'High-accuracy engine'
+  if (name === 'Deepgram') return 'Fast engine'
+  return 'Live engine'
+}
 
 // Correction track: on each finalized line, re-clean it server-side and swap in place. Fail-soft.
 async function correctLine(
@@ -188,9 +196,16 @@ export default function RecordPage() {
 
   return (
     <main className="relative min-h-dvh bg-[#faf9f7] pb-32 text-[#16151a]">
+      {/* Idle has no header — pin nav top-left so the launch screen isn't a dead end. */}
+      {idle && (
+        <div className="fixed left-4 top-4 z-50">
+          <HomeMenu />
+        </div>
+      )}
       {/* Live telemetry rail — replaces the orphan status; shows on-air state + numbers. */}
       {!reader && !idle && (
         <header className="mx-auto flex max-w-3xl items-center gap-4 px-6 py-4">
+          <HomeMenu />
           {recording ? (
             <>
               <span className="flex items-center gap-1.5 text-sm text-[color:var(--stop)]">
@@ -204,7 +219,9 @@ export default function RecordPage() {
             <span className="text-sm text-black/40">Stopped · {words.toLocaleString()} words</span>
           )}
           {engine && (
-            <span className="rounded-full bg-black/5 px-2.5 py-0.5 text-xs text-black/50">{engine}</span>
+            <span className="rounded-full bg-black/5 px-2.5 py-0.5 text-xs text-black/50">
+              {engineLabel(engine)}
+            </span>
           )}
           <button
             onClick={() => setReader(true)}
@@ -391,12 +408,13 @@ function LaunchConsole({
               value={providerChoice}
               onChange={(e) => setProviderChoice(e.target.value as ProviderChoice)}
               disabled={busy}
-              title="Live engine — OpenAI runs the accuracy correction pass on top"
+              title="How we transcribe — Auto picks the best engine for you"
               className="rounded-full border border-black/15 bg-white/70 px-3 py-1.5 text-sm outline-none focus:border-emerald-700"
             >
-              <option value="auto">Auto (smart fallback)</option>
-              <option value="AssemblyAI">AssemblyAI</option>
-              <option value="Deepgram">Deepgram</option>
+              {/* Capability labels — never expose which vendor/model powers each. */}
+              <option value="auto">Auto — best available</option>
+              <option value="AssemblyAI">Highest accuracy</option>
+              <option value="Deepgram">Fastest / lowest latency</option>
             </select>
           </label>
           <button

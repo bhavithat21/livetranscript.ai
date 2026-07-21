@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
 
   if (provider === 'assemblyai') {
     const key = process.env.ASSEMBLYAI_API_KEY
-    if (!key) return NextResponse.json({ error: 'AssemblyAI key not configured' }, { status: 500 })
+    if (!key) return NextResponse.json({ error: 'Engine unavailable' }, { status: 500 })
     // AssemblyAI streaming temp token (v3). Raw key in Authorization, NO Bearer prefix.
     const r = await fetch('https://streaming.assemblyai.com/v3/token?expires_in_seconds=300', {
       headers: { Authorization: key },
@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
 
   if (provider === 'deepgram') {
     const key = process.env.DEEPGRAM_API_KEY
-    if (!key) return NextResponse.json({ error: 'Deepgram key not configured' }, { status: 500 })
+    if (!key) return NextResponse.json({ error: 'Engine unavailable' }, { status: 500 })
     const r = await fetch('https://api.deepgram.com/v1/auth/grant', {
       method: 'POST',
       headers: { Authorization: `Token ${key}`, 'Content-Type': 'application/json' },

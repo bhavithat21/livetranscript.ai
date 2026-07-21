@@ -13,6 +13,7 @@ import { speakerColor } from '@/lib/speakers/palette'
 import { TranscriptView } from '@/components/transcript/TranscriptView'
 import { ChatView } from '@/components/transcript/ChatView'
 import { Waveform } from '@/components/transcript/Waveform'
+import { HomeMenu } from '@/components/nav/HomeMenu'
 import type { TranscriptionProvider } from '@/lib/transcription/types'
 
 const KEYTERMS = ['Kubernetes', 'idempotency', 'quantization', 'Kafka', 'AWS Lambda', 'system design']
@@ -255,8 +256,9 @@ function Meeting({ roomId }: { roomId: string }) {
     // Lock the meeting to ONE viewport: header fixed, transcript is the only
     // scroll region — otherwise the page AND the transcript both scroll ("two scrolls").
     <main className="relative flex h-dvh flex-col overflow-hidden bg-[#faf9f7] text-[#16151a]">
-      {/* Top bar: identity + copyable meeting id + status on the left, End on the right. */}
+      {/* Top bar: home nav + identity + copyable meeting id + status, End on the right. */}
       <header className="flex flex-wrap items-center gap-3 px-6 py-4">
+        <HomeMenu />
         {!full && (
           <span className="flex items-center gap-1.5 text-sm">
             <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: me.color }} />

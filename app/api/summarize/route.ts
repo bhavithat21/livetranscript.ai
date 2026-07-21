@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
   if (!transcript) return NextResponse.json({ error: 'Empty transcript' }, { status: 400 })
 
   const key = process.env.OPENAI_API_KEY
-  if (!key) return NextResponse.json({ error: 'OpenAI key not configured' }, { status: 500 })
+  if (!key) return NextResponse.json({ error: 'Summaries unavailable' }, { status: 500 })
   const client = new OpenAI({ apiKey: key })
 
   try {

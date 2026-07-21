@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { getSession } from '../../session-actions'
 import { SessionActions } from '@/components/session/SessionActions'
+import { HomeMenu } from '@/components/nav/HomeMenu'
 import { TranscriptView } from '@/components/transcript/TranscriptView'
 import { transcriptText, type Segment } from '@/lib/transcript/store'
 import { formatDate, formatDuration } from '@/lib/format'
@@ -21,9 +22,12 @@ export default async function SessionDetailPage({ params }: { params: Promise<{ 
 
   return (
     <main className="mx-auto max-w-3xl px-6 pb-24 pt-10">
-      <Link href="/dashboard" className="text-sm text-black/50 transition-colors hover:text-ink">
-        ← Library
-      </Link>
+      <div className="flex items-center gap-3">
+        <HomeMenu />
+        <Link href="/dashboard" className="text-sm text-black/50 transition-colors hover:text-ink">
+          ← Library
+        </Link>
+      </div>
 
       <div className="glass rise-in mt-4 rounded-2xl p-6">
         <SessionActions id={row.id} title={row.title} shared={Boolean(row.shareToken)} transcript={text} />
