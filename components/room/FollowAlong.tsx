@@ -7,19 +7,24 @@ import { alignIndex, sourceKeyterms } from '@/lib/room/shadowAlign'
 import { ShadowFollow } from '@/components/transcript/ShadowFollow'
 import type { TranscriptionProvider } from '@/lib/transcription/types'
 
-// Speech-shadowing follow-along. The reader repeats a chosen line aloud; their OWN
-// mic drives a rolling 3–5 word highlight on the source text (ShadowFollow) so
-// they always see where they are now and what's next.
+// Speech-shadowing follow-along. Shows the recent conversation: previous turns
+// dimmed as CONTEXT above, and the current (live, growing) turn below with a
+// growing highlight trail — the reader repeats aloud and their OWN mic drives the
+// trail forward. They always see what was said before, what they're on now, and
+// what's next. `source` grows live; `context` is the surrounding conversation.
 //
 // LOW LATENCY: alignment is a pure local string match (alignIndex) — no model
-// call per word. The only network hop is the reader's own ASR (same engine used
-// to speak), and the highlight advances on each partial, not on a round-trip.
+// call per word. Only network hop is the reader's own ASR; the trail advances on
+// each ASR partial, not on a round-trip. Alignment runs on the CURRENT turn only
+// so the reader's first words lock on reliably (no distant-history mismatch).
 export function FollowAlong({
   source,
+  context,
   keyterms,
   onClose,
 }: {
   source: string
+  context?: string
   keyterms: string[]
   onClose: () => void
 }) {
@@ -29,6 +34,10 @@ export function FollowAlong({
   const [listening, setListening] = useState(false)
   const [startError, setStartError] = useState<string | null>(null)
   const providerRef = useRef<TranscriptionProvider | null>(null)
+  // Freshest source for keyterm bias at begin() time, without re-creating begin
+  // on every live word.
+  const sourceRef = useRef(source)
+  sourceRef.current = source
 
   // Active word index = how many source words the reader has covered so far.
   const activeIndex = alignIndex(words, spoken)
@@ -40,15 +49,15 @@ export function FollowAlong({
       let provider: TranscriptionProvider | null = null
       const rate = await start((pcm) => provider?.sendAudio(pcm), () => {}, { source: 'mic' })
       // Accuracy win at zero latency cost: bias the engine toward the EXACT words
-      // in the line being read (sent once at open, not per word). Source terms
-      // first so they survive the 100-cap, then the user's packs.
-      const boosted = [...sourceKeyterms(source), ...keyterms]
+      // being read (sent once at open, not per word). Source terms first so they
+      // survive the 100-cap, then the user's packs.
+      const boosted = [...sourceKeyterms(sourceRef.current), ...keyterms]
       // Fastest engine — immediacy matters most here; the source-term bias keeps
       // positioning accurate even on the fast path.
       const res = await connectWithFallback({ keyterms: boosted, sampleRate: rate, maxSpeakers: 1 }, undefined, 'Deepgram')
       provider = res.provider
       providerRef.current = provider
-      // Partials advance the cursor immediately; we track the latest line only.
+      // Partials advance the cursor immediately; track the latest line spoken.
       provider.onPartial((e) => setSpoken(e.text))
       provider.onFinal((e) => setSpoken(e.text))
       setListening(true)
@@ -74,22 +83,33 @@ export function FollowAlong({
         <span className="text-sm font-medium uppercase tracking-widest text-emerald-700">
           Follow along
         </span>
-        {listening && (
+        {listening ? (
           <span className="flex items-center gap-1.5 text-sm text-[color:var(--stop)]">
             <span className="live-dot" aria-hidden /> Listening — repeat aloud
           </span>
+        ) : (
+          <span className="text-sm text-black/45">Tap start, then read the highlighted words aloud</span>
         )}
         <button onClick={onClose} className="btn-ghost ml-auto flex items-center gap-1.5 text-sm">
           <X size={15} /> Close
         </button>
       </header>
 
-      <div className="flex flex-1 items-center overflow-y-auto px-8 pb-32 pt-4">
-        <ShadowFollow
-          words={words}
-          activeIndex={activeIndex}
-          className="mx-auto max-w-3xl text-3xl sm:text-4xl"
-        />
+      <div className="flex flex-1 flex-col overflow-y-auto px-8 pb-32 pt-4">
+        <div className="mx-auto w-full max-w-3xl">
+          {/* Previous conversation — context so the reader keeps the thread. */}
+          {context && (
+            <p className="mb-6 border-l-2 border-black/10 pl-4 text-lg leading-relaxed text-black/35">
+              {context}
+            </p>
+          )}
+          {/* The live turn with the growing highlight trail. */}
+          <ShadowFollow
+            words={words}
+            activeIndex={activeIndex}
+            className="text-3xl sm:text-4xl"
+          />
+        </div>
       </div>
 
       <div className="pointer-events-none fixed inset-x-0 bottom-8 flex justify-center px-4">

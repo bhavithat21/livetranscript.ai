@@ -1,6 +1,6 @@
 'use client'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { BookOpen, Check, Copy, Mic, MicOff, Users } from 'lucide-react'
 import { useMicStream, type AudioSource } from '@/lib/audio/useMicStream'
 import { connectWithFallback } from '@/lib/transcription'
@@ -28,6 +28,8 @@ export default function RoomPage() {
   // updated the id and never moved you into the new meeting.
   const id = String(useParams().id ?? '')
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const autoJoin = searchParams.get('join') === '1'
   const [joined, setJoined] = useState(false)
 
   // "/room/new" → mint a unique meeting id and redirect, so each meeting is its own channel.
@@ -35,11 +37,12 @@ export default function RoomPage() {
     if (id === 'new') router.replace(`/room/${newRoomId()}`)
   }, [id, router])
 
-  // If the id changes under us (navigated to a different meeting), drop back to
-  // that meeting's lobby rather than showing the previous room's live view.
+  // On id change: if arriving with ?join=1 (Go = open, not just update), go
+  // straight into the meeting; otherwise drop to that meeting's lobby rather than
+  // showing the previous room's live view.
   useEffect(() => {
-    setJoined(false)
-  }, [id])
+    setJoined(autoJoin)
+  }, [id, autoJoin])
 
   if (id === 'new') {
     return (
@@ -74,6 +77,7 @@ function InvalidRoom() {
 function Lobby({ roomId, onJoin }: { roomId: string; onJoin: () => void }) {
   const router = useRouter()
   const [copied, setCopied] = useState(false)
+  const [idCopied, setIdCopied] = useState(false)
   const [joinId, setJoinId] = useState('')
 
   // Build the invite from the origin + THIS room id (not window.location.href,
@@ -100,7 +104,21 @@ function Lobby({ roomId, onJoin }: { roomId: string; onJoin: () => void }) {
       </h1>
       <div className="glass mt-6 rounded-2xl p-5">
         <div className="text-xs uppercase tracking-wide text-black/40">Meeting ID</div>
-        <div className="mt-1 select-all font-mono text-lg">{roomId}</div>
+        <div className="mt-1 flex items-center gap-2">
+          <span className="select-all font-mono text-lg">{roomId}</span>
+          <button
+            onClick={() => {
+              navigator.clipboard.writeText(roomId)
+              setIdCopied(true)
+              setTimeout(() => setIdCopied(false), 2000)
+            }}
+            className="flex h-7 w-7 items-center justify-center rounded-full bg-black/5 text-black/50 transition-colors hover:bg-black/10 hover:text-ink"
+            title="Copy meeting ID"
+            aria-label="Copy meeting ID"
+          >
+            {idCopied ? <Check size={14} className="text-emerald-700" /> : <Copy size={14} />}
+          </button>
+        </div>
         <p className="mt-3 text-sm leading-relaxed text-black/60">
           Up to {MAX_SPEAKERS} people can speak — each on their own device. Get everyone on a
           separate voice call for audio; LiveTranscript syncs the text live and colors each speaker.
@@ -130,7 +148,9 @@ function Lobby({ roomId, onJoin }: { roomId: string; onJoin: () => void }) {
           if (!clean) return
           // Pasting the link for THIS room = just join it (don't no-op).
           if (clean === roomId) return onJoin()
-          router.push(`/room/${clean}`)
+          // ?join=1 tells the target room to OPEN straight into the meeting
+          // instead of stopping at its lobby (Go = open, not just update).
+          router.push(`/room/${clean}?join=1`)
         }}
       >
         <label htmlFor="join-id" className="sr-only">
@@ -211,11 +231,26 @@ function Meeting({ roomId }: { roomId: string }) {
   // Local per-device overrides (custom name + color) keyed by sender clientId.
   const overrides: SpeakerOverrides = prefs
 
-  // The latest turn currently on screen — what a follower would repeat. We hand
-  // its text to FollowAlong as the source to shadow.
-  const latestTurnText = useMemo(() => {
-    const finals = segments.filter((s) => s.isFinal)
-    return finals.length ? finals[finals.length - 1].text : transcriptText(segments)
+  // Follow-along source = the LATEST turn (grows live as that speaker talks);
+  // context = the couple of turns before it, so the reader keeps the thread.
+  // Grouped by sender so a multi-line turn stays one block.
+  const follow = useMemo(() => {
+    const turns: string[] = []
+    let lastSender: string | undefined
+    let cur = ''
+    for (const s of segments) {
+      if (!s.text.trim()) continue
+      if (s.sender !== lastSender && cur) {
+        turns.push(cur)
+        cur = ''
+      }
+      cur = cur ? `${cur} ${s.text}` : s.text
+      lastSender = s.sender
+    }
+    if (cur) turns.push(cur)
+    const source = turns.length ? turns[turns.length - 1] : transcriptText(segments)
+    const context = turns.slice(Math.max(0, turns.length - 3), turns.length - 1).join('  ')
+    return { source, context }
   }, [segments])
 
   // See peers' words the moment they speak — before starting my own mic.
@@ -364,9 +399,16 @@ function Meeting({ roomId }: { roomId: string }) {
         />
       )}
 
-      {/* Follow-along overlay: repeat the latest turn aloud, guided word-by-word. */}
+      {/* Follow-along overlay: repeat the live turn aloud, guided word-by-word,
+          with the previous turns shown above as context. Reads `follow` live so
+          the passage keeps growing while it's open. */}
       {followSource && (
-        <FollowAlong source={followSource} keyterms={keyterms} onClose={() => setFollowSource(null)} />
+        <FollowAlong
+          source={follow.source}
+          context={follow.context}
+          keyterms={keyterms}
+          onClose={() => setFollowSource(null)}
+        />
       )}
 
       {/* The transcript owns the ONLY scrollbar. `fill` makes it grow to the
@@ -386,10 +428,10 @@ function Meeting({ roomId }: { roomId: string }) {
           {/* Follow along — repeat the latest line aloud, guided word-by-word.
               Available to everyone (a listener repeating the speaker is the point). */}
           <button
-            onClick={() => latestTurnText && setFollowSource(latestTurnText)}
-            disabled={!latestTurnText}
+            onClick={() => follow.source && setFollowSource(follow.source)}
+            disabled={!follow.source}
             className="btn-ghost flex items-center gap-2 text-sm disabled:opacity-40"
-            title="Follow along — repeat the latest line, guided as you read"
+            title="Follow along — repeat the conversation, guided as you read"
           >
             <BookOpen size={16} /> Follow
           </button>

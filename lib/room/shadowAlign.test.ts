@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { alignIndex, syllables, bandWordCount, sourceKeyterms } from './shadowAlign'
+import { alignIndex, syllables, bandWordCount, sourceKeyterms, wordState } from './shadowAlign'
 
 const SRC = 'The quick brown fox jumps over the lazy dog'.split(' ')
 
@@ -52,6 +52,22 @@ describe('bandWordCount (adaptive)', () => {
     const words = 'a a a a a a a a a a'.split(' ') // all tiny
     expect(bandWordCount(words, 0)).toBeLessThanOrEqual(6)
     expect(bandWordCount(['a'], 0)).toBeGreaterThanOrEqual(1)
+  })
+})
+
+describe('wordState (growing trail)', () => {
+  // reader is on word 3, band spans 2 words (lead + 1 next)
+  it('marks words behind as covered, the current as lead, the next as band', () => {
+    expect(wordState(0, 3, 2)).toBe('covered')
+    expect(wordState(2, 3, 2)).toBe('covered')
+    expect(wordState(3, 3, 2)).toBe('lead')
+    expect(wordState(4, 3, 2)).toBe('band') // within lead+2
+    expect(wordState(5, 3, 2)).toBe('upcoming')
+  })
+  it('at the start everything ahead is band or upcoming, nothing covered', () => {
+    expect(wordState(0, 0, 3)).toBe('lead')
+    expect(wordState(1, 0, 3)).toBe('band')
+    expect(wordState(9, 0, 3)).toBe('upcoming')
   })
 })
 

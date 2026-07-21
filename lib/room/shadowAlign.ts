@@ -70,6 +70,20 @@ export function bandWordCount(
   return Math.max(MIN_BAND_WORDS, count)
 }
 
+// Which visual band a word falls in, given where the reader is (activeIndex) and
+// how many words the "read next" band spans. Pure so it's unit-testable:
+//   covered  — behind the reader: the growing marked trail ("continues/increases")
+//   lead     — the exact word being said now
+//   band     — the next few words to read
+//   upcoming — further ahead (speaker already said it), shown faint
+export type ShadowWordState = 'covered' | 'lead' | 'band' | 'upcoming'
+export function wordState(i: number, activeIndex: number, bandWords: number): ShadowWordState {
+  if (i === activeIndex) return 'lead'
+  if (i > activeIndex && i < activeIndex + bandWords) return 'band'
+  if (i < activeIndex) return 'covered'
+  return 'upcoming'
+}
+
 // Salient words from the source line, fed to the reader's ASR as keyterms so it
 // recognizes exactly the words being read (biggest accuracy win, zero per-word
 // latency — keyterms are sent once at connection). Skips short/function words,
