@@ -6,7 +6,7 @@ import { type Segment } from '@/lib/transcript/store'
 import { useRoom, type RoomRole } from '@/lib/room/useRoom'
 import { mergeRoomSegments } from '@/lib/room/roomStore'
 import { TranscriptView } from '@/components/transcript/TranscriptView'
-import { AudioMeter } from '@/components/transcript/AudioMeter'
+import { Waveform } from '@/components/transcript/Waveform'
 import type { TranscriptionProvider } from '@/lib/transcription/types'
 
 const KEYTERMS = ['Kubernetes', 'idempotency', 'quantization', 'Kafka', 'AWS Lambda', 'system design']
@@ -108,7 +108,7 @@ function Room({ roomId, role }: { roomId: string; role: RoomRole }) {
             Stop
           </button>
         )}
-        <AudioMeter level={level} />
+        <Waveform level={level} active={live} />
         <span className="text-sm text-black/50">
           You: {role === 'reader' ? 'Reader (Speaker 1)' : 'Repeater (Speaker 2)'}
         </span>

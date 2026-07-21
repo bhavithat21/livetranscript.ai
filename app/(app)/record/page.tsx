@@ -4,7 +4,7 @@ import { useMicStream } from '@/lib/audio/useMicStream'
 import { connectWithFallback } from '@/lib/transcription'
 import { mergeSegments, applyCorrection, transcriptText, type Segment } from '@/lib/transcript/store'
 import { TranscriptView } from '@/components/transcript/TranscriptView'
-import { AudioMeter } from '@/components/transcript/AudioMeter'
+import { Waveform } from '@/components/transcript/Waveform'
 import { saveSession, createShare } from './actions'
 import type { TranscriptionProvider, TranscriptEvent } from '@/lib/transcription/types'
 
@@ -156,7 +156,7 @@ export default function RecordPage() {
               </span>
             </span>
           )}
-          <AudioMeter level={level} />
+          <Waveform level={level} active={recording} />
           {engine && <span className="text-sm text-black/50">Engine: {engine}</span>}
           <label className="ml-auto flex items-center gap-2 text-sm">
             <input
