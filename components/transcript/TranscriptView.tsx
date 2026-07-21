@@ -12,6 +12,11 @@ function sentencesOf(s: Segment): string[] {
   return lines.length ? lines : ['']
 }
 
+// Per-device overrides for how one participant is shown: a custom name and/or a
+// color slot, keyed by the segment's `sender` (Ably clientId). Local only.
+export type SpeakerOverride = { name?: string; colorSlot?: number }
+export type SpeakerOverrides = Record<string, SpeakerOverride>
+
 export function TranscriptView({
   segments,
   theme,
@@ -21,6 +26,7 @@ export function TranscriptView({
   fade = false,
   flow = false,
   fill = false,
+  overrides,
 }: {
   segments: Segment[]
   theme: 'light' | 'dark'
@@ -36,6 +42,8 @@ export function TranscriptView({
   // Fill the parent's height (h-full) instead of a fixed 100dvh cap — use inside
   // a flex column so there's exactly one scrollbar (no page + inner double scroll).
   fill?: boolean
+  // Per-device name/color overrides keyed by sender (clientId). Undefined = none.
+  overrides?: SpeakerOverrides
 }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   // Only follow the live edge when the reader is already near the bottom, so
@@ -91,18 +99,21 @@ export function TranscriptView({
         )}
       >
         {segments.map((s, i) => {
-          const slot = segmentSlot(s, colors)
+          const ov = s.sender ? overrides?.[s.sender] : undefined
+          // Override color slot wins, else the receiver-derived consistent slot.
+          const slot = ov?.colorSlot ?? segmentSlot(s, colors)
           const speaker = speakerColor(slot, theme)
           const color = speaker.color
-          // Prefer the speaker's real display name (from Clerk) over "Speaker N".
-          const name = s.name?.trim() || speaker.name
+          // Name priority: your local override → the speaker's login name → "Speaker N".
+          const name = ov?.name?.trim() || s.name?.trim() || speaker.name
           // A new turn = the speaker changed from the previous segment. Only then do
           // we print the label + add a gap, so consecutive lines from ONE speaker
           // group into a turn instead of every line re-labelling and running on.
+          // Group turns by SENDER (stable identity) — with a colorSlot override two
+          // people could share a color, so sender is the correct turn boundary.
           const prev = segments[i - 1]
-          const prevSlot = prev ? segmentSlot(prev, colors) : -999
           const prevSender = prev?.sender
-          const newTurn = i === 0 || prevSlot !== slot || prevSender !== s.sender
+          const newTurn = i === 0 || prevSender !== s.sender
 
           if (shadow) {
             const emphasized = slot === emphasizeSpeaker

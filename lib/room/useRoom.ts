@@ -7,6 +7,13 @@ import { speakerSlot } from './roomStore'
 // and their display name (from Clerk).
 export type RoomMessage = TranscriptEvent & { sender: string; name?: string }
 
+// What each participant publishes via Ably presence: their display name and the
+// audio source they're capturing. Drives the "who's in the meeting" roster.
+export type PresenceData = { name?: string; source?: 'mic' | 'system' | 'listening' }
+
+// A roster entry the UI renders: stable id + presence data + deterministic slot.
+export type RoomMember = { clientId: string; name?: string; source?: PresenceData['source']; slot: number }
+
 const INTERIM_THROTTLE_MS = 100
 
 // A short, stable per-tab id used for Ably presence + speaker-slot assignment.
@@ -22,6 +29,9 @@ export function useRoom(roomId: string, displayName?: string) {
   const [connected, setConnected] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [roster, setRoster] = useState<string[]>([])
+  // Full roster entries (id + presence name/source + slot) for the "who's here" panel.
+  const [members, setMembers] = useState<RoomMember[]>([])
+  const sourceRef = useRef<PresenceData['source']>('listening')
   // Mirror roster into a ref so publish() always reads the CURRENT roster, not a
   // stale closure snapshot — otherwise a fast first utterance could publish with
   // an unassigned slot (-1) before the presence re-render lands.
@@ -62,23 +72,35 @@ export function useRoom(roomId: string, displayName?: string) {
       }
     })
 
-    // Presence → the live roster of participant client ids.
+    // Presence → the live roster of participant client ids + their name/source.
     const refreshRoster = async () => {
       try {
-        const members = await channel.presence.get()
+        const present = await channel.presence.get()
         if (closed) return
-        const ids = members.map((m) => m.clientId).filter(Boolean) as string[]
+        const withId = present.filter((m) => m.clientId)
+        const ids = withId.map((m) => m.clientId as string)
         rosterRef.current = ids
         setRoster(ids)
+        // Slots come from the SAME sorted-roster rule everyone computes, so the
+        // roster panel colors match the transcript colors across all clients.
+        setMembers(
+          withId.map((m) => {
+            const d = (m.data ?? {}) as PresenceData
+            return { clientId: m.clientId as string, name: d.name, source: d.source, slot: speakerSlot(m.clientId as string, ids) }
+          }),
+        )
       } catch {
         /* presence not ready yet */
       }
     }
     // presence subscribe/enter both return promises that reject if attach fails.
-    Promise.resolve(channel.presence.subscribe(['enter', 'leave', 'present'], refreshRoster)).catch(
+    Promise.resolve(channel.presence.subscribe(['enter', 'leave', 'present', 'update'], refreshRoster)).catch(
       () => {},
     )
-    channel.presence.enter().then(refreshRoster).catch(() => {})
+    channel.presence
+      .enter({ name: nameRef.current, source: sourceRef.current } satisfies PresenceData)
+      .then(refreshRoster)
+      .catch(() => {})
 
     // subscribe() returns a promise that rejects if the channel fails to attach
     // (e.g. token/connection dropped) — swallow so it's not an unhandled rejection.
@@ -149,5 +171,23 @@ export function useRoom(roomId: string, displayName?: string) {
     chanRef.current?.publish('end', { at: myClientId }).catch(() => {})
   }, [myClientId])
 
-  return { connected, error, publish, onPeer, onEnd, endMeeting, roster, mySlot, myClientId }
+  // Update my audio source in presence so the roster shows mic / system / listening.
+  const setPresenceSource = useCallback((source: PresenceData['source']) => {
+    sourceRef.current = source
+    chanRef.current?.presence.update({ name: nameRef.current, source } satisfies PresenceData).catch(() => {})
+  }, [])
+
+  return {
+    connected,
+    error,
+    publish,
+    onPeer,
+    onEnd,
+    endMeeting,
+    roster,
+    members,
+    setPresenceSource,
+    mySlot,
+    myClientId,
+  }
 }

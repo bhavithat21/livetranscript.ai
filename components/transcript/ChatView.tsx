@@ -2,6 +2,7 @@
 import { useEffect, useRef } from 'react'
 import { speakerColor } from '@/lib/speakers/palette'
 import { splitSentences, type Segment } from '@/lib/transcript/store'
+import type { SpeakerOverrides } from './TranscriptView'
 
 // Chat-bubble view of a meeting transcript. Consecutive lines from the same
 // speaker are grouped into one bubble, labeled with their display name (from
@@ -10,10 +11,12 @@ export function ChatView({
   segments,
   theme = 'light',
   fill = false,
+  overrides,
 }: {
   segments: Segment[]
   theme?: 'light' | 'dark'
   fill?: boolean
+  overrides?: SpeakerOverrides
 }) {
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -43,8 +46,10 @@ export function ChatView({
       {/* pb-40 so the last bubble clears the fixed bottom control dock. */}
       <div className="mx-auto flex max-w-3xl flex-col gap-4 px-6 pt-8 pb-40">
         {groups.map((g) => {
-          const speaker = speakerColor(g.speaker ?? 0, theme)
-          const name = g.name?.trim() || speaker.name
+          const sender = g.segments[0].sender
+          const ov = sender ? overrides?.[sender] : undefined
+          const speaker = speakerColor(ov?.colorSlot ?? g.speaker ?? 0, theme)
+          const name = ov?.name?.trim() || g.name?.trim() || speaker.name
           const pending = g.segments.some((s) => !s.isFinal)
           return (
             <div key={g.key} className="flex flex-col gap-1">

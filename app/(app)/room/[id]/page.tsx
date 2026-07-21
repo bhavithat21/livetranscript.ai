@@ -1,19 +1,22 @@
 'use client'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { Check, Copy, Mic, MicOff } from 'lucide-react'
+import { BookOpen, Check, Copy, Mic, MicOff, Users } from 'lucide-react'
 import { useMicStream, type AudioSource } from '@/lib/audio/useMicStream'
 import { connectWithFallback } from '@/lib/transcription'
-import { type Segment } from '@/lib/transcript/store'
+import { transcriptText, type Segment } from '@/lib/transcript/store'
 import { useRoom } from '@/lib/room/useRoom'
 import { useDisplayName } from '@/lib/auth/useDisplayName'
 import { mergeRoomSegments, MAX_SPEAKERS, isStrongRoomId } from '@/lib/room/roomStore'
 import { newRoomId } from '@/lib/room/roomId'
 import { useKeytermPrefs } from '@/lib/transcription/useKeytermPrefs'
+import { useSpeakerPrefs } from '@/lib/room/useSpeakerPrefs'
 import { speakerColor } from '@/lib/speakers/palette'
-import { TranscriptView } from '@/components/transcript/TranscriptView'
+import { TranscriptView, type SpeakerOverrides } from '@/components/transcript/TranscriptView'
 import { ChatView } from '@/components/transcript/ChatView'
 import { Waveform } from '@/components/transcript/Waveform'
+import { RosterPanel } from '@/components/room/RosterPanel'
+import { FollowAlong } from '@/components/room/FollowAlong'
 import { HomeMenu } from '@/components/nav/HomeMenu'
 import type { TranscriptionProvider } from '@/lib/transcription/types'
 
@@ -178,18 +181,42 @@ function Meeting({ roomId }: { roomId: string }) {
   const displayName = useDisplayName()
   const { keyterms } = useKeytermPrefs()
   const { start, stop, error } = useMicStream()
-  const { connected, error: roomError, publish, onPeer, onEnd: onRoomEnd, endMeeting, roster, mySlot, myClientId } =
-    useRoom(roomId, displayName)
+  const {
+    connected,
+    error: roomError,
+    publish,
+    onPeer,
+    onEnd: onRoomEnd,
+    endMeeting,
+    roster,
+    members,
+    setPresenceSource,
+    mySlot,
+    myClientId,
+  } = useRoom(roomId, displayName)
+  const { prefs, setPref } = useSpeakerPrefs(roomId)
   const [segments, setSegments] = useState<Segment[]>([])
   const [level, setLevel] = useState(0)
   const [live, setLive] = useState(false)
   const [muted, setMuted] = useState(false)
   const [source, setSource] = useState<AudioSource>('mic')
   const [view, setView] = useState<'transcript' | 'chat'>('transcript')
+  const [showRoster, setShowRoster] = useState(false)
+  const [followSource, setFollowSource] = useState<string | null>(null)
   const [startError, setStartError] = useState<string | null>(null)
   const providerRef = useRef<TranscriptionProvider | null>(null)
   const mutedRef = useRef(false)
   mutedRef.current = muted
+
+  // Local per-device overrides (custom name + color) keyed by sender clientId.
+  const overrides: SpeakerOverrides = prefs
+
+  // The latest turn currently on screen — what a follower would repeat. We hand
+  // its text to FollowAlong as the source to shadow.
+  const latestTurnText = useMemo(() => {
+    const finals = segments.filter((s) => s.isFinal)
+    return finals.length ? finals[finals.length - 1].text : transcriptText(segments)
+  }, [segments])
 
   // See peers' words the moment they speak — before starting my own mic.
   useEffect(() => {
@@ -238,6 +265,12 @@ function Meeting({ roomId }: { roomId: string }) {
     router.push('/dashboard')
   }, [endMeeting, onStop, router])
 
+  // Reflect my audio state in presence so the roster shows mic / system /
+  // listening for everyone. Listen-only (over the 5-cap) always reads "listening".
+  useEffect(() => {
+    setPresenceSource(full ? 'listening' : live ? source : 'listening')
+  }, [full, live, source, setPresenceSource])
+
   // If someone else ends the meeting, stop + leave gracefully.
   useEffect(() => {
     onRoomEnd(() => {
@@ -281,9 +314,16 @@ function Meeting({ roomId }: { roomId: string }) {
           </span>
         )}
         <CopyMeetingId roomId={roomId} />
-        <span className="text-sm text-black/50">
-          {roster.length} in meeting{roster.length > MAX_SPEAKERS ? ` (${MAX_SPEAKERS} speaking)` : ''}
-        </span>
+        <button
+          onClick={() => setShowRoster((v) => !v)}
+          data-active={showRoster}
+          className="glass glass-interactive flex items-center gap-1.5 rounded-full px-3 py-1 text-sm text-black/60 data-[active=true]:text-ink"
+          title="Who's in the meeting"
+        >
+          <Users size={14} />
+          {roster.length}
+          {roster.length > MAX_SPEAKERS ? ` (${MAX_SPEAKERS} speaking)` : ''}
+        </button>
         <span className={`text-sm ${connected ? 'text-emerald-700' : 'text-black/40'}`}>
           {connected ? '● connected' : '○ connecting…'}
         </span>
@@ -314,20 +354,46 @@ function Meeting({ roomId }: { roomId: string }) {
         <p className="px-6 text-sm text-red-700">{startError ?? error ?? roomError}</p>
       )}
 
+      {showRoster && (
+        <RosterPanel
+          members={members}
+          myClientId={myClientId}
+          prefs={prefs}
+          setPref={setPref}
+          onClose={() => setShowRoster(false)}
+        />
+      )}
+
+      {/* Follow-along overlay: repeat the latest turn aloud, guided word-by-word. */}
+      {followSource && (
+        <FollowAlong source={followSource} keyterms={keyterms} onClose={() => setFollowSource(null)} />
+      )}
+
       {/* The transcript owns the ONLY scrollbar. `fill` makes it grow to the
           remaining viewport (flex-1) instead of a fixed 100dvh cap, so it fits
           under the header + above the dock without a second page scrollbar. */}
       <div className="min-h-0 flex-1">
         {view === 'chat' ? (
-          <ChatView segments={segments} theme="light" fill />
+          <ChatView segments={segments} theme="light" fill overrides={overrides} />
         ) : (
-          <TranscriptView segments={segments} theme="light" readerMode autoScroll fade fill />
+          <TranscriptView segments={segments} theme="light" readerMode autoScroll fade fill overrides={overrides} />
         )}
       </div>
 
-      {/* Bottom-center control dock: source, mic mute, start/stop. */}
+      {/* Bottom-center control dock: follow-along, source, mic mute, start/stop. */}
       <div className="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex justify-center px-4">
         <div className="glass pointer-events-auto flex items-center gap-3 rounded-full px-4 py-2.5">
+          {/* Follow along — repeat the latest line aloud, guided word-by-word.
+              Available to everyone (a listener repeating the speaker is the point). */}
+          <button
+            onClick={() => latestTurnText && setFollowSource(latestTurnText)}
+            disabled={!latestTurnText}
+            className="btn-ghost flex items-center gap-2 text-sm disabled:opacity-40"
+            title="Follow along — repeat the latest line, guided as you read"
+          >
+            <BookOpen size={16} /> Follow
+          </button>
+          {!full && <span className="h-5 w-px bg-black/10" aria-hidden />}
           {full ? (
             <span className="px-3 text-sm text-black/60">Meeting full — you’re listening</span>
           ) : (

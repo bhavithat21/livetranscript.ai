@@ -22,3 +22,21 @@ describe('TranscriptView Shadow Mode', () => {
     expect(reference.style.opacity).toBe('0.4')
   })
 })
+
+describe('TranscriptView speaker overrides', () => {
+  const senderSegs: Segment[] = [
+    { id: 1, speaker: 0, sender: 'u_abc', name: 'Ravi', text: 'first line.', isFinal: true },
+  ]
+  it('renders the local override name instead of the login name', () => {
+    const { getByText, queryByText } = render(
+      <TranscriptView
+        segments={senderSegs}
+        theme="light"
+        readerMode={false}
+        overrides={{ u_abc: { name: 'Coach' } }}
+      />,
+    )
+    expect(getByText('Coach')).toBeTruthy()
+    expect(queryByText('Ravi')).toBeNull()
+  })
+})
