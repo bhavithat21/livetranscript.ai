@@ -2,7 +2,13 @@ import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server'
 import { NextResponse } from 'next/server'
 
 // Public: landing, the shared-transcript view (no login), and Clerk's own paths.
-const isPublicRoute = createRouteMatcher(['/', '/s/(.*)', '/__clerk/(.*)'])
+const isPublicRoute = createRouteMatcher([
+  '/',
+  '/sign-in(.*)',
+  '/sign-up(.*)',
+  '/s/(.*)',
+  '/__clerk/(.*)',
+])
 
 const clerkConfigured = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY)
 
