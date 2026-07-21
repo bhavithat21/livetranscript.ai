@@ -142,20 +142,19 @@ export default function RecordPage() {
       {!reader && (
         <header className="glass sticky top-0 z-40 flex flex-wrap items-center gap-4 rounded-b-2xl px-6 py-3">
           {!recording ? (
-            <button
-              onClick={onStart}
-              disabled={busy}
-              className="rounded-full bg-emerald-700 px-5 py-2 font-medium text-white disabled:opacity-50"
-            >
+            <button onClick={onStart} disabled={busy} className="btn-signal">
               {busy ? 'Starting…' : 'Start Recording'}
             </button>
           ) : (
-            <button
-              onClick={onStop}
-              className="rounded-full bg-red-700 px-5 py-2 font-medium text-white"
-            >
-              Stop
-            </button>
+            <span className="flex items-center gap-3">
+              <button onClick={onStop} className="btn-stop">
+                Stop
+              </button>
+              <span className="flex items-center gap-1.5 text-sm text-red-700">
+                <span className="live-dot" aria-hidden />
+                live
+              </span>
+            </span>
           )}
           <AudioMeter level={level} />
           {engine && <span className="text-sm text-black/50">Engine: {engine}</span>}
@@ -170,24 +169,15 @@ export default function RecordPage() {
           {shadow && (
             <div className="flex items-center gap-1 text-sm">
               <span className="text-black/50">Highlight:</span>
-              <button
-                onClick={() => setShadowSpeaker(0)}
-                className={`rounded-full px-3 py-1 ${shadowSpeaker === 0 ? 'bg-black text-white' : 'border border-black/15'}`}
-              >
+              <button onClick={() => setShadowSpeaker(0)} className="btn-ghost" data-active={shadowSpeaker === 0}>
                 Speaker 1
               </button>
-              <button
-                onClick={() => setShadowSpeaker(1)}
-                className={`rounded-full px-3 py-1 ${shadowSpeaker === 1 ? 'bg-black text-white' : 'border border-black/15'}`}
-              >
+              <button onClick={() => setShadowSpeaker(1)} className="btn-ghost" data-active={shadowSpeaker === 1}>
                 Speaker 2
               </button>
             </div>
           )}
-          <button
-            onClick={() => setReader(true)}
-            className="text-sm underline underline-offset-4"
-          >
+          <button onClick={() => setReader(true)} className="btn-ghost text-sm">
             Reader Mode
           </button>
           {error && <span className="w-full text-sm text-red-700">{error}</span>}

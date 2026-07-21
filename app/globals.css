@@ -69,3 +69,90 @@ body {
     transform: none;
   }
 }
+
+@layer components {
+  /* Signal button — the primary action. Emerald, tactile, presses in. */
+  .btn-signal {
+    background: #0f766e;
+    color: #fff;
+    border-radius: 9999px;
+    padding: 0.6rem 1.4rem;
+    font-weight: 500;
+    box-shadow: 0 4px 16px rgba(15, 118, 110, 0.32);
+    transition: transform 140ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 140ms ease, background 140ms ease;
+  }
+  .btn-signal:hover {
+    background: #115e59;
+    box-shadow: 0 8px 28px rgba(15, 118, 110, 0.4);
+    transform: translateY(-1px);
+  }
+  .btn-signal:active {
+    transform: translateY(0) scale(0.98);
+  }
+  .btn-signal:disabled {
+    opacity: 0.5;
+    box-shadow: none;
+  }
+
+  /* Stop button — live red. */
+  .btn-stop {
+    background: #b91c1c;
+    color: #fff;
+    border-radius: 9999px;
+    padding: 0.6rem 1.4rem;
+    font-weight: 500;
+    box-shadow: 0 4px 16px rgba(185, 28, 28, 0.3);
+    transition: transform 140ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 140ms ease;
+  }
+  .btn-stop:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 28px rgba(185, 28, 28, 0.4);
+  }
+
+  /* Ghost pill — secondary chrome buttons. */
+  .btn-ghost {
+    border-radius: 9999px;
+    padding: 0.4rem 1rem;
+    border: 1px solid rgba(20, 21, 26, 0.15);
+    transition: background 140ms ease, border-color 140ms ease;
+  }
+  .btn-ghost:hover {
+    background: rgba(20, 21, 26, 0.05);
+  }
+  .btn-ghost[data-active='true'] {
+    background: var(--ink);
+    color: #fff;
+    border-color: var(--ink);
+  }
+
+  /* Live recording dot — pulses like an on-air signal. */
+  .live-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 9999px;
+    background: #dc2626;
+    box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.55);
+    animation: live-pulse 1.6s ease-out infinite;
+  }
+}
+
+@keyframes live-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.5); }
+  70% { box-shadow: 0 0 0 10px rgba(220, 38, 38, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); }
+}
+
+/* One orchestrated entrance — staggered rise-in on page load. */
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.rise-in {
+  animation: rise-in 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-dot { animation: none; }
+  .rise-in { animation: none; }
+  .btn-signal, .btn-stop, .btn-ghost { transition: none; }
+}
