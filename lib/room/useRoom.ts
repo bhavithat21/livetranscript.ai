@@ -20,13 +20,26 @@ export function useRoom(roomId: string, role: RoomRole) {
 
   useEffect(() => {
     if (!roomId) return
+    let closed = false
     const client = new Ably.Realtime({ authUrl: '/api/ably-token' })
     clientRef.current = client
     const channel = client.channels.get(`room:${roomId}`)
     chanRef.current = channel
 
-    client.connection.on('connected', () => setConnected(true))
-    client.connection.on('failed', () => setError('Realtime connection failed'))
+    const down = () => {
+      if (!closed) setConnected(false)
+    }
+    client.connection.on('connected', () => {
+      if (!closed) setConnected(true)
+    })
+    client.connection.on('disconnected', down)
+    client.connection.on('suspended', down)
+    client.connection.on('failed', () => {
+      if (!closed) {
+        setConnected(false)
+        setError('Realtime unavailable — check ABLY_API_KEY')
+      }
+    })
 
     channel.subscribe('transcript', (msg) => {
       const data = msg.data as RoomMessage
@@ -34,8 +47,14 @@ export function useRoom(roomId: string, role: RoomRole) {
     })
 
     return () => {
-      channel.unsubscribe()
-      client.close()
+      closed = true
+      // A failed/connecting client throws "Connection closed" on close() — safe to ignore.
+      try {
+        channel.unsubscribe()
+        client.close()
+      } catch {
+        /* connection already closed or never opened */
+      }
       chanRef.current = null
       clientRef.current = null
     }
