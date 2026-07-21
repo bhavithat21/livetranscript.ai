@@ -29,6 +29,7 @@ export function useRoom(roomId: string, displayName?: string) {
   const chanRef = useRef<Ably.RealtimeChannel | null>(null)
   const clientRef = useRef<Ably.Realtime | null>(null)
   const peerCbRef = useRef<(m: RoomMessage) => void>(() => {})
+  const endCbRef = useRef<() => void>(() => {})
   const lastInterimAt = useRef(0)
   const clientIdRef = useRef<string>('')
   if (!clientIdRef.current) clientIdRef.current = makeClientId()
@@ -88,6 +89,9 @@ export function useRoom(roomId: string, displayName?: string) {
       })
       .catch(() => {})
 
+    // Anyone ending the meeting broadcasts 'end' → every participant is notified.
+    channel.subscribe('end', () => endCbRef.current()).catch(() => {})
+
     return () => {
       closed = true
       // A failed/connecting client throws "Connection closed" on close() — safe to ignore.
@@ -135,5 +139,15 @@ export function useRoom(roomId: string, displayName?: string) {
     peerCbRef.current = cb
   }, [])
 
-  return { connected, error, publish, onPeer, roster, mySlot, myClientId }
+  // Register a handler for when someone ends the meeting for everyone.
+  const onEnd = useCallback((cb: () => void) => {
+    endCbRef.current = cb
+  }, [])
+
+  // Broadcast that the meeting is over — all participants receive 'end'.
+  const endMeeting = useCallback(() => {
+    chanRef.current?.publish('end', { at: myClientId }).catch(() => {})
+  }, [myClientId])
+
+  return { connected, error, publish, onPeer, onEnd, endMeeting, roster, mySlot, myClientId }
 }

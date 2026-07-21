@@ -101,7 +101,7 @@ export function SessionActions({ id, title, shared, transcript }: Props) {
           7 days
         </button>
         {shared && (
-          <button onClick={stopSharing} disabled={pending} className="btn-ghost text-red-700">
+          <button onClick={stopSharing} disabled={pending} className="btn-ghost text-[color:var(--stop)]">
             Stop sharing
           </button>
         )}
@@ -109,10 +109,24 @@ export function SessionActions({ id, title, shared, transcript }: Props) {
         <button onClick={exportTxt} className="btn-ghost">
           Export .txt
         </button>
-        <button onClick={remove} disabled={pending} className="btn-ghost text-red-700">
-          Delete
-        </button>
-        {msg && <span className="text-emerald-700">{msg}</span>}
+
+        {/* Destructive action tucked into an overflow menu, away from benign buttons,
+            so Delete is never one accidental click from Export. Esc + click-out close it. */}
+        <details className="relative">
+          <summary className="btn-ghost inline-flex cursor-pointer list-none items-center [&::-webkit-details-marker]:hidden">
+            ⋯
+          </summary>
+          <div className="glass absolute right-0 z-20 mt-2 w-44 rounded-xl p-1 shadow-lg">
+            <button
+              onClick={remove}
+              disabled={pending}
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[color:var(--stop)] hover:bg-black/5"
+            >
+              Delete transcript
+            </button>
+          </div>
+        </details>
+        {msg && <span className="text-[color:var(--signal)]">{msg}</span>}
       </div>
     </div>
   )

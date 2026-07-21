@@ -1,13 +1,14 @@
 'use client'
 import { use, useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Mic, MicOff } from 'lucide-react'
+import { Check, Copy, Mic, MicOff } from 'lucide-react'
 import { useMicStream, type AudioSource } from '@/lib/audio/useMicStream'
 import { connectWithFallback } from '@/lib/transcription'
 import { type Segment } from '@/lib/transcript/store'
 import { useRoom } from '@/lib/room/useRoom'
 import { useDisplayName } from '@/lib/auth/useDisplayName'
 import { mergeRoomSegments, MAX_SPEAKERS, isStrongRoomId } from '@/lib/room/roomStore'
+import { newRoomId } from '@/lib/room/roomId'
 import { speakerColor } from '@/lib/speakers/palette'
 import { TranscriptView } from '@/components/transcript/TranscriptView'
 import { ChatView } from '@/components/transcript/ChatView'
@@ -15,12 +16,6 @@ import { Waveform } from '@/components/transcript/Waveform'
 import type { TranscriptionProvider } from '@/lib/transcription/types'
 
 const KEYTERMS = ['Kubernetes', 'idempotency', 'quantization', 'Kafka', 'AWS Lambda', 'system design']
-
-// A short, unguessable, url-safe meeting id.
-function newRoomId(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(9))
-  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-}
 
 export default function RoomPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
@@ -139,11 +134,35 @@ function Lobby({ roomId, onJoin }: { roomId: string; onJoin: () => void }) {
   )
 }
 
+// The meeting id as a one-tap copyable chip — copies the full join link so it's
+// trivial to paste to whoever should join. Friendly ids read aloud fine too.
+function CopyMeetingId({ roomId }: { roomId: string }) {
+  const [copied, setCopied] = useState(false)
+  const copy = () => {
+    const link = typeof window !== 'undefined' ? `${window.location.origin}/room/${roomId}` : roomId
+    navigator.clipboard.writeText(link)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+  return (
+    <button
+      onClick={copy}
+      className="glass glass-interactive flex items-center gap-2 rounded-full py-1 pl-3 pr-2 text-sm"
+      title="Copy the join link"
+    >
+      <span className="font-mono text-black/70">{roomId}</span>
+      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-black/5 text-black/50">
+        {copied ? <Check size={13} className="text-emerald-700" /> : <Copy size={13} />}
+      </span>
+    </button>
+  )
+}
+
 function Meeting({ roomId }: { roomId: string }) {
   const router = useRouter()
   const displayName = useDisplayName()
   const { start, stop, error } = useMicStream()
-  const { connected, error: roomError, publish, onPeer, roster, mySlot, myClientId } =
+  const { connected, error: roomError, publish, onPeer, onEnd: onRoomEnd, endMeeting, roster, mySlot, myClientId } =
     useRoom(roomId, displayName)
   const [segments, setSegments] = useState<Segment[]>([])
   const [level, setLevel] = useState(0)
@@ -196,10 +215,20 @@ function Meeting({ roomId }: { roomId: string }) {
     setLevel(0)
   }, [stop])
 
+  // Ending broadcasts to everyone, then leaves. Peers receive 'end' and leave too.
   const onEnd = useCallback(async () => {
+    endMeeting()
     await onStop()
     router.push('/dashboard')
-  }, [onStop, router])
+  }, [endMeeting, onStop, router])
+
+  // If someone else ends the meeting, stop + leave gracefully.
+  useEffect(() => {
+    onRoomEnd(() => {
+      void onStop()
+      router.push('/dashboard')
+    })
+  }, [onRoomEnd, onStop, router])
 
   // Keyboard shortcuts: Space/M = mute toggle while live, S = start/stop, Esc = end.
   useEffect(() => {
@@ -224,14 +253,15 @@ function Meeting({ roomId }: { roomId: string }) {
 
   return (
     <main className="relative min-h-dvh bg-[#faf9f7] pb-32 text-[#16151a]">
-      {/* Top bar: identity + status on the left, End on the top-right. */}
-      <header className="flex items-center gap-4 px-6 py-4">
+      {/* Top bar: identity + copyable meeting id + status on the left, End on the right. */}
+      <header className="flex flex-wrap items-center gap-3 px-6 py-4">
         {!full && (
           <span className="flex items-center gap-1.5 text-sm">
             <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: me.color }} />
             {displayName ?? `You’re ${me.name}`}
           </span>
         )}
+        <CopyMeetingId roomId={roomId} />
         <span className="text-sm text-black/50">
           {roster.length} in meeting{roster.length > MAX_SPEAKERS ? ` (${MAX_SPEAKERS} speaking)` : ''}
         </span>
@@ -255,7 +285,7 @@ function Meeting({ roomId }: { roomId: string }) {
               Chat
             </button>
           </div>
-          <button onClick={onEnd} className="btn-stop" title="End meeting (Esc)">
+          <button onClick={onEnd} className="btn-stop" title="End meeting for everyone (Esc)">
             End
           </button>
         </div>

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { mergeRoomSegments, speakerSlot, isStrongRoomId, MAX_SPEAKERS } from './roomStore'
+import { mergeRoomSegments, speakerSlot, isStrongRoomId, colorMap, segmentSlot, MAX_SPEAKERS } from './roomStore'
 import type { RoomMessage } from './useRoom'
 import type { Segment } from '@/lib/transcript/store'
 
@@ -70,8 +70,35 @@ describe('isStrongRoomId', () => {
     expect(isStrongRoomId('K7bQ9-mZ2pXa')).toBe(true)
     expect(isStrongRoomId('aZ3f_Qb8Kd10')).toBe(true)
   })
+  it('accepts friendly word-word-#### ids', () => {
+    expect(isStrongRoomId('swift-otter-4821')).toBe(true)
+    expect(isStrongRoomId('lunar-beacon-0007')).toBe(true)
+  })
   it('rejects ids with unsafe characters', () => {
     expect(isStrongRoomId('room/../secret')).toBe(false)
     expect(isStrongRoomId('K7bQ9 mZ2pXa')).toBe(false)
+  })
+})
+
+describe('colorMap / segmentSlot — cross-client color consistency', () => {
+  const seg = (sender: string, speaker: number): Segment => ({
+    id: Math.random(),
+    speaker,
+    text: 'x',
+    isFinal: true,
+    sender,
+  })
+  it('assigns the SAME color per sender regardless of the racy wire speaker slot', () => {
+    // Both browsers see the same two senders; on the wire both stamped speaker=0.
+    const segs = [seg('u_alice', 0), seg('u_bob', 0), seg('u_alice', 0)]
+    const colors = colorMap(segs)
+    expect(colors.get('u_alice')).not.toBe(colors.get('u_bob')) // distinct colors
+    // And it's deterministic by sorted sender id — every client agrees.
+    expect(segmentSlot(seg('u_alice', 0), colors)).toBe(0)
+    expect(segmentSlot(seg('u_bob', 0), colors)).toBe(1)
+  })
+  it('falls back to the wire speaker for single-mic segments (no sender)', () => {
+    const s: Segment = { id: 1, speaker: 3, text: 'x', isFinal: true }
+    expect(segmentSlot(s, new Map())).toBe(3)
   })
 })
