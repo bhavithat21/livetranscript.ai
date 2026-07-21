@@ -140,7 +140,7 @@ export default function RecordPage() {
   return (
     <main className="min-h-dvh bg-[#faf9f7] text-[#16151a]">
       {!reader && (
-        <header className="flex flex-wrap items-center gap-4 border-b border-black/10 px-6 py-3">
+        <header className="glass sticky top-0 z-40 flex flex-wrap items-center gap-4 rounded-b-2xl px-6 py-3">
           {!recording ? (
             <button
               onClick={onStart}
@@ -209,7 +209,7 @@ export default function RecordPage() {
         autoScroll={recording}
       />
       {savedId && !reader && (
-        <section className="mx-6 mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-black/10 bg-white p-4">
+        <section className="glass mx-6 mb-4 mt-4 flex flex-wrap items-center gap-3 rounded-2xl p-4">
           <span className="text-sm font-medium">Share transcript:</span>
           <button
             onClick={() => onShare(1, '1 hour')}
@@ -233,7 +233,7 @@ export default function RecordPage() {
         </section>
       )}
       {summary && !reader && (
-        <section className="mx-6 mb-10 rounded-lg border border-black/10 bg-white p-5">
+        <section className="glass mx-6 mb-10 rounded-2xl p-5">
           <h2 className="mb-2 font-serif text-xl">Summary</h2>
           <p className="mb-4 leading-relaxed">{summary.summary}</p>
           {summary.keyPoints.length > 0 && (
