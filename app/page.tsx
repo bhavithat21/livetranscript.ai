@@ -62,7 +62,7 @@ export default function Home() {
       <section className="mx-auto max-w-5xl px-8 pb-20">
         <div className="glass flex flex-wrap items-center justify-between gap-6 rounded-3xl px-8 py-8">
           <p className="max-w-md font-[family-name:var(--font-serif)] text-2xl leading-snug tracking-[-0.01em]">
-            Built for interviews, meetings, lectures, and dictation.
+            Built for meetings, lectures, notes, and dictation.
           </p>
           <Link href="/record" className="btn-signal px-7 py-3 text-base">
             Try it free

@@ -1,6 +1,6 @@
 'use client'
-import { use, useCallback, useEffect, useRef, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useParams, useRouter } from 'next/navigation'
 import { Check, Copy, Mic, MicOff } from 'lucide-react'
 import { useMicStream, type AudioSource } from '@/lib/audio/useMicStream'
 import { connectWithFallback } from '@/lib/transcription'
@@ -18,8 +18,12 @@ import { HomeMenu } from '@/components/nav/HomeMenu'
 import type { TranscriptionProvider } from '@/lib/transcription/types'
 
 
-export default function RoomPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params)
+export default function RoomPage() {
+  // useParams (not `use(params)`): it's reactive, so client navigation BETWEEN two
+  // /room/[id] routes (e.g. pasting a different link + Go) re-renders with the new
+  // id instead of staying stuck on the first — that stuck read was why "Go" only
+  // updated the id and never moved you into the new meeting.
+  const id = String(useParams().id ?? '')
   const router = useRouter()
   const [joined, setJoined] = useState(false)
 
@@ -27,6 +31,12 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   useEffect(() => {
     if (id === 'new') router.replace(`/room/${newRoomId()}`)
   }, [id, router])
+
+  // If the id changes under us (navigated to a different meeting), drop back to
+  // that meeting's lobby rather than showing the previous room's live view.
+  useEffect(() => {
+    setJoined(false)
+  }, [id])
 
   if (id === 'new') {
     return (
@@ -110,10 +120,14 @@ function Lobby({ roomId, onJoin }: { roomId: string; onJoin: () => void }) {
         className="mt-8 flex items-center gap-2"
         onSubmit={(e) => {
           e.preventDefault()
-          // Accept a full pasted link or a bare id; take the last path segment.
-          const raw = joinId.trim().split('/').filter(Boolean).pop() ?? ''
+          // Accept a full pasted link, a link with query/hash, or a bare id. Strip
+          // any query/hash, then take the last path segment.
+          const raw = (joinId.trim().split(/[?#]/)[0].split('/').filter(Boolean).pop() ?? '')
           const clean = raw.replace(/[^a-zA-Z0-9_-]/g, '')
-          if (clean && clean !== roomId) router.push(`/room/${clean}`)
+          if (!clean) return
+          // Pasting the link for THIS room = just join it (don't no-op).
+          if (clean === roomId) return onJoin()
+          router.push(`/room/${clean}`)
         }}
       >
         <label htmlFor="join-id" className="sr-only">

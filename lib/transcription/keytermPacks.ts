@@ -1,7 +1,7 @@
 // Keyterm PACKS — the report's recommended strategy: one always-on base pack plus
 // swappable overlays chosen per session. Each active combination stays under the
 // 100-term provider cap, so users boost the vocabulary that matches THEIR context
-// (a coding interview vs a networking design review) without diluting the boost.
+// (a coding session vs a networking design review) without diluting the boost.
 //
 // LATENCY: keyterms are sent ONCE at connection open, never per word — so pack
 // size has ZERO effect on live transcription latency. The 100-cap is about
@@ -39,7 +39,7 @@ export const PACKS: KeytermPack[] = [
   {
     id: 'coding',
     name: 'Coding & algorithms',
-    description: 'Interview coding-round vocabulary.',
+    description: 'Data-structures & algorithms vocabulary.',
     terms: [
       'Big O', 'HashMap', 'HashSet', 'two pointers', 'sliding window', 'BFS', 'DFS',
       'binary search', 'topological sort', 'dynamic programming', 'backtracking', 'Spring Boot',
@@ -72,8 +72,8 @@ export const PACKS: KeytermPack[] = [
   },
   {
     id: 'amazon',
-    name: 'Amazon interview',
-    description: 'Leadership Principles & loop vocabulary.',
+    name: 'Amazon & Leadership',
+    description: 'Leadership Principles & operations vocabulary.',
     terms: ['Bar Raiser', 'Leadership Principles', 'operational excellence', 'Tier-1 service'],
   },
 ]
