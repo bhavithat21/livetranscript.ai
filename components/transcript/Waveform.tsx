@@ -45,7 +45,7 @@ export function Waveform({ level, active }: { level: number; active: boolean }) 
             className="w-[3px] rounded-full transition-[height,opacity] duration-75"
             style={{
               height: `${Math.max(3, h * 32)}px`,
-              background: active ? '#0f766e' : 'rgba(20,21,26,0.15)',
+              background: active ? 'var(--signal)' : 'rgba(20,21,26,0.15)',
               opacity: active ? 0.5 + h * 0.5 : 0.4,
             }}
           />

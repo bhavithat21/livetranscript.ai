@@ -268,7 +268,7 @@ function Meeting({ roomId }: { roomId: string }) {
       {view === 'chat' ? (
         <ChatView segments={segments} theme="light" />
       ) : (
-        <TranscriptView segments={segments} theme="light" readerMode autoScroll />
+        <TranscriptView segments={segments} theme="light" readerMode autoScroll fade />
       )}
 
       {/* Bottom-center control dock: source, mic mute, start/stop. */}

@@ -1,9 +1,8 @@
 'use client'
 import { useEffect, useRef } from 'react'
 import { speakerColor } from '@/lib/speakers/palette'
+import { cn } from '@/lib/utils'
 import type { Segment } from '@/lib/transcript/store'
-
-const INK = '#16151a'
 
 export function TranscriptView({
   segments,
@@ -11,13 +10,16 @@ export function TranscriptView({
   readerMode,
   emphasizeSpeaker = null,
   autoScroll = false,
+  fade = false,
 }: {
   segments: Segment[]
   theme: 'light' | 'dark'
   readerMode: boolean
-  // Shadow Mode: this speaker's text renders big + dark, others small + dim.
+  // Shadow Mode: this speaker's text renders big, others small + dim.
   emphasizeSpeaker?: number | null
   autoScroll?: boolean
+  // Soft bottom dissolve — use when a fixed dock overlaps the scroll region.
+  fade?: boolean
 }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   // Only follow the live edge when the reader is already near the bottom, so
@@ -41,39 +43,61 @@ export function TranscriptView({
     )
   }
 
+  const inkBody = theme === 'dark' ? 'text-[#f5f4f2]' : 'text-ink'
   const shadow = emphasizeSpeaker != null
 
   return (
     <div
       ref={scrollRef}
-      className="overflow-y-auto overscroll-contain"
+      className={cn('overflow-y-auto overscroll-contain', fade && 'reading-fade')}
       style={{ maxHeight: 'calc(100dvh - 72px)' }}
     >
-      <div className={readerMode ? 'mx-auto max-w-3xl px-6 py-10' : 'px-6 py-4'}>
-      {segments.map((s) => {
-        const speaker = speakerColor(s.speaker ?? 0, theme)
-        const color = speaker.color
-        // Prefer the speaker's real display name (from Clerk) over "Speaker N".
-        const name = s.name?.trim() || speaker.name
+      {/* Always a measured reading column (~70ch) — live AND reader — so lines
+          never run 120+ chars on wide displays. */}
+      <div className={cn('mx-auto max-w-3xl px-6', readerMode ? 'py-10' : 'py-6')}>
+        {segments.map((s) => {
+          const speaker = speakerColor(s.speaker ?? 0, theme)
+          const color = speaker.color
+          // Prefer the speaker's real display name (from Clerk) over "Speaker N".
+          const name = s.name?.trim() || speaker.name
 
-        if (shadow) {
-          const emphasized = s.speaker === emphasizeSpeaker
+          if (shadow) {
+            const emphasized = s.speaker === emphasizeSpeaker
+            return (
+              <p
+                key={s.id}
+                className={cn(
+                  inkBody,
+                  emphasized
+                    ? 'mb-5 text-3xl font-medium leading-snug transition-all sm:text-4xl'
+                    : 'mb-3 text-base leading-relaxed transition-all',
+                )}
+                style={{ opacity: emphasized ? (s.isFinal ? 1 : 0.6) : 0.4 }}
+              >
+                {s.speaker != null && (
+                  <span
+                    className="mr-2 align-middle font-[family-name:var(--font-serif)] text-sm font-semibold"
+                    style={{ color }}
+                  >
+                    {name}
+                  </span>
+                )}
+                <span>{s.text}</span>
+              </p>
+            )
+          }
+
           return (
             <p
               key={s.id}
-              className={
-                emphasized
-                  ? 'mb-5 text-3xl font-medium leading-snug transition-all sm:text-4xl'
-                  : 'mb-3 text-base leading-relaxed transition-all'
-              }
-              style={{
-                color: emphasized ? INK : undefined,
-                opacity: emphasized ? (s.isFinal ? 1 : 0.6) : 0.4,
-              }}
+              className={cn('mb-4 text-lg leading-relaxed transition-opacity', inkBody)}
+              style={{ opacity: s.isFinal ? 1 : 0.55 }}
             >
               {s.speaker != null && (
+                // Speaker identity is carried by COLOR on the label only — the body
+                // text stays ink for maximum contrast (the #1 product value).
                 <span
-                  className="mr-2 align-middle font-[family-name:var(--font-serif)] text-sm font-semibold"
+                  className="mr-2 font-[family-name:var(--font-serif)] text-sm font-semibold"
                   style={{ color }}
                 >
                   {name}
@@ -82,26 +106,7 @@ export function TranscriptView({
               <span>{s.text}</span>
             </p>
           )
-        }
-
-        return (
-          <p
-            key={s.id}
-            className="mb-4 text-lg leading-relaxed transition-opacity"
-            style={{ opacity: s.isFinal ? 1 : 0.55 }}
-          >
-            {s.speaker != null && (
-              <span
-                className="mr-2 font-[family-name:var(--font-serif)] text-sm font-semibold"
-                style={{ color }}
-              >
-                {name}
-              </span>
-            )}
-            <span style={readerMode ? { color } : undefined}>{s.text}</span>
-          </p>
-        )
-      })}
+        })}
       </div>
     </div>
   )

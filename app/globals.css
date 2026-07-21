@@ -4,17 +4,28 @@
   /* Reading surface — kept solid + high-contrast for transcript legibility */
   --paper: #faf9f7;
   --ink: #16151a;
+  --reader: #fffdf9; /* slightly warmer solid surface for reading payloads */
+
+  /* Semantic accents — ONE signal color, red only for stop/destructive */
+  --signal: #0f766e;
+  --stop: #b91c1c;
 
   /* Liquid-glass tokens (chrome only, never behind reading text) */
   --glass-bg: rgba(255, 255, 255, 0.55);
   --glass-border: rgba(255, 255, 255, 0.7);
   --glass-shadow: 0 8px 32px rgba(20, 21, 26, 0.12);
   --glass-blur: 20px;
+
+  /* Fluid type + rhythm scale */
+  --text-hero: clamp(2.5rem, 1.2rem + 5vw, 5rem);
+  --space-section: clamp(4rem, 3rem + 5vw, 9rem);
 }
 
 @theme inline {
   --color-paper: var(--paper);
   --color-ink: var(--ink);
+  --color-signal: var(--signal);
+  --color-stop: var(--stop);
   --font-serif: var(--font-serif);
   --font-body: var(--font-body);
 }
@@ -41,6 +52,39 @@ body {
     backdrop-filter: blur(20px) saturate(160%);
     border: 1px solid var(--glass-border);
     box-shadow: var(--glass-shadow);
+  }
+
+  /* Solid, warm reading surface for transcript payloads — never blurred/glassy,
+     so body text keeps maximum contrast (the #1 product value). */
+  .reader-surface {
+    background: var(--reader);
+    border: 1px solid rgba(20, 21, 26, 0.08);
+    box-shadow: 0 1px 3px rgba(20, 21, 26, 0.04);
+  }
+
+  /* Soft bottom dissolve so live text slides under a fixed dock without a hard cut. */
+  .reading-fade {
+    -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 5rem), transparent);
+    mask-image: linear-gradient(to bottom, #000 calc(100% - 5rem), transparent);
+  }
+
+  .hairline {
+    height: 1px;
+    background: rgba(20, 21, 26, 0.1);
+  }
+
+  /* On-air breathing glow for the live control dock. */
+  .dock-live {
+    animation: dock-live 3s ease-in-out infinite;
+  }
+}
+
+@keyframes dock-live {
+  0%, 100% {
+    box-shadow: var(--glass-shadow), 0 0 0 1px rgba(185, 28, 28, 0.1), 0 0 24px rgba(185, 28, 28, 0.1);
+  }
+  50% {
+    box-shadow: var(--glass-shadow), 0 0 0 1px rgba(185, 28, 28, 0.18), 0 0 34px rgba(185, 28, 28, 0.16);
   }
 }
 
@@ -154,5 +198,6 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .live-dot { animation: none; }
   .rise-in { animation: none; }
+  .dock-live { animation: none; }
   .btn-signal, .btn-stop, .btn-ghost { transition: none; }
 }
