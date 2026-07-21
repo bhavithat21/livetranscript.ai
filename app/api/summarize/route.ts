@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
+import { currentUserId } from '@/lib/auth'
+import { logError } from '@/lib/log'
 
 export async function POST(req: NextRequest) {
+  // Require a signed-in user so anonymous callers can't drain OpenAI quota.
+  const userId = await currentUserId()
+  if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
   let body: { transcript?: string }
   try {
     body = await req.json()
@@ -35,7 +41,8 @@ export async function POST(req: NextRequest) {
       keyPoints: Array.isArray(parsed.keyPoints) ? parsed.keyPoints : [],
       actionItems: Array.isArray(parsed.actionItems) ? parsed.actionItems : [],
     })
-  } catch {
+  } catch (e) {
+    logError('api/summarize', e)
     return NextResponse.json({ error: 'Summary generation failed' }, { status: 502 })
   }
 }

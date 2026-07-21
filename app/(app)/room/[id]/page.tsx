@@ -1,18 +1,22 @@
 'use client'
 import { use, useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { useMicStream } from '@/lib/audio/useMicStream'
+import { Mic, MicOff } from 'lucide-react'
+import { useMicStream, type AudioSource } from '@/lib/audio/useMicStream'
 import { connectWithFallback } from '@/lib/transcription'
 import { type Segment } from '@/lib/transcript/store'
-import { useRoom, type RoomRole } from '@/lib/room/useRoom'
-import { mergeRoomSegments } from '@/lib/room/roomStore'
+import { useRoom } from '@/lib/room/useRoom'
+import { useDisplayName } from '@/lib/auth/useDisplayName'
+import { mergeRoomSegments, MAX_SPEAKERS, isStrongRoomId } from '@/lib/room/roomStore'
+import { speakerColor } from '@/lib/speakers/palette'
 import { TranscriptView } from '@/components/transcript/TranscriptView'
+import { ChatView } from '@/components/transcript/ChatView'
 import { Waveform } from '@/components/transcript/Waveform'
 import type { TranscriptionProvider } from '@/lib/transcription/types'
 
 const KEYTERMS = ['Kubernetes', 'idempotency', 'quantization', 'Kafka', 'AWS Lambda', 'system design']
 
-// A short, unguessable, url-safe room id.
+// A short, unguessable, url-safe meeting id.
 function newRoomId(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(9))
   return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
@@ -21,10 +25,9 @@ function newRoomId(): string {
 export default function RoomPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
   const router = useRouter()
-  const [role, setRole] = useState<RoomRole | null>(null)
+  const [joined, setJoined] = useState(false)
 
-  // "/room/new" is a request for a fresh room — mint a unique id and redirect so
-  // each pair gets their own channel instead of everyone colliding in "room:new".
+  // "/room/new" → mint a unique meeting id and redirect, so each meeting is its own channel.
   useEffect(() => {
     if (id === 'new') router.replace(`/room/${newRoomId()}`)
   }, [id, router])
@@ -32,78 +35,149 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   if (id === 'new') {
     return (
       <main className="mx-auto max-w-md px-6 py-24 text-center text-black/50">
-        Creating your room…
+        Creating your meeting…
       </main>
     )
   }
 
-  if (!role) return <RolePicker roomId={id} onPick={setRole} />
-  return <Room roomId={id} role={role} />
+  // Reject guessable / enumerable ids — real meetings arrive via a shared random link.
+  if (!isStrongRoomId(id)) return <InvalidRoom />
+
+  if (!joined) return <Lobby roomId={id} onJoin={() => setJoined(true)} />
+  return <Meeting roomId={id} />
 }
 
-function RolePicker({ roomId, onPick }: { roomId: string; onPick: (r: RoomRole) => void }) {
-  const [copied, setCopied] = useState(false)
-  const copyInvite = () => {
-    navigator.clipboard.writeText(window.location.href)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }
+function InvalidRoom() {
   return (
     <main className="mx-auto max-w-md px-6 py-24 text-center">
-      <h1 className="font-[family-name:var(--font-serif)] text-3xl">Join shadowing room</h1>
-      <p className="mt-2 font-mono text-sm text-black/50">Room {roomId}</p>
-      <button onClick={copyInvite} className="btn-ghost mt-4 text-sm">
-        {copied ? 'Invite link copied ✓' : 'Copy invite link'}
-      </button>
-      <p className="mt-6 text-sm text-black/60">
-        Send the invite link to the other person, get on a separate voice call so you can hear each
-        other, then pick your role:
+      <h1 className="font-[family-name:var(--font-serif)] text-3xl">That meeting link isn&rsquo;t valid</h1>
+      <p className="mt-3 text-black/60">
+        Meeting links are randomly generated. Ask the host to resend their invite, or start a new
+        meeting of your own.
       </p>
-      <div className="mt-6 flex justify-center gap-4">
-        <button
-          onClick={() => onPick('reader')}
-          className="rounded-full border border-black/15 px-6 py-3 font-medium hover:bg-black/5"
-        >
-          I&rsquo;m reading
-        </button>
-        <button
-          onClick={() => onPick('repeater')}
-          className="rounded-full bg-emerald-700 px-6 py-3 font-medium text-white hover:bg-emerald-800"
-        >
-          I&rsquo;m repeating
-        </button>
-      </div>
+      <a href="/room/new" className="btn-signal mt-6 inline-block px-6 py-3">
+        Start a new meeting
+      </a>
     </main>
   )
 }
 
-function Room({ roomId, role }: { roomId: string; role: RoomRole }) {
+function Lobby({ roomId, onJoin }: { roomId: string; onJoin: () => void }) {
+  const router = useRouter()
+  const [copied, setCopied] = useState(false)
+  const [joinId, setJoinId] = useState('')
+
+  // Build the invite from the origin + THIS room id (not window.location.href,
+  // which can still read "/room/new" right after the redirect). Set after mount
+  // so SSR doesn't bake in an empty origin that hydration then freezes.
+  const [link, setLink] = useState('')
+  useEffect(() => {
+    setLink(`${window.location.origin}/room/${roomId}`)
+  }, [roomId])
+  const copyInvite = () => {
+    navigator.clipboard.writeText(link)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+  const mailto =
+    `mailto:?subject=${encodeURIComponent('Join my LiveTranscript meeting')}` +
+    `&body=${encodeURIComponent(`Join the live transcript meeting:\n${link}\n\nMeeting ID: ${roomId}`)}`
+
+  return (
+    <main className="mx-auto max-w-lg px-6 py-20">
+      <p className="text-sm font-medium uppercase tracking-widest text-emerald-700">Live meeting</p>
+      <h1 className="mt-2 font-[family-name:var(--font-serif)] text-4xl leading-tight">
+        You&rsquo;re about to join
+      </h1>
+      <div className="glass mt-6 rounded-2xl p-5">
+        <div className="text-xs uppercase tracking-wide text-black/40">Meeting ID</div>
+        <div className="mt-1 select-all font-mono text-lg">{roomId}</div>
+        <p className="mt-3 text-sm leading-relaxed text-black/60">
+          Up to {MAX_SPEAKERS} people can speak — each on their own device. Get everyone on a
+          separate voice call for audio; LiveTranscript syncs the text live and colors each speaker.
+        </p>
+        <div className="mt-4 flex flex-wrap gap-3">
+          <button onClick={copyInvite} className="btn-ghost text-sm">
+            {copied ? 'Link copied ✓' : 'Copy invite link'}
+          </button>
+          <a href={mailto} className="btn-ghost text-sm">
+            Invite by email
+          </a>
+        </div>
+      </div>
+
+      <button onClick={onJoin} className="btn-signal mt-6 w-full py-3 text-base">
+        Join meeting
+      </button>
+
+      <form
+        className="mt-8 flex items-center gap-2"
+        onSubmit={(e) => {
+          e.preventDefault()
+          // Accept a full pasted link or a bare id; take the last path segment.
+          const raw = joinId.trim().split('/').filter(Boolean).pop() ?? ''
+          const clean = raw.replace(/[^a-zA-Z0-9_-]/g, '')
+          if (clean && clean !== roomId) router.push(`/room/${clean}`)
+        }}
+      >
+        <label htmlFor="join-id" className="sr-only">
+          Join a different meeting ID
+        </label>
+        <input
+          id="join-id"
+          name="joinId"
+          value={joinId}
+          onChange={(e) => setJoinId(e.target.value)}
+          placeholder="Join a different meeting ID"
+          className="min-w-0 flex-1 rounded-full border border-black/15 bg-white/60 px-4 py-2 text-sm outline-none focus:border-emerald-700"
+        />
+        <button type="submit" className="btn-ghost text-sm">
+          Go
+        </button>
+      </form>
+    </main>
+  )
+}
+
+function Meeting({ roomId }: { roomId: string }) {
+  const router = useRouter()
+  const displayName = useDisplayName()
   const { start, stop, error } = useMicStream()
-  const { connected, error: roomError, publish, onPeer } = useRoom(roomId, role)
+  const { connected, error: roomError, publish, onPeer, roster, mySlot, myClientId } =
+    useRoom(roomId, displayName)
   const [segments, setSegments] = useState<Segment[]>([])
   const [level, setLevel] = useState(0)
   const [live, setLive] = useState(false)
+  const [muted, setMuted] = useState(false)
+  const [source, setSource] = useState<AudioSource>('mic')
+  const [view, setView] = useState<'transcript' | 'chat'>('transcript')
+  const [startError, setStartError] = useState<string | null>(null)
   const providerRef = useRef<TranscriptionProvider | null>(null)
+  const mutedRef = useRef(false)
+  mutedRef.current = muted
 
-  // The repeater always gets the emphasis (their words big + dark), regardless of my role.
-  const emphasizeSpeaker = 1
-
-  // Subscribe to the peer's transcript on mount, so User 2 sees User 1's words
-  // the moment they join — before starting their own mic.
+  // See peers' words the moment they speak — before starting my own mic.
   useEffect(() => {
     onPeer((m) => setSegments((s) => mergeRoomSegments(s, m)))
   }, [onPeer])
 
+  const full = mySlot < 0 // past the 5-speaker cap → listen-only
+
   const onStart = useCallback(async () => {
+    setStartError(null)
     try {
       let provider: TranscriptionProvider | null = null
-      const rate = await start((pcm) => provider?.sendAudio(pcm), setLevel)
-      const res = await connectWithFallback({ keyterms: KEYTERMS, sampleRate: rate, maxSpeakers: 2 })
+      const rate = await start((pcm) => provider?.sendAudio(pcm), setLevel, {
+        source,
+        isMuted: () => mutedRef.current,
+      })
+      const res = await connectWithFallback({ keyterms: KEYTERMS, sampleRate: rate, maxSpeakers: 1 })
       provider = res.provider
       providerRef.current = provider
       const relay = (e: Parameters<typeof publish>[0]) => {
-        // show my own words locally AND send to peer
-        setSegments((s) => mergeRoomSegments(s, { ...e, role }))
+        setSegments((s) =>
+          mergeRoomSegments(s, { ...e, speaker: mySlot, sender: myClientId, name: displayName }),
+        )
         publish(e)
       }
       provider.onPartial(relay)
@@ -111,9 +185,9 @@ function Room({ roomId, role }: { roomId: string; role: RoomRole }) {
       setLive(true)
     } catch (e) {
       stop()
-      alert(e instanceof Error ? e.message : 'Failed to start')
+      setStartError(e instanceof Error ? e.message : 'Failed to start')
     }
-  }, [start, stop, publish, role])
+  }, [start, stop, publish, mySlot, myClientId, displayName, source])
 
   const onStop = useCallback(async () => {
     stop()
@@ -122,42 +196,125 @@ function Room({ roomId, role }: { roomId: string; role: RoomRole }) {
     setLevel(0)
   }, [stop])
 
+  const onEnd = useCallback(async () => {
+    await onStop()
+    router.push('/dashboard')
+  }, [onStop, router])
+
+  // Keyboard shortcuts: Space/M = mute toggle while live, S = start/stop, Esc = end.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return
+      if (e.key === 'Escape') return void onEnd()
+      if (e.key.toLowerCase() === 's') {
+        e.preventDefault()
+        void (live ? onStop() : onStart())
+      }
+      if (live && (e.key === ' ' || e.key.toLowerCase() === 'm')) {
+        e.preventDefault()
+        setMuted((m) => !m)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [live, onStart, onStop, onEnd])
+
+  const me = speakerColor(mySlot < 0 ? 0 : mySlot, 'light')
+
   return (
-    <main className="min-h-dvh bg-[#faf9f7] text-[#16151a]">
-      <header className="flex flex-wrap items-center gap-4 border-b border-black/10 px-6 py-3">
-        {!live ? (
-          <button
-            onClick={onStart}
-            className="rounded-full bg-emerald-700 px-5 py-2 font-medium text-white"
-          >
-            Start
-          </button>
-        ) : (
-          <button
-            onClick={onStop}
-            className="rounded-full bg-red-700 px-5 py-2 font-medium text-white"
-          >
-            Stop
-          </button>
+    <main className="relative min-h-dvh bg-[#faf9f7] pb-32 text-[#16151a]">
+      {/* Top bar: identity + status on the left, End on the top-right. */}
+      <header className="flex items-center gap-4 px-6 py-4">
+        {!full && (
+          <span className="flex items-center gap-1.5 text-sm">
+            <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: me.color }} />
+            {displayName ?? `You’re ${me.name}`}
+          </span>
         )}
-        <Waveform level={level} active={live} />
         <span className="text-sm text-black/50">
-          You: {role === 'reader' ? 'Reader (Speaker 1)' : 'Repeater (Speaker 2)'}
+          {roster.length} in meeting{roster.length > MAX_SPEAKERS ? ` (${MAX_SPEAKERS} speaking)` : ''}
         </span>
         <span className={`text-sm ${connected ? 'text-emerald-700' : 'text-black/40'}`}>
-          {connected ? '● room connected' : '○ connecting…'}
+          {connected ? '● connected' : '○ connecting…'}
         </span>
-        {(error || roomError) && (
-          <span className="w-full text-sm text-red-700">{error ?? roomError}</span>
-        )}
+        <div className="ml-auto flex items-center gap-2">
+          <div className="glass flex items-center rounded-full p-0.5 text-sm">
+            <button
+              onClick={() => setView('transcript')}
+              data-active={view === 'transcript'}
+              className="rounded-full px-3 py-1 text-black/50 data-[active=true]:bg-ink data-[active=true]:text-white"
+            >
+              Transcript
+            </button>
+            <button
+              onClick={() => setView('chat')}
+              data-active={view === 'chat'}
+              className="rounded-full px-3 py-1 text-black/50 data-[active=true]:bg-ink data-[active=true]:text-white"
+            >
+              Chat
+            </button>
+          </div>
+          <button onClick={onEnd} className="btn-stop" title="End meeting (Esc)">
+            End
+          </button>
+        </div>
       </header>
-      <TranscriptView
-        segments={segments}
-        theme="light"
-        readerMode
-        emphasizeSpeaker={emphasizeSpeaker}
-        autoScroll={live}
-      />
+
+      {(startError || error || roomError) && (
+        <p className="px-6 text-sm text-red-700">{startError ?? error ?? roomError}</p>
+      )}
+
+      {view === 'chat' ? (
+        <ChatView segments={segments} theme="light" />
+      ) : (
+        <TranscriptView segments={segments} theme="light" readerMode autoScroll />
+      )}
+
+      {/* Bottom-center control dock: source, mic mute, start/stop. */}
+      <div className="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex justify-center px-4">
+        <div className="glass pointer-events-auto flex items-center gap-3 rounded-full px-4 py-2.5">
+          {full ? (
+            <span className="px-3 text-sm text-black/60">Meeting full — you’re listening</span>
+          ) : (
+            <>
+              {!live && (
+                <select
+                  value={source}
+                  onChange={(e) => setSource(e.target.value as AudioSource)}
+                  className="rounded-full border border-black/15 bg-white/60 px-3 py-1.5 text-sm outline-none focus:border-emerald-700"
+                  title="Audio source"
+                >
+                  <option value="mic">Microphone</option>
+                  <option value="system">System sound</option>
+                </select>
+              )}
+              {live && (
+                <button
+                  onClick={() => setMuted((m) => !m)}
+                  data-active={muted}
+                  className="btn-ghost flex items-center gap-2 text-sm"
+                  title="Mute / unmute (M or Space)"
+                >
+                  {muted ? <MicOff size={16} /> : <Mic size={16} />}
+                  {muted ? 'Muted' : 'Mic on'}
+                </button>
+              )}
+              <Waveform level={level} active={live && !muted} />
+              {!live ? (
+                <button onClick={onStart} className="btn-signal" title="Start (S)">
+                  Start speaking
+                </button>
+              ) : (
+                <button onClick={onStop} className="btn-stop flex items-center gap-2" title="Stop (S)">
+                  <span className="live-dot" aria-hidden />
+                  Stop
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      </div>
     </main>
   )
 }

@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { currentUserId } from '@/lib/auth'
 
 // Mints short-lived, scoped tokens so the real provider API keys never reach the browser.
 export async function POST(req: NextRequest) {
+  // Require a signed-in user so anonymous callers can't burn our ASR quota.
+  const userId = await currentUserId()
+  if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
   let body: { provider?: string }
   try {
     body = await req.json()

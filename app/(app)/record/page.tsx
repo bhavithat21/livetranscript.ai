@@ -1,11 +1,13 @@
 'use client'
 import { useCallback, useRef, useState } from 'react'
 import { useMicStream } from '@/lib/audio/useMicStream'
-import { connectWithFallback } from '@/lib/transcription'
+import { connectWithFallback, type ProviderChoice } from '@/lib/transcription'
 import { mergeSegments, applyCorrection, transcriptText, type Segment } from '@/lib/transcript/store'
 import { TranscriptView } from '@/components/transcript/TranscriptView'
 import { Waveform } from '@/components/transcript/Waveform'
-import { saveSession, createShare } from './actions'
+import { saveSession } from './actions'
+import { createShare } from '../session-actions'
+import { logError } from '@/lib/log'
 import type { TranscriptionProvider, TranscriptEvent } from '@/lib/transcription/types'
 
 const KEYTERMS = ['Kubernetes', 'idempotency', 'quantization', 'Kafka', 'AWS Lambda', 'system design']
@@ -28,8 +30,8 @@ async function correctLine(
     if (!r.ok) return
     const { text } = await r.json()
     if (text && text !== e.text) setSegments((s) => applyCorrection(s, id, text))
-  } catch {
-    /* fail-soft: keep the live line */
+  } catch (err) {
+    logError('record/correctLine', err) // fail-soft: keep the live line, but record it
   }
 }
 
@@ -39,6 +41,7 @@ export default function RecordPage() {
   const [level, setLevel] = useState(0)
   const [recording, setRecording] = useState(false)
   const [engine, setEngine] = useState<string | null>(null)
+  const [providerChoice, setProviderChoice] = useState<ProviderChoice>('auto')
   const [reader, setReader] = useState(false)
   const [shadow, setShadow] = useState(false)
   const [shadowSpeaker, setShadowSpeaker] = useState(1) // Speaker 2 (the repeater) by default
@@ -48,6 +51,10 @@ export default function RecordPage() {
   const [shareMsg, setShareMsg] = useState<string | null>(null)
   const providerRef = useRef<TranscriptionProvider | null>(null)
   const startedAtRef = useRef<number>(0)
+  // Latest segments, kept outside the render cycle so onStop reads the final
+  // state (not a stale closure snapshot from when the callback was created).
+  const segmentsRef = useRef<Segment[]>([])
+  segmentsRef.current = segments
 
   const onStart = useCallback(async () => {
     setSegments([])
@@ -60,11 +67,11 @@ export default function RecordPage() {
       // Open mic first so we know the REAL sample rate, then tell the provider that rate.
       let provider: TranscriptionProvider | null = null
       const actualRate = await start((pcm) => provider?.sendAudio(pcm), setLevel)
-      const res = await connectWithFallback({
-        keyterms: KEYTERMS,
-        sampleRate: actualRate,
-        maxSpeakers: 5,
-      })
+      const res = await connectWithFallback(
+        { keyterms: KEYTERMS, sampleRate: actualRate, maxSpeakers: 5 },
+        undefined,
+        providerChoice,
+      )
       provider = res.provider
       providerRef.current = provider
       setEngine(res.name)
@@ -85,14 +92,15 @@ export default function RecordPage() {
     } finally {
       setBusy(false)
     }
-  }, [start, stop])
+  }, [start, stop, providerChoice])
 
   const onStop = useCallback(async () => {
     stop()
     await providerRef.current?.disconnect()
     setRecording(false)
     setLevel(0)
-    const text = transcriptText(segments)
+    const finalSegments = segmentsRef.current // authoritative latest, not a stale closure
+    const text = transcriptText(finalSegments)
     if (text) {
       setBusy(true)
       try {
@@ -110,18 +118,19 @@ export default function RecordPage() {
             title: 'Untitled session',
             language: 'en',
             durationSeconds,
-            segments,
+            segments: finalSegments,
             summary: sum,
           })
           setSavedId(id)
-        } catch {
-          /* not signed in / no DB — transcript still shown, just not saved */
+        } catch (err) {
+          // not signed in / no DB — transcript still shown, just not saved
+          logError('record/saveSession', err)
         }
       } finally {
         setBusy(false)
       }
     }
-  }, [stop, segments])
+  }, [stop])
 
   const onShare = useCallback(
     async (ttlHours: number, label: string) => {
@@ -142,9 +151,26 @@ export default function RecordPage() {
       {!reader && (
         <header className="glass sticky top-0 z-40 flex flex-wrap items-center gap-4 rounded-b-2xl px-6 py-3">
           {!recording ? (
-            <button onClick={onStart} disabled={busy} className="btn-signal">
-              {busy ? 'Starting…' : 'Start Recording'}
-            </button>
+            <span className="flex items-center gap-2">
+              <label className="sr-only" htmlFor="provider">
+                Transcription engine
+              </label>
+              <select
+                id="provider"
+                value={providerChoice}
+                onChange={(e) => setProviderChoice(e.target.value as ProviderChoice)}
+                disabled={busy}
+                className="rounded-full border border-black/15 bg-white/60 px-3 py-2 text-sm outline-none focus:border-emerald-700"
+                title="Live engine — OpenAI runs the accuracy correction pass on top"
+              >
+                <option value="auto">Engine: Auto (smart fallback)</option>
+                <option value="AssemblyAI">Engine: AssemblyAI</option>
+                <option value="Deepgram">Engine: Deepgram</option>
+              </select>
+              <button onClick={onStart} disabled={busy} className="btn-signal">
+                {busy ? 'Starting…' : 'Start Recording'}
+              </button>
+            </span>
           ) : (
             <span className="flex items-center gap-3">
               <button onClick={onStop} className="btn-stop">

@@ -1,7 +1,18 @@
 import type { TranscriptEvent } from '@/lib/transcription/types'
 
 let SEG_SEQ = 0
-export type Segment = { id: number; speaker: number | null; text: string; isFinal: boolean }
+// `sender` is set only in multi-party rooms: the Ably clientId that produced the
+// line, so one speaker's interim never clobbers another's. Single-mic leaves it
+// undefined. `name` is the speaker's Clerk display name, shown instead of
+// "Speaker N" when present.
+export type Segment = {
+  id: number
+  speaker: number | null
+  text: string
+  isFinal: boolean
+  sender?: string
+  name?: string
+}
 
 export function mergeSegments(prev: Segment[], e: TranscriptEvent): Segment[] {
   const last = prev[prev.length - 1]

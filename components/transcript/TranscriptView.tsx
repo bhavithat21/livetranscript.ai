@@ -51,7 +51,10 @@ export function TranscriptView({
     >
       <div className={readerMode ? 'mx-auto max-w-3xl px-6 py-10' : 'px-6 py-4'}>
       {segments.map((s) => {
-        const { color, name } = speakerColor(s.speaker ?? 0, theme)
+        const speaker = speakerColor(s.speaker ?? 0, theme)
+        const color = speaker.color
+        // Prefer the speaker's real display name (from Clerk) over "Speaker N".
+        const name = s.name?.trim() || speaker.name
 
         if (shadow) {
           const emphasized = s.speaker === emphasizeSpeaker

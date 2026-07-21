@@ -1,28 +1,53 @@
 import type { Segment } from '@/lib/transcript/store'
-import type { RoomMessage, RoomRole } from './useRoom'
+import type { RoomMessage } from './useRoom'
 
-// Reader -> Speaker 1 (index 0), Repeater -> Speaker 2 (index 1). Fixed by role,
-// so no diarization: each machine is one known person.
-export function roleToSpeaker(role: RoomRole): number {
-  return role === 'reader' ? 0 : 1
-}
+// A meeting seats up to five speakers (color slots 0–4). Extra participants can
+// still join and watch, but don't get a mic slot.
+export const MAX_SPEAKERS = 5
 
-let ROOM_SEQ = 0
-
-// Two independent streams interleave. Unlike the single-mic store, we replace the
-// trailing INTERIM of the SAME role — a reader interim must not clobber a repeater interim.
+// N independent streams interleave, one per participant. We replace the trailing
+// INTERIM belonging to the SAME sender — so speaker A's live words never clobber
+// speaker B's. A different sender (or a finalized same-sender line) appends.
+// Pure: the new id is derived from the list (max + 1), so there's no global
+// counter to bleed ids across rooms or survive Fast Refresh.
 export function mergeRoomSegments(prev: Segment[], m: RoomMessage): Segment[] {
-  const speaker = roleToSpeaker(m.role)
-  // find the last segment for this role
   for (let i = prev.length - 1; i >= 0; i--) {
-    if (prev[i].speaker === speaker) {
+    if (prev[i].sender === m.sender) {
       if (!prev[i].isFinal) {
         const next = prev.slice()
-        next[i] = { ...prev[i], text: m.text, isFinal: m.isFinal }
+        next[i] = { ...prev[i], speaker: m.speaker, text: m.text, isFinal: m.isFinal }
         return next
       }
-      break // last for this role is final -> append a new one
+      break // last line for this sender is final → append a new one
     }
   }
-  return [...prev, { id: ++ROOM_SEQ, speaker, text: m.text, isFinal: m.isFinal }]
+  const nextId = prev.reduce((max, s) => Math.max(max, s.id), 0) + 1
+  return [
+    ...prev,
+    { id: nextId, speaker: m.speaker, text: m.text, isFinal: m.isFinal, sender: m.sender, name: m.name },
+  ]
+}
+
+// Deterministically assign a speaker slot (0–4) from the sorted roster of client
+// ids, so every participant independently computes the SAME color for each person.
+// Returns -1 for anyone beyond the 5-seat cap (listener, no mic slot).
+export function speakerSlot(clientId: string, roster: string[]): number {
+  const idx = [...roster].sort().indexOf(clientId)
+  return idx >= 0 && idx < MAX_SPEAKERS ? idx : -1
+}
+
+// Minimum entropy for a meeting id: matches what newRoomId() produces (12
+// base64url chars from 9 random bytes ≈ 72 bits). Rejecting shorter / low-variety
+// ids (e.g. "testmeeting", "standup") stops URL enumeration of active rooms —
+// legitimate meetings are always reached via a shared random link.
+const ROOM_ID_MIN_LEN = 12
+
+export function isStrongRoomId(id: string): boolean {
+  if (id.length < ROOM_ID_MIN_LEN) return false
+  if (!/^[A-Za-z0-9_-]+$/.test(id)) return false
+  // A generated base64url id (9 random bytes) almost always contains an uppercase
+  // letter or a digit; all-lowercase dictionary phrases ("team-standup") don't.
+  // Combined with a distinct-char floor, this rejects guessable names.
+  if (!/[A-Z0-9]/.test(id)) return false
+  return new Set(id).size >= 8
 }

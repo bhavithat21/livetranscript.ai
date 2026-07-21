@@ -1,8 +1,10 @@
 'use server'
-import { auth } from '@clerk/nextjs/server'
-import { and, eq } from 'drizzle-orm'
-import { getDb, sessions, newShareToken } from '@/lib/db'
+import { getDb, sessions } from '@/lib/db'
+import { currentUserId } from '@/lib/auth'
 import { posthogServer } from '@/lib/analytics'
+
+// Share/revoke live in ../session-actions (shared with dashboard + detail);
+// the record screen imports them from there directly.
 
 type SaveInput = {
   title: string
@@ -13,7 +15,7 @@ type SaveInput = {
 }
 
 export async function saveSession(input: SaveInput): Promise<{ id: string }> {
-  const { userId } = await auth()
+  const userId = await currentUserId()
   if (!userId) throw new Error('Not authenticated')
   const db = getDb()
   if (!db) throw new Error('Database not configured')
@@ -36,35 +38,4 @@ export async function saveSession(input: SaveInput): Promise<{ id: string }> {
     properties: { sessionId: row.id },
   })
   return { id: row.id }
-}
-
-export async function createShare(sessionId: string, ttlHours: number): Promise<{ url: string }> {
-  const { userId } = await auth()
-  if (!userId) throw new Error('Not authenticated')
-  const db = getDb()
-  if (!db) throw new Error('Database not configured')
-
-  const token = newShareToken()
-  const expires = new Date(Date.now() + ttlHours * 3_600_000)
-  const updated = await db
-    .update(sessions)
-    .set({ shareToken: token, shareExpiresAt: expires, updatedAt: new Date() })
-    .where(and(eq(sessions.id, sessionId), eq(sessions.userId, userId)))
-    .returning({ id: sessions.id })
-  if (!updated.length) throw new Error('Session not found')
-
-  const base = process.env.NEXT_PUBLIC_APP_URL ?? ''
-  return { url: `${base}/s/${token}` }
-}
-
-export async function revokeShare(sessionId: string): Promise<void> {
-  const { userId } = await auth()
-  if (!userId) throw new Error('Not authenticated')
-  const db = getDb()
-  if (!db) throw new Error('Database not configured')
-
-  await db
-    .update(sessions)
-    .set({ shareToken: null, shareExpiresAt: null, updatedAt: new Date() })
-    .where(and(eq(sessions.id, sessionId), eq(sessions.userId, userId)))
 }

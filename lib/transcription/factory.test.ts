@@ -25,4 +25,21 @@ describe('connectWithFallback', () => {
       connectWithFallback(cfg, [{ name: 'only', make: () => stub(true) }]),
     ).rejects.toThrow()
   })
+  it('pins the preferred provider first', async () => {
+    const makers = [
+      { name: 'AssemblyAI', make: () => stub(false) },
+      { name: 'Deepgram', make: () => stub(false) },
+    ]
+    const res = await connectWithFallback(cfg, makers, 'Deepgram')
+    expect(res.name).toBe('Deepgram')
+  })
+  it('falls back past a failing preferred provider', async () => {
+    const makers = [
+      { name: 'AssemblyAI', make: () => stub(false) },
+      { name: 'Deepgram', make: () => stub(true) },
+    ]
+    // Deepgram preferred but fails → recovers to AssemblyAI.
+    const res = await connectWithFallback(cfg, makers, 'Deepgram')
+    expect(res.name).toBe('AssemblyAI')
+  })
 })

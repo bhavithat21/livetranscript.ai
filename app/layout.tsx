@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { Fraunces, IBM_Plex_Sans } from 'next/font/google'
-import { ClerkProvider, Show, SignInButton, SignUpButton, UserButton } from '@clerk/nextjs'
+import { ClerkProvider } from '@clerk/nextjs'
+import { AppNav } from '@/components/nav/AppNav'
 import { Providers } from './providers'
 import './globals.css'
 
@@ -24,22 +25,6 @@ export const metadata: Metadata = {
 
 const clerkConfigured = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY)
 
-function AuthControls() {
-  return (
-    <>
-      <Show when="signed-out">
-        <div className="flex items-center gap-3 text-sm">
-          <SignInButton />
-          <SignUpButton />
-        </div>
-      </Show>
-      <Show when="signed-in">
-        <UserButton />
-      </Show>
-    </>
-  )
-}
-
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -47,11 +32,7 @@ export default function RootLayout({
 }>) {
   const body = (
     <body className="min-h-full font-[family-name:var(--font-body)]">
-      {clerkConfigured && (
-        <div className="fixed right-4 top-4 z-50">
-          <AuthControls />
-        </div>
-      )}
+      <AppNav clerkConfigured={clerkConfigured} />
       <Providers>{children}</Providers>
     </body>
   )

@@ -3,15 +3,6 @@ import Link from 'next/link'
 export default function Home() {
   return (
     <main className="min-h-dvh bg-[#faf9f7] text-[#16151a]">
-      <header className="flex items-center justify-between px-8 py-6">
-        <span className="font-[family-name:var(--font-serif)] text-xl font-semibold">
-          LiveTranscript
-        </span>
-        <Link href="/record" className="text-sm underline underline-offset-4">
-          Open app
-        </Link>
-      </header>
-
       <section className="mx-auto max-w-4xl px-8 py-24">
         <p
           className="rise-in mb-4 text-sm font-medium uppercase tracking-widest text-emerald-700"
@@ -41,13 +32,13 @@ export default function Home() {
             Start transcribing
           </Link>
           <Link href="/room/new" className="btn-ghost px-7 py-3 font-medium">
-            Open a shadowing room
+            Open a meeting
           </Link>
           <span className="text-sm text-black/50">No install. Works in your browser.</span>
         </div>
         <p className="mt-4 text-sm text-black/50">
-          Shadowing rooms sync two people on different computers — one reads, the other repeats,
-          with the repeater&rsquo;s words shown large. Use any room name in the URL to share it.
+          Meetings sync up to five people across different computers — everyone speaks, every voice
+          gets its own color, and the latest words scroll into view. Share the meeting ID to invite.
         </p>
       </section>
     </main>
