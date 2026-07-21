@@ -105,6 +105,71 @@ Note: middleware filename follows Next version (`proxy.ts` on 16+, `middleware.t
 
 ---
 
+### Task 1c: PostHog analytics + event logging
+
+**Files:**
+- Create: `app/providers.tsx` (client), `lib/analytics.ts`
+- Modify: `app/layout.tsx` (wrap with PostHogProvider inside ClerkProvider)
+- Add deps: `posthog-js`, `posthog-node`
+
+**Interfaces:**
+- Consumes: scaffolded app (Task 1), Clerk (Task 1b).
+- Produces: `capture(event: string, props?: Record<string, unknown>)` client helper; server-side `posthogServer` for API-route event logging (session start/stop, provider fallback, correction hit-rate, errors).
+
+- [ ] **Step 1: Install**
+
+```bash
+pnpm add posthog-js posthog-node
+```
+
+- [ ] **Step 2: Client provider**
+
+`app/providers.tsx`:
+```tsx
+'use client'
+import posthog from 'posthog-js'
+import { PostHogProvider } from 'posthog-js/react'
+import { useEffect } from 'react'
+
+export function Providers({ children }: { children: React.ReactNode }) {
+  useEffect(() => {
+    const key = process.env.NEXT_PUBLIC_POSTHOG_KEY
+    if (key && !posthog.__loaded) {
+      posthog.init(key, {
+        api_host: process.env.NEXT_PUBLIC_POSTHOG_HOST ?? 'https://us.i.posthog.com',
+        capture_pageview: true,
+        autocapture: false, // ponytail: explicit events only; autocapture is noise for this app
+      })
+    }
+  }, [])
+  return <PostHogProvider client={posthog}>{children}</PostHogProvider>
+}
+```
+
+`lib/analytics.ts`:
+```ts
+import { PostHog } from 'posthog-node'
+
+let server: PostHog | null = null
+export function posthogServer(): PostHog | null {
+  const key = process.env.POSTHOG_KEY ?? process.env.NEXT_PUBLIC_POSTHOG_KEY
+  if (!key) return null
+  if (!server) server = new PostHog(key, { host: process.env.NEXT_PUBLIC_POSTHOG_HOST ?? 'https://us.i.posthog.com' })
+  return server
+}
+```
+
+- [ ] **Step 3: Wire in layout** — wrap `{children}` with `<Providers>` inside `<ClerkProvider>`, inside `<body>`.
+
+- [ ] **Step 4: Verify + commit**
+
+Run: `pnpm build` (expect success; PostHog no-ops without a key, so it never breaks local dev)
+```bash
+git add app/providers.tsx lib/analytics.ts app/layout.tsx package.json pnpm-lock.yaml && git commit -m "feat: PostHog analytics and server event logging"
+```
+
+---
+
 ### Task 2: Provider types + speaker color palette
 
 **Files:**
@@ -1112,13 +1177,46 @@ git add app/ && git commit -m "feat: landing page and typographic system"
 
 ---
 
+### Task 11b: Local verification gate (before any deploy)
+
+**Files:** none (verification). Do NOT deploy until every check here passes.
+
+- [ ] **Step 1: Clean build + tests + typecheck**
+
+```bash
+pnpm test && pnpm tsc --noEmit && pnpm build
+```
+Expected: all unit tests pass (palette, pcm, factory, store), no type errors, production build succeeds.
+
+- [ ] **Step 2: Run locally with real keys**
+
+Put real keys in `.env.local` (`ASSEMBLYAI_API_KEY`, `DEEPGRAM_API_KEY`, `OPENAI_API_KEY`, Clerk keys from init, `NEXT_PUBLIC_POSTHOG_KEY`). Then `pnpm dev`.
+
+- [ ] **Step 3: Chrome DevTools MCP verification loop** (agent drives a real browser at localhost:3000):
+  - Load `/` → sign-up flow renders (Clerk controls visible).
+  - `/record` → grant mic → speak a scripted line with jargon ("Let's discuss idempotency in the Kubernetes controller"). Confirm: interim words appear < ~500ms; final line commits; correction track swaps in cleaned text; per-speaker color renders.
+  - Toggle Reader Mode → only transcript visible, speaker colors applied.
+  - Stop → summary + action items render.
+  - Check Network tab: `/api/token` returns a token; the provider WS is a **direct** connection to the provider domain (not our server); no API key visible in any request the browser makes.
+  - Check Console: no thrown errors; PostHog events fire (session_started, session_stopped).
+  - Screenshot light theme at 1440 + 768 widths for the readability check.
+
+- [ ] **Step 4: Fix anything broken, re-run Steps 1-3 until green. Commit.**
+
+```bash
+git add -A && git commit -m "chore: local verification pass green"
+```
+
+---
+
 ### Task 12: Deploy to Vercel + wire domain
 
-**Files:** none (infra).
+**Files:** none (infra). Only after Task 11b is fully green.
 
-- [ ] **Step 1: Push to a Git host and import to Vercel** (or `vercel deploy`). Set env vars `ASSEMBLYAI_API_KEY`, `DEEPGRAM_API_KEY`, `OPENAI_API_KEY` in Vercel project settings (never in the repo).
+- [ ] **Step 1: Push to a Git host and import to Vercel** (or `vercel deploy`). Set env vars in Vercel project settings (never in the repo): `ASSEMBLYAI_API_KEY`, `DEEPGRAM_API_KEY`, `OPENAI_API_KEY`, `CLERK_SECRET_KEY`, `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `NEXT_PUBLIC_POSTHOG_KEY`, `POSTHOG_KEY`, `NEXT_PUBLIC_POSTHOG_HOST`.
 - [ ] **Step 2: Add `livetranscript.ai` as a custom domain in Vercel; at Cloudflare, set the DNS records Vercel specifies (CNAME/A). Same pattern as KreditWiz.**
-- [ ] **Step 3: Verify production `/record` works end to end over HTTPS (mic requires secure context).**
+- [ ] **Step 3: In Clerk dashboard, add the production domain (`livetranscript.ai`) to allowed origins / set production instance keys.**
+- [ ] **Step 4: Verify production `/record` works end to end over HTTPS (mic requires secure context); confirm PostHog receives prod events.**
 
 ---
 
