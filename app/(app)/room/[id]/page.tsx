@@ -9,6 +9,7 @@ import { useRoom } from '@/lib/room/useRoom'
 import { useDisplayName } from '@/lib/auth/useDisplayName'
 import { mergeRoomSegments, MAX_SPEAKERS, isStrongRoomId } from '@/lib/room/roomStore'
 import { newRoomId } from '@/lib/room/roomId'
+import { KEYTERMS } from '@/lib/transcription/keyterms'
 import { speakerColor } from '@/lib/speakers/palette'
 import { TranscriptView } from '@/components/transcript/TranscriptView'
 import { ChatView } from '@/components/transcript/ChatView'
@@ -16,7 +17,6 @@ import { Waveform } from '@/components/transcript/Waveform'
 import { HomeMenu } from '@/components/nav/HomeMenu'
 import type { TranscriptionProvider } from '@/lib/transcription/types'
 
-const KEYTERMS = ['Kubernetes', 'idempotency', 'quantization', 'Kafka', 'AWS Lambda', 'system design']
 
 export default function RoomPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)

@@ -10,9 +10,9 @@ import { HomeMenu } from '@/components/nav/HomeMenu'
 import { saveSession } from './actions'
 import { createShare } from '../session-actions'
 import { logError } from '@/lib/log'
+import { KEYTERMS } from '@/lib/transcription/keyterms'
 import type { TranscriptionProvider, TranscriptEvent } from '@/lib/transcription/types'
 
-const KEYTERMS = ['Kubernetes', 'idempotency', 'quantization', 'Kafka', 'AWS Lambda', 'system design']
 
 type Summary = { summary: string; keyPoints: string[]; actionItems: string[] }
 

@@ -27,7 +27,9 @@ export class DeepgramProvider implements TranscriptionProvider {
       sample_rate: String(config.sampleRate),
       channels: '1',
     })
-    config.keyterms.forEach((t) => params.append('keyterm', t))
+    // Cap at 100 (Deepgram's limit; also stays within its ~500-token budget) so a
+    // large list can't get silently truncated mid-way by the server.
+    config.keyterms.slice(0, 100).forEach((t) => params.append('keyterm', t))
 
     // A MINTED JWT uses the "bearer" subprotocol keyword (raw API keys would use "token").
     await new Promise<void>((resolve, reject) => {
