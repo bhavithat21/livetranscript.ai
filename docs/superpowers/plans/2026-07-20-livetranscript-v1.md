@@ -10,6 +10,9 @@
 
 ## Global Constraints
 
+- **MANDATORY — apply all corrections in `docs/superpowers/api-verification-2026-07-20.md` before/while coding.** These were verified against live vendor docs and supersede any conflicting code block below. Highest-risk: (1) worklet must buffer ~50ms (~800 frames @16k) before posting, not every 128-frame quantum; (2) AssemblyAI Turn has NO top-level numeric `speaker`/`audio_start`/`audio_end` — use `speaker_label` (string) + `words[].speaker`/`.start`/`.end` (ms), and send `speech_model=universal-3-5-pro` + `keyterms_prompt=encodeURIComponent(JSON.stringify(terms))`; (3) Deepgram minted JWT uses subprotocol `["bearer", token]` not `["token", …]`, and read `words[].end` (no per-word `duration`); (4) OpenAI diarize pass takes NO `prompt` — use `response_format:'diarized_json'` + `chunking_strategy:'auto'` (use `gpt-4o-transcribe` when prompt-biasing is needed); (5) derive `sampleRate` from `ctx.sampleRate`, never hardcode 16000; wrap forced-rate `AudioContext` in try/catch for `NotSupportedError`; (6) Clerk matcher uses `'/__clerk/(.*)'`.
+- **Next.js 16 has breaking changes (see repo `AGENTS.md`).** Before writing any Next.js code, read the relevant guide under `node_modules/next/dist/docs/`. Do not assume App Router APIs from memory.
+- **All DB access is server-only** — the browser NEVER holds a DB connection string or queries Postgres directly (this is exactly the old site's breach class). Every read/write goes through a Clerk-gated Next.js route/server action.
 - No provider secret / API key ever ships to the browser — server mints ephemeral tokens only.
 - Live audio path must stream browser→provider directly (no server relay).
 - Diarization capped at **5 speakers**; fixed ordered color palette (ink blue, rust orange, teal green, violet, amber/ochre), each >= WCAG AA 4.5:1 on light and dark, color-blind-safe, always paired with speaker name. 6th+ speaker → neutral labeled style.
@@ -166,6 +169,108 @@ export function posthogServer(): PostHog | null {
 Run: `pnpm build` (expect success; PostHog no-ops without a key, so it never breaks local dev)
 ```bash
 git add app/providers.tsx lib/analytics.ts app/layout.tsx package.json pnpm-lock.yaml && git commit -m "feat: PostHog analytics and server event logging"
+```
+
+---
+
+### Task 1d: Database (Neon Postgres + Drizzle) — server-only
+
+**Files:**
+- Create: `lib/db/schema.ts`, `lib/db/index.ts`, `drizzle.config.ts`, `lib/db/schema.test.ts`
+- Add deps: `drizzle-orm`, `@neondatabase/serverless`; dev `drizzle-kit`
+- Env: `DATABASE_URL` (Neon pooled connection string)
+
+**Interfaces:**
+- Produces:
+  - `sessions` table: `id (uuid pk)`, `userId (text, Clerk id)`, `title (text)`, `language (text)`, `durationSeconds (int)`, `segments (jsonb)`, `summary (jsonb)`, `shareToken (text unique, nullable)`, `shareExpiresAt (timestamp, nullable)`, `createdAt`, `updatedAt`.
+  - `db` — Drizzle client, imported ONLY by server routes/actions.
+  - `function newShareToken(): string` — 22-char url-safe random token.
+- Consumes: scaffolded app.
+
+Segments stored as JSONB on the session (not a separate table) — normalizing is a v2 concern (verification/YAGNI). No raw audio stored in v1.
+
+- [ ] **Step 1: Install**
+
+```bash
+pnpm add drizzle-orm @neondatabase/serverless && pnpm add -D drizzle-kit
+```
+
+- [ ] **Step 2: Write the failing test** (`lib/db/schema.test.ts`):
+```ts
+import { describe, it, expect } from 'vitest'
+import { newShareToken } from './schema'
+
+describe('newShareToken', () => {
+  it('is url-safe and 22 chars', () => {
+    const t = newShareToken()
+    expect(t).toMatch(/^[A-Za-z0-9_-]{22}$/)
+  })
+  it('is unique across calls', () => {
+    expect(newShareToken()).not.toBe(newShareToken())
+  })
+})
+```
+Run `pnpm test schema` → FAIL (no `./schema`).
+
+- [ ] **Step 3: Implement schema**
+
+`lib/db/schema.ts`:
+```ts
+import { pgTable, uuid, text, integer, jsonb, timestamp } from 'drizzle-orm/pg-core'
+
+export const sessions = pgTable('sessions', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: text('user_id').notNull(),
+  title: text('title').notNull().default('Untitled session'),
+  language: text('language').notNull().default('en'),
+  durationSeconds: integer('duration_seconds').notNull().default(0),
+  segments: jsonb('segments').notNull().default([]),
+  summary: jsonb('summary'),
+  shareToken: text('share_token').unique(),
+  shareExpiresAt: timestamp('share_expires_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export type SessionRow = typeof sessions.$inferSelect
+
+// url-safe token from 16 random bytes -> 22 base64url chars
+export function newShareToken(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16))
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+```
+
+`lib/db/index.ts`:
+```ts
+import { drizzle } from 'drizzle-orm/neon-http'
+import { neon } from '@neondatabase/serverless'
+import * as schema from './schema'
+
+// server-only: importing this in a client component must fail the build (no DATABASE_URL in browser)
+const sql = neon(process.env.DATABASE_URL!)
+export const db = drizzle(sql, { schema })
+export * from './schema'
+```
+
+`drizzle.config.ts`:
+```ts
+import type { Config } from 'drizzle-kit'
+export default {
+  schema: './lib/db/schema.ts',
+  out: './drizzle',
+  dialect: 'postgresql',
+  dbCredentials: { url: process.env.DATABASE_URL! },
+} satisfies Config
+```
+
+- [ ] **Step 4: Run test** `pnpm test schema` → PASS.
+
+- [ ] **Step 5: Push schema to Neon** (once `DATABASE_URL` is set): `pnpm drizzle-kit push`. Expected: `sessions` table created. (Skippable until the DB URL exists; the test passes without a live DB.)
+
+- [ ] **Step 6: Commit**
+```bash
+git add lib/db drizzle.config.ts package.json pnpm-lock.yaml && git commit -m "feat: Neon + Drizzle sessions schema with share tokens"
 ```
 
 ---
@@ -339,21 +444,34 @@ git add lib/audio/ && git commit -m "feat: Float32 to Int16 PCM conversion"
 
 **Interfaces:**
 - Consumes: `floatTo16BitPCM` (Task 3).
-- Produces: `function useMicStream(): { start: (onPcm: (pcm: ArrayBuffer) => void, onLevel: (rms: number) => void) => Promise<void>; stop: () => void; error: string | null }`
+- Produces: `function useMicStream(): { start: (onPcm: (pcm: ArrayBuffer) => void, onLevel: (rms: number) => void) => Promise<number>; stop: () => void; error: string | null }` — `start` resolves with the **actual** `ctx.sampleRate` (the provider must be told the real rate, not a hardcoded 16000).
 
 - [ ] **Step 1: Write the worklet**
 
-`public/worklet-processor.js` (plain JS, loaded by URL — not bundled):
+`public/worklet-processor.js` (plain JS, loaded by URL — not bundled). Buffers ~50ms before posting (AssemblyAI requires 50–1000ms payloads; posting every ~8ms quantum breaks it — see verification §5):
 ```js
 class PCMProcessor extends AudioWorkletProcessor {
+  constructor() {
+    super()
+    // ~50ms at 16kHz = 800 samples. sampleRate is a global in AudioWorkletGlobalScope.
+    this._target = Math.round(sampleRate * 0.05)
+    this._buf = new Float32Array(this._target)
+    this._len = 0
+  }
   process(inputs) {
     const ch = inputs[0][0]
     if (!ch) return true
-    let sumSq = 0
-    for (let i = 0; i < ch.length; i++) sumSq += ch[i] * ch[i]
-    const rms = Math.sqrt(sumSq / ch.length)
-    // transfer a copy of the Float32 frame + level to the main thread
-    this.port.postMessage({ samples: ch.slice(0), rms })
+    for (let i = 0; i < ch.length; i++) {
+      this._buf[this._len++] = ch[i]
+      if (this._len === this._target) {
+        let sumSq = 0
+        for (let j = 0; j < this._len; j++) sumSq += this._buf[j] * this._buf[j]
+        const out = this._buf.slice(0, this._len)
+        this.port.postMessage({ samples: out, rms: Math.sqrt(sumSq / this._len) }, [out.buffer])
+        this._buf = new Float32Array(this._target)
+        this._len = 0
+      }
+    }
     return true
   }
 }
@@ -375,14 +493,21 @@ export function useMicStream() {
   const streamRef = useRef<MediaStream | null>(null)
 
   const start = useCallback(
-    async (onPcm: (pcm: ArrayBuffer) => void, onLevel: (rms: number) => void) => {
+    async (onPcm: (pcm: ArrayBuffer) => void, onLevel: (rms: number) => void): Promise<number> => {
       setError(null)
       try {
+        // gUM sampleRate constraint is advisory + can perturb echo-cancel DSP; the AudioContext does the resample.
         const stream = await navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true, sampleRate: TARGET_SAMPLE_RATE },
+          audio: { echoCancellation: true, noiseSuppression: true },
         })
         streamRef.current = stream
-        const ctx = new AudioContext({ sampleRate: TARGET_SAMPLE_RATE })
+        // Forcing 16k can throw NotSupportedError on some engines — fall back to default rate.
+        let ctx: AudioContext
+        try {
+          ctx = new AudioContext({ sampleRate: TARGET_SAMPLE_RATE })
+        } catch {
+          ctx = new AudioContext()
+        }
         ctxRef.current = ctx
         await ctx.audioWorklet.addModule('/worklet-processor.js')
         const source = ctx.createMediaStreamSource(stream)
@@ -394,6 +519,7 @@ export function useMicStream() {
         }
         source.connect(node)
         node.connect(ctx.destination)
+        return ctx.sampleRate // actual rate — pass this to the provider, not a hardcoded 16000
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Microphone access failed')
         throw e
@@ -535,12 +661,17 @@ export class AssemblyAIProvider implements TranscriptionProvider {
     if (!res.ok) throw new Error('AssemblyAI token mint failed')
     const { token } = await res.json()
 
+    // NOTE (verification §1): speech_model explicit; keyterms_prompt is JSON-stringified THEN url-encoded.
+    // URLSearchParams handles the encoding, so pass the raw JSON string as a value.
     const params = new URLSearchParams({
+      speech_model: 'universal-3-5-pro',
       sample_rate: String(config.sampleRate),
       speaker_labels: 'true',
       token,
     })
-    if (config.keyterms.length) params.set('keyterms_prompt', JSON.stringify(config.keyterms))
+    if (config.keyterms.length) {
+      params.set('keyterms_prompt', JSON.stringify(config.keyterms.slice(0, 100)))
+    }
 
     await new Promise<void>((resolve, reject) => {
       const ws = new WebSocket(`wss://streaming.assemblyai.com/v3/ws?${params}`)
@@ -551,16 +682,28 @@ export class AssemblyAIProvider implements TranscriptionProvider {
       ws.onmessage = (msg) => {
         const data = JSON.parse(msg.data)
         if (data.type !== 'Turn') return
+        // v3 schema (verification §1): turn-level speaker_label is a STRING ('A'/'B'/'UNKNOWN');
+        // timing is per-word in ms. Map speaker label -> stable 0-based index.
+        const words = Array.isArray(data.words) ? data.words : []
+        const label: string | undefined = data.speaker_label ?? words[0]?.speaker
         const evt: TranscriptEvent = {
           text: data.transcript ?? '',
           isFinal: data.end_of_turn === true,
-          speaker: typeof data.speaker === 'number' ? data.speaker : null,
-          startMs: data.audio_start ?? 0,
-          endMs: data.audio_end ?? 0,
+          speaker: label != null ? this.speakerIndex(label) : null,
+          startMs: words[0]?.start ?? 0,
+          endMs: words[words.length - 1]?.end ?? 0,
         }
         ;(evt.isFinal ? this.finalCb : this.partialCb)(evt)
       }
     })
+  }
+
+  // AssemblyAI diarization returns string labels ('A','B',...); map to stable 0-based indices for the palette.
+  private labels = new Map<string, number>()
+  private speakerIndex(label: string): number | null {
+    if (label === 'UNKNOWN') return null
+    if (!this.labels.has(label)) this.labels.set(label, this.labels.size)
+    return this.labels.get(label)!
   }
 
   sendAudio(chunk: ArrayBuffer): void {
@@ -628,8 +771,9 @@ export class DeepgramProvider implements TranscriptionProvider {
     })
     config.keyterms.forEach((t) => params.append('keyterm', t))
 
+    // verification §2: a MINTED JWT uses the "bearer" subprotocol keyword (not "token", which is for raw API keys).
     await new Promise<void>((resolve, reject) => {
-      const ws = new WebSocket(`wss://api.deepgram.com/v1/listen?${params}`, ['token', token])
+      const ws = new WebSocket(`wss://api.deepgram.com/v1/listen?${params}`, ['bearer', token])
       this.ws = ws
       const timeout = setTimeout(() => { ws.close(); reject(new Error('Deepgram WS timeout')) }, 10_000)
       ws.onopen = () => { clearTimeout(timeout); resolve() }
@@ -638,13 +782,14 @@ export class DeepgramProvider implements TranscriptionProvider {
         const data = JSON.parse(msg.data)
         const alt = data.channel?.alternatives?.[0]
         if (!alt) return
-        const speaker = alt.words?.[0]?.speaker
+        const words = alt.words ?? []
+        const speaker = words[0]?.speaker // Deepgram speaker is already a 0-based int
         const evt: TranscriptEvent = {
           text: alt.transcript ?? '',
           isFinal: data.is_final === true,
           speaker: typeof speaker === 'number' ? speaker : null,
-          startMs: Math.round((data.start ?? 0) * 1000),
-          endMs: Math.round(((data.start ?? 0) + (data.duration ?? 0)) * 1000),
+          startMs: Math.round((words[0]?.start ?? data.start ?? 0) * 1000),
+          endMs: Math.round((words[words.length - 1]?.end ?? (data.start ?? 0) + (data.duration ?? 0)) * 1000),
         }
         if (!evt.text) return
         ;(evt.isFinal ? this.finalCb : this.partialCb)(evt)
@@ -1071,9 +1216,13 @@ export default function RecordPage() {
   const onStart = useCallback(async () => {
     setSegments([]); setSummary(null)
     try {
-      const { provider, name } = await connectWithFallback({ keyterms: KEYTERMS, sampleRate: 16000, maxSpeakers: 5 })
+      // Open mic first so we know the REAL sample rate, then tell the provider that rate.
+      let provider: TranscriptionProvider | null = null
+      const actualRate = await start((pcm) => provider?.sendAudio(pcm), setLevel)
+      const res = await connectWithFallback({ keyterms: KEYTERMS, sampleRate: actualRate, maxSpeakers: 5 })
+      provider = res.provider
       providerRef.current = provider
-      setEngine(name)
+      setEngine(res.name)
       provider.onPartial((e) => setSegments((s) => mergeSegments(s, e)))
       provider.onFinal((e) => {
         setSegments((s) => {
@@ -1084,12 +1233,12 @@ export default function RecordPage() {
           return merged
         })
       })
-      await start((pcm) => provider.sendAudio(pcm), setLevel)
       setRecording(true)
     } catch (e) {
+      stop()
       alert(e instanceof Error ? e.message : 'Failed to start')
     }
-  }, [start])
+  }, [start, stop])
 
   const onStop = useCallback(async () => {
     stop(); await providerRef.current?.disconnect(); setRecording(false); setLevel(0)
@@ -1149,6 +1298,162 @@ git add lib/transcript components/transcript "app/(app)" && git commit -m "feat:
 
 ---
 
+### Task 10b: Save session + create/revoke share link (server actions)
+
+**Files:**
+- Create: `app/(app)/record/actions.ts` (server actions), `lib/share.ts`, `lib/share.test.ts`
+
+**Interfaces:**
+- Consumes: `db`, `sessions`, `newShareToken` (Task 1d); Clerk `auth()` (Task 1b).
+- Produces:
+  - `'use server'` `saveSession(input: { title: string; language: string; durationSeconds: number; segments: Segment[]; summary: unknown }): Promise<{ id: string }>` — inserts scoped to `auth().userId`; throws if unauthenticated.
+  - `createShare(sessionId: string, ttlHours: 1 | 24 | 168): Promise<{ url: string }>` — sets `shareToken` + `shareExpiresAt = now + ttl`, only if the row belongs to the caller.
+  - `revokeShare(sessionId: string): Promise<void>`.
+  - `function isShareValid(row: { shareToken: string | null; shareExpiresAt: Date | null }, now: number): boolean` (pure, tested).
+
+- [ ] **Step 1: Write the failing test** (`lib/share.test.ts`):
+```ts
+import { describe, it, expect } from 'vitest'
+import { isShareValid } from './share'
+
+const now = 1_000_000
+describe('isShareValid', () => {
+  it('false when no token', () => {
+    expect(isShareValid({ shareToken: null, shareExpiresAt: new Date(now + 1000) }, now)).toBe(false)
+  })
+  it('false when expired', () => {
+    expect(isShareValid({ shareToken: 'abc', shareExpiresAt: new Date(now - 1) }, now)).toBe(false)
+  })
+  it('true when token present and not expired', () => {
+    expect(isShareValid({ shareToken: 'abc', shareExpiresAt: new Date(now + 1) }, now)).toBe(true)
+  })
+})
+```
+Run `pnpm test share` → FAIL.
+
+- [ ] **Step 2: Implement** `lib/share.ts`:
+```ts
+export function isShareValid(
+  row: { shareToken: string | null; shareExpiresAt: Date | null },
+  now: number,
+): boolean {
+  if (!row.shareToken || !row.shareExpiresAt) return false
+  return row.shareExpiresAt.getTime() > now
+}
+
+export const SHARE_TTL_HOURS = { '1h': 1, '24h': 24, '7d': 168 } as const
+```
+Run `pnpm test share` → PASS.
+
+- [ ] **Step 3: Implement server actions** `app/(app)/record/actions.ts`:
+```ts
+'use server'
+import { auth } from '@clerk/nextjs/server'
+import { and, eq } from 'drizzle-orm'
+import { db, sessions, newShareToken } from '@/lib/db'
+import { posthogServer } from '@/lib/analytics'
+
+export async function saveSession(input: {
+  title: string; language: string; durationSeconds: number; segments: unknown; summary: unknown
+}): Promise<{ id: string }> {
+  const { userId } = await auth()
+  if (!userId) throw new Error('Not authenticated')
+  const [row] = await db.insert(sessions).values({
+    userId, title: input.title || 'Untitled session', language: input.language || 'en',
+    durationSeconds: input.durationSeconds, segments: input.segments as object, summary: input.summary as object,
+  }).returning({ id: sessions.id })
+  posthogServer()?.capture({ distinctId: userId, event: 'session_saved', properties: { sessionId: row.id } })
+  return { id: row.id }
+}
+
+export async function createShare(sessionId: string, ttlHours: number): Promise<{ url: string }> {
+  const { userId } = await auth()
+  if (!userId) throw new Error('Not authenticated')
+  const token = newShareToken()
+  const expires = new Date(Date.now() + ttlHours * 3600_000)
+  const updated = await db.update(sessions)
+    .set({ shareToken: token, shareExpiresAt: expires, updatedAt: new Date() })
+    .where(and(eq(sessions.id, sessionId), eq(sessions.userId, userId)))
+    .returning({ id: sessions.id })
+  if (!updated.length) throw new Error('Session not found')
+  const base = process.env.NEXT_PUBLIC_APP_URL ?? ''
+  return { url: `${base}/s/${token}` }
+}
+
+export async function revokeShare(sessionId: string): Promise<void> {
+  const { userId } = await auth()
+  if (!userId) throw new Error('Not authenticated')
+  await db.update(sessions).set({ shareToken: null, shareExpiresAt: null, updatedAt: new Date() })
+    .where(and(eq(sessions.id, sessionId), eq(sessions.userId, userId)))
+}
+```
+
+- [ ] **Step 4: Wire into record page** — after summary returns, call `saveSession(...)`; add a "Share" control offering 1h / 24h / 7d that calls `createShare` and copies the returned URL to the clipboard (`navigator.clipboard.writeText`). Show a "copied, expires in Nh" confirmation.
+
+- [ ] **Step 5: Commit**
+```bash
+git add lib/share.ts lib/share.test.ts "app/(app)/record/actions.ts" "app/(app)/record/page.tsx" && git commit -m "feat: save session + expiring share links"
+```
+
+---
+
+### Task 10c: Public share view `/s/[token]` (no login, read-only, expiring)
+
+**Files:**
+- Create: `app/s/[token]/page.tsx`
+- Modify: `proxy.ts` (Clerk middleware) — mark `/s/(.*)` public so unauthenticated visitors can open shares.
+
+**Interfaces:**
+- Consumes: `db`, `sessions`, `isShareValid` (Tasks 1d, 10b); `TranscriptView` (Task 10).
+- Produces: a server-rendered read-only transcript page for a valid, unexpired token; a clean "link expired or not found" page otherwise. Never requires auth. Never exposes `userId` or other rows.
+
+- [ ] **Step 1: Make the route public in Clerk middleware** — in `proxy.ts`, use `createRouteMatcher(['/s/(.*)'])` and skip protection for those paths (per current Clerk docs — read `node_modules/next/dist/docs/` + Clerk quickstart first).
+
+- [ ] **Step 2: Implement the page** `app/s/[token]/page.tsx`:
+```tsx
+import { eq } from 'drizzle-orm'
+import { db, sessions } from '@/lib/db'
+import { isShareValid } from '@/lib/share'
+import { TranscriptView } from '@/components/transcript/TranscriptView'
+import type { Segment } from '@/lib/transcript/store'
+
+export default async function SharePage({ params }: { params: Promise<{ token: string }> }) {
+  const { token } = await params
+  const [row] = await db.select().from(sessions).where(eq(sessions.shareToken, token)).limit(1)
+
+  if (!row || !isShareValid(row, Date.now())) {
+    return (
+      <main className="mx-auto max-w-2xl px-6 py-24 text-center">
+        <h1 className="font-serif text-3xl">This link has expired</h1>
+        <p className="mt-3 text-black/60">Ask the owner to share a new link.</p>
+      </main>
+    )
+  }
+
+  const segments = (row.segments as Segment[]) ?? []
+  return (
+    <main className="min-h-dvh bg-[#faf9f7] text-[#16151a]">
+      <header className="border-b border-black/10 px-6 py-4">
+        <h1 className="font-serif text-2xl">{row.title}</h1>
+        <p className="text-sm text-black/50">Shared transcript · read-only</p>
+      </header>
+      <TranscriptView segments={segments} theme="light" readerMode />
+    </main>
+  )
+}
+```
+
+- [ ] **Step 3: Verify guards**
+
+With a real DB + dev server: an unknown token and an expired token both render the "expired" page (HTTP 200, no data leak); a valid token renders the transcript without login. Confirm `/s/<token>` is reachable while signed out.
+
+- [ ] **Step 4: Commit**
+```bash
+git add "app/s" proxy.ts && git commit -m "feat: public expiring share view"
+```
+
+---
+
 ### Task 11: Home route + polish pass
 
 **Files:**
@@ -1196,7 +1501,8 @@ Put real keys in `.env.local` (`ASSEMBLYAI_API_KEY`, `DEEPGRAM_API_KEY`, `OPENAI
   - Load `/` → sign-up flow renders (Clerk controls visible).
   - `/record` → grant mic → speak a scripted line with jargon ("Let's discuss idempotency in the Kubernetes controller"). Confirm: interim words appear < ~500ms; final line commits; correction track swaps in cleaned text; per-speaker color renders.
   - Toggle Reader Mode → only transcript visible, speaker colors applied.
-  - Stop → summary + action items render.
+  - Stop → summary + action items render → session saved (appears via DB).
+  - Share → pick 24h → link copied; open `/s/<token>` in a signed-out/incognito context → transcript renders read-only. Manually expire (or use a 1h link + check logic) → "link expired" page, no data leak.
   - Check Network tab: `/api/token` returns a token; the provider WS is a **direct** connection to the provider domain (not our server); no API key visible in any request the browser makes.
   - Check Console: no thrown errors; PostHog events fire (session_started, session_stopped).
   - Screenshot light theme at 1440 + 768 widths for the readability check.
@@ -1213,7 +1519,7 @@ git add -A && git commit -m "chore: local verification pass green"
 
 **Files:** none (infra). Only after Task 11b is fully green.
 
-- [ ] **Step 1: Push to a Git host and import to Vercel** (or `vercel deploy`). Set env vars in Vercel project settings (never in the repo): `ASSEMBLYAI_API_KEY`, `DEEPGRAM_API_KEY`, `OPENAI_API_KEY`, `CLERK_SECRET_KEY`, `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `NEXT_PUBLIC_POSTHOG_KEY`, `POSTHOG_KEY`, `NEXT_PUBLIC_POSTHOG_HOST`.
+- [ ] **Step 1: Push to a Git host and import to Vercel** (or `vercel deploy`). Set env vars in Vercel project settings (never in the repo): `ASSEMBLYAI_API_KEY`, `DEEPGRAM_API_KEY`, `OPENAI_API_KEY`, `CLERK_SECRET_KEY`, `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `NEXT_PUBLIC_POSTHOG_KEY`, `POSTHOG_KEY`, `NEXT_PUBLIC_POSTHOG_HOST`, `DATABASE_URL` (Neon pooled), `NEXT_PUBLIC_APP_URL=https://livetranscript.ai`. Add the Neon integration (auto-injects `DATABASE_URL`) and run `pnpm drizzle-kit push` against the prod DB.
 - [ ] **Step 2: Add `livetranscript.ai` as a custom domain in Vercel; at Cloudflare, set the DNS records Vercel specifies (CNAME/A). Same pattern as KreditWiz.**
 - [ ] **Step 3: In Clerk dashboard, add the production domain (`livetranscript.ai`) to allowed origins / set production instance keys.**
 - [ ] **Step 4: Verify production `/record` works end to end over HTTPS (mic requires secure context); confirm PostHog receives prod events.**
@@ -1230,6 +1536,9 @@ git add -A && git commit -m "chore: local verification pass green"
 - Keyterm prompting on by default → Tasks 6, 7, 10
 - Two-track (live + correction) → Task 9b endpoint + Task 10 wiring (`applyCorrection`, `correctLine`)
 - Clerk auth → Task 1b
+- PostHog analytics/logging → Task 1c (client) + server events in Tasks 10b actions
+- Persistence (Neon + Drizzle, server-only) → Task 1d
+- Save history + expiring share links (1h/24h/7d, no-login public view) → Tasks 10b, 10c
 - AI summary + action items → Tasks 9, 10
 - Otter-style workspace + Reader Mode → Task 10
 - Readability-first typography (serif+sans, not Inter) → Task 11
