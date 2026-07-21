@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { listSessions, type SessionSummaryRow } from '../session-actions'
-import { SessionCard } from '@/components/session/SessionCard'
+import { LibraryView } from '@/components/session/LibraryView'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,18 +13,21 @@ export default async function DashboardPage() {
     sessions = []
   }
 
+  // At-a-glance stats, derived from the rows already in memory (no extra query).
+  const totalSeconds = sessions.reduce((n, s) => n + (s.durationSeconds ?? 0), 0)
+  const hours = (totalSeconds / 3600).toFixed(totalSeconds >= 36000 ? 0 : 1)
+  const sharedCount = sessions.filter((s) => s.shareToken).length
+  const now = Date.now()
+
   return (
     <main className="mx-auto max-w-6xl px-6 pb-24 pt-10">
+      {/* Editorial masthead + stat band. */}
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="font-[family-name:var(--font-serif)] text-4xl tracking-[-0.01em]">
+          <p className="text-sm font-medium uppercase tracking-widest text-[color:var(--signal)]">Library</p>
+          <h1 className="mt-1 font-[family-name:var(--font-serif)] text-5xl tracking-[-0.02em]">
             Your transcripts
           </h1>
-          <p className="mt-1 text-black/50">
-            {sessions.length
-              ? `${sessions.length} saved session${sessions.length === 1 ? '' : 's'}`
-              : 'Everything you record shows up here.'}
-          </p>
         </div>
         <Link href="/record" className="btn-signal">
           New transcript
@@ -34,13 +37,25 @@ export default async function DashboardPage() {
       {sessions.length === 0 ? (
         <EmptyState />
       ) : (
-        <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {sessions.map((s) => (
-            <SessionCard key={s.id} session={s} />
-          ))}
-        </div>
+        <>
+          <dl className="mt-6 flex flex-wrap gap-8 border-y border-black/10 py-4">
+            <Stat value={String(sessions.length)} label="sessions" />
+            <Stat value={hours} label="hours transcribed" />
+            <Stat value={String(sharedCount)} label="shared" />
+          </dl>
+          <LibraryView sessions={sessions} now={now} />
+        </>
       )}
     </main>
+  )
+}
+
+function Stat({ value, label }: { value: string; label: string }) {
+  return (
+    <div>
+      <div className="font-[family-name:var(--font-serif)] text-3xl tabular-nums leading-none">{value}</div>
+      <dt className="mt-1 text-xs uppercase tracking-wide text-black/40">{label}</dt>
+    </div>
   )
 }
 
