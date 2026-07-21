@@ -5,6 +5,7 @@ import { connectWithFallback } from '@/lib/transcription'
 import { mergeSegments, applyCorrection, transcriptText, type Segment } from '@/lib/transcript/store'
 import { TranscriptView } from '@/components/transcript/TranscriptView'
 import { AudioMeter } from '@/components/transcript/AudioMeter'
+import { saveSession, createShare } from './actions'
 import type { TranscriptionProvider, TranscriptEvent } from '@/lib/transcription/types'
 
 const KEYTERMS = ['Kubernetes', 'idempotency', 'quantization', 'Kafka', 'AWS Lambda', 'system design']
@@ -41,11 +42,17 @@ export default function RecordPage() {
   const [reader, setReader] = useState(false)
   const [summary, setSummary] = useState<Summary | null>(null)
   const [busy, setBusy] = useState(false)
+  const [savedId, setSavedId] = useState<string | null>(null)
+  const [shareMsg, setShareMsg] = useState<string | null>(null)
   const providerRef = useRef<TranscriptionProvider | null>(null)
+  const startedAtRef = useRef<number>(0)
 
   const onStart = useCallback(async () => {
     setSegments([])
     setSummary(null)
+    setSavedId(null)
+    setShareMsg(null)
+    startedAtRef.current = Date.now()
     setBusy(true)
     try {
       // Open mic first so we know the REAL sample rate, then tell the provider that rate.
@@ -92,12 +99,41 @@ export default function RecordPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ transcript: text }),
         })
-        if (r.ok) setSummary(await r.json())
+        const sum: Summary | null = r.ok ? await r.json() : null
+        if (sum) setSummary(sum)
+        // Persist the session (best-effort — needs auth + DB configured).
+        try {
+          const durationSeconds = Math.round((Date.now() - startedAtRef.current) / 1000)
+          const { id } = await saveSession({
+            title: 'Untitled session',
+            language: 'en',
+            durationSeconds,
+            segments,
+            summary: sum,
+          })
+          setSavedId(id)
+        } catch {
+          /* not signed in / no DB — transcript still shown, just not saved */
+        }
       } finally {
         setBusy(false)
       }
     }
   }, [stop, segments])
+
+  const onShare = useCallback(
+    async (ttlHours: number, label: string) => {
+      if (!savedId) return
+      try {
+        const { url } = await createShare(savedId, ttlHours)
+        await navigator.clipboard.writeText(url)
+        setShareMsg(`Link copied — expires in ${label}`)
+      } catch {
+        setShareMsg('Sharing needs sign-in + database')
+      }
+    },
+    [savedId],
+  )
 
   return (
     <main className="min-h-dvh bg-[#faf9f7] text-[#16151a]">
@@ -139,6 +175,30 @@ export default function RecordPage() {
         </button>
       )}
       <TranscriptView segments={segments} theme="light" readerMode={reader} />
+      {savedId && !reader && (
+        <section className="mx-6 mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-black/10 bg-white p-4">
+          <span className="text-sm font-medium">Share transcript:</span>
+          <button
+            onClick={() => onShare(1, '1 hour')}
+            className="rounded-full border border-black/15 px-3 py-1 text-sm hover:bg-black/5"
+          >
+            1 hour
+          </button>
+          <button
+            onClick={() => onShare(24, '24 hours')}
+            className="rounded-full border border-black/15 px-3 py-1 text-sm hover:bg-black/5"
+          >
+            24 hours
+          </button>
+          <button
+            onClick={() => onShare(168, '7 days')}
+            className="rounded-full border border-black/15 px-3 py-1 text-sm hover:bg-black/5"
+          >
+            7 days
+          </button>
+          {shareMsg && <span className="text-sm text-emerald-700">{shareMsg}</span>}
+        </section>
+      )}
       {summary && !reader && (
         <section className="mx-6 mb-10 rounded-lg border border-black/10 bg-white p-5">
           <h2 className="mb-2 font-serif text-xl">Summary</h2>
