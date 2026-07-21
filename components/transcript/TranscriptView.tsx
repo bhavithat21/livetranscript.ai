@@ -19,10 +19,16 @@ export function TranscriptView({
   emphasizeSpeaker?: number | null
   autoScroll?: boolean
 }) {
-  const bottomRef = useRef<HTMLDivElement>(null)
-
+  const scrollRef = useRef<HTMLDivElement>(null)
+  // Only follow the live edge when the reader is already near the bottom, so
+  // scrolling up to re-read isn't yanked back down. Instant (not smooth) so the
+  // ~10 updates/sec during speech don't stack competing animations = the jank.
   useEffect(() => {
-    if (autoScroll) bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+    if (!autoScroll) return
+    const el = scrollRef.current
+    if (!el) return
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120
+    if (nearBottom) el.scrollTop = el.scrollHeight
   }, [segments, autoScroll])
 
   if (segments.length === 0) {
@@ -38,7 +44,12 @@ export function TranscriptView({
   const shadow = emphasizeSpeaker != null
 
   return (
-    <div className={readerMode ? 'mx-auto max-w-3xl px-6 py-10' : 'px-6 py-4'}>
+    <div
+      ref={scrollRef}
+      className="overflow-y-auto overscroll-contain"
+      style={{ maxHeight: 'calc(100dvh - 72px)' }}
+    >
+      <div className={readerMode ? 'mx-auto max-w-3xl px-6 py-10' : 'px-6 py-4'}>
       {segments.map((s) => {
         const { color, name } = speakerColor(s.speaker ?? 0, theme)
 
@@ -88,7 +99,7 @@ export function TranscriptView({
           </p>
         )
       })}
-      <div ref={bottomRef} />
+      </div>
     </div>
   )
 }
