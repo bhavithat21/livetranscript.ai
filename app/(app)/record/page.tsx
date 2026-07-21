@@ -263,6 +263,10 @@ export default function RecordPage() {
           readerMode={reader}
           autoScroll={recording}
           fade={recording && !reader}
+          // Post-stop: let the PAGE scroll (main's pb-32 clears the floating
+          // "New recording" button + avoids a double scroll with the summary).
+          // While recording we keep the inner capped scroll for autoscroll + fade.
+          flow={!recording && !reader}
         />
       )}
 
