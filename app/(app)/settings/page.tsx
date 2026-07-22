@@ -9,10 +9,10 @@ export default function SettingsPage() {
   const { enabledIds, toggle, keyterms } = useKeytermPrefs()
 
   return (
-    <main className="mx-auto max-w-3xl px-6 pb-24 pt-10">
+    <main className="mx-auto max-w-3xl px-4 pb-24 pt-10 sm:px-6">
       <div className="flex items-center gap-3">
         <HomeMenu />
-        <Link href="/dashboard" className="text-sm text-black/50 transition-colors hover:text-ink">
+        <Link href="/dashboard" className="-my-2 inline-flex min-h-11 items-center py-2 text-sm text-black/50 transition-colors hover:text-ink">
           ← Library
         </Link>
       </div>
@@ -49,13 +49,13 @@ export default function SettingsPage() {
                   </span>
                 </div>
                 <span className="mt-1 text-sm text-black/55">{pack.description}</span>
-                {pack.base && <span className="mt-2 text-xs text-black/35">Always on</span>}
+                {pack.base && <span className="mt-2 text-xs text-black/55">Always on</span>}
               </button>
             )
           })}
         </div>
 
-        <p className="mt-4 text-sm text-black/45">
+        <p className="mt-4 text-sm text-black/60">
           <span className="font-medium tabular-nums text-black/70">{keyterms.length}</span> / 100
           terms active. {keyterms.length >= 100 && 'At the cap — deselect a pack to add another.'}
         </p>

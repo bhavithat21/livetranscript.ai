@@ -65,7 +65,7 @@ export function ChatView({
               >
                 {/* One statement per line inside the bubble instead of a run-on paragraph. */}
                 {splitSentences(g.segments.map((s) => s.text).join(' ')).map((line, li) => (
-                  <p key={li}>{line}</p>
+                  <p key={li} className="break-words">{line}</p>
                 ))}
               </div>
             </div>

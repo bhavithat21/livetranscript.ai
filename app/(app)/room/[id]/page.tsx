@@ -99,20 +99,20 @@ function Lobby({ roomId, onJoin }: { roomId: string; onJoin: () => void }) {
   return (
     <main className="mx-auto max-w-lg px-6 py-20">
       <p className="text-sm font-medium uppercase tracking-widest text-emerald-700">Live meeting</p>
-      <h1 className="mt-2 font-[family-name:var(--font-serif)] text-4xl leading-tight">
+      <h1 className="mt-2 font-[family-name:var(--font-serif)] text-3xl leading-tight sm:text-4xl">
         You&rsquo;re about to join
       </h1>
       <div className="glass mt-6 rounded-2xl p-5">
         <div className="text-xs uppercase tracking-wide text-black/40">Meeting ID</div>
         <div className="mt-1 flex items-center gap-2">
-          <span className="select-all font-mono text-lg">{roomId}</span>
+          <span className="min-w-0 select-all truncate font-mono text-lg">{roomId}</span>
           <button
             onClick={() => {
               navigator.clipboard.writeText(roomId)
               setIdCopied(true)
               setTimeout(() => setIdCopied(false), 2000)
             }}
-            className="flex h-7 w-7 items-center justify-center rounded-full bg-black/5 text-black/50 transition-colors hover:bg-black/10 hover:text-ink"
+            className="flex h-11 w-11 items-center justify-center rounded-full bg-black/5 text-black/50 transition-colors hover:bg-black/10 hover:text-ink"
             title="Copy meeting ID"
             aria-label="Copy meeting ID"
           >
@@ -340,7 +340,7 @@ function Meeting({ roomId }: { roomId: string }) {
     // scroll region — otherwise the page AND the transcript both scroll ("two scrolls").
     <main className="relative flex h-dvh flex-col overflow-hidden bg-[#faf9f7] text-[#16151a]">
       {/* Top bar: home nav + identity + copyable meeting id + status, End on the right. */}
-      <header className="flex flex-wrap items-center gap-3 px-6 py-4">
+      <header className="flex flex-wrap items-center gap-2 px-4 py-3 sm:gap-3 sm:px-6 sm:py-4">
         <HomeMenu />
         {!full && (
           <span className="flex items-center gap-1.5 text-sm">
@@ -352,29 +352,31 @@ function Meeting({ roomId }: { roomId: string }) {
         <button
           onClick={() => setShowRoster((v) => !v)}
           data-active={showRoster}
-          className="glass glass-interactive flex items-center gap-1.5 rounded-full px-3 py-1 text-sm text-black/60 data-[active=true]:text-ink"
+          className="glass glass-interactive flex min-h-11 items-center gap-1.5 rounded-full px-3 text-sm text-black/60 data-[active=true]:text-ink"
           title="Who's in the meeting"
         >
           <Users size={14} />
           {roster.length}
           {roster.length > MAX_SPEAKERS ? ` (${MAX_SPEAKERS} speaking)` : ''}
         </button>
-        <span className={`text-sm ${connected ? 'text-emerald-700' : 'text-black/40'}`}>
-          {connected ? '● connected' : '○ connecting…'}
+        <span className={`text-sm ${connected ? 'text-emerald-700' : 'text-black/40'}`} title={connected ? 'Connected' : 'Connecting…'}>
+          {/* Phone: dot only (saves the crowded header). Desktop: dot + label. */}
+          <span className="sm:hidden">{connected ? '●' : '○'}</span>
+          <span className="hidden sm:inline">{connected ? '● connected' : '○ connecting…'}</span>
         </span>
         <div className="ml-auto flex items-center gap-2">
           <div className="glass flex items-center rounded-full p-0.5 text-sm">
             <button
               onClick={() => setView('transcript')}
               data-active={view === 'transcript'}
-              className="rounded-full px-3 py-1 text-black/50 data-[active=true]:bg-ink data-[active=true]:text-white"
+              className="inline-flex min-h-10 items-center rounded-full px-3 text-black/50 data-[active=true]:bg-ink data-[active=true]:text-white"
             >
               Transcript
             </button>
             <button
               onClick={() => setView('chat')}
               data-active={view === 'chat'}
-              className="rounded-full px-3 py-1 text-black/50 data-[active=true]:bg-ink data-[active=true]:text-white"
+              className="inline-flex min-h-10 items-center rounded-full px-3 text-black/50 data-[active=true]:bg-ink data-[active=true]:text-white"
             >
               Chat
             </button>
@@ -422,9 +424,11 @@ function Meeting({ roomId }: { roomId: string }) {
         )}
       </div>
 
-      {/* Bottom-center control dock: follow-along, source, mic mute, start/stop. */}
-      <div className="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex justify-center px-4">
-        <div className="glass pointer-events-auto flex items-center gap-3 rounded-full px-4 py-2.5">
+      {/* Bottom-center control dock: follow-along, source, mic mute, start/stop.
+          Wraps + caps width so it never overflows a phone; rounded-3xl so a
+          wrapped multi-row dock still looks intentional. */}
+      <div className="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex justify-center px-3">
+        <div className="glass pointer-events-auto flex max-w-[calc(100vw-1.5rem)] flex-wrap items-center justify-center gap-2 rounded-3xl px-4 py-2.5 sm:gap-3">
           {/* Follow along — repeat the latest line aloud, guided word-by-word.
               Available to everyone (a listener repeating the speaker is the point). */}
           <button
@@ -435,7 +439,7 @@ function Meeting({ roomId }: { roomId: string }) {
           >
             <BookOpen size={16} /> Follow
           </button>
-          {!full && <span className="h-5 w-px bg-black/10" aria-hidden />}
+          {!full && <span className="hidden h-5 w-px bg-black/10 sm:block" aria-hidden />}
           {full ? (
             <span className="px-3 text-sm text-black/60">Meeting full — you’re listening</span>
           ) : (
@@ -445,7 +449,7 @@ function Meeting({ roomId }: { roomId: string }) {
                   value={source}
                   onChange={(e) => setSource(e.target.value as AudioSource)}
                   className="rounded-full border border-black/15 bg-white/60 px-3 py-1.5 text-sm outline-none focus:border-emerald-700"
-                  title="Audio source"
+                  title="Audio source — pick System sound to transcribe a call without echo; Microphone for your own voice"
                 >
                   <option value="mic">Microphone</option>
                   <option value="system">System sound</option>
@@ -459,7 +463,7 @@ function Meeting({ roomId }: { roomId: string }) {
                   title="Mute / unmute (M or Space)"
                 >
                   {muted ? <MicOff size={16} /> : <Mic size={16} />}
-                  {muted ? 'Muted' : 'Mic on'}
+                  <span className="hidden sm:inline">{muted ? 'Muted' : 'Mic on'}</span>
                 </button>
               )}
               <Waveform level={level} active={live && !muted} />

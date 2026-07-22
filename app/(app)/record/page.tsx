@@ -210,7 +210,7 @@ export default function RecordPage() {
       )}
       {/* Live telemetry rail — replaces the orphan status; shows on-air state + numbers. */}
       {!reader && !idle && (
-        <header className="mx-auto flex max-w-3xl items-center gap-4 px-6 py-4">
+        <header className="mx-auto flex max-w-3xl flex-wrap items-center gap-x-3 gap-y-2 px-4 py-4 sm:px-6">
           <HomeMenu />
           {recording ? (
             <>
@@ -313,8 +313,8 @@ export default function RecordPage() {
       {/* Bottom control dock. Live: zoned mute | waveform | stop with breathing glow.
           Post-stop: a single calm "New recording". Absent in idle (console owns it). */}
       {!reader && recording && (
-        <div className="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex justify-center px-4">
-          <div className="glass dock-live pointer-events-auto flex items-center gap-3 rounded-full px-4 py-2.5">
+        <div className="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex justify-center px-3">
+          <div className="glass dock-live pointer-events-auto flex max-w-[calc(100vw-1.5rem)] flex-wrap items-center justify-center gap-2 rounded-3xl px-4 py-2.5 sm:gap-3">
             <button
               onClick={() => setMuted((m) => !m)}
               data-active={muted}
@@ -322,12 +322,13 @@ export default function RecordPage() {
               title="Mute / unmute (M or Space)"
             >
               {muted ? <MicOff size={16} /> : <Mic size={16} />}
-              {muted ? 'Muted' : 'Mic on'}
+              <span className="hidden sm:inline">{muted ? 'Muted' : 'Mic on'}</span>
             </button>
-            <span className="h-5 w-px bg-black/10" aria-hidden />
+            <span className="hidden h-5 w-px bg-black/10 sm:block" aria-hidden />
             <Waveform level={level} active={recording && !muted} />
-            <span className="font-mono text-sm tabular-nums text-black/50">{elapsed}</span>
-            <span className="h-5 w-px bg-black/10" aria-hidden />
+            {/* elapsed already shows in the header — hide on phones to save dock width */}
+            <span className="hidden font-mono text-sm tabular-nums text-black/50 sm:inline">{elapsed}</span>
+            <span className="hidden h-5 w-px bg-black/10 sm:block" aria-hidden />
             <button onClick={onStop} className="btn-stop flex items-center gap-2" title="Stop (S)">
               <span className="live-dot" aria-hidden />
               Stop
@@ -411,6 +412,13 @@ function LaunchConsole({
               <option value="system">System sound</option>
             </select>
           </label>
+          {/* Echo guidance: for calls, System sound taps the audio digitally so
+              there's no speaker→mic echo loop. Mic is for the room you're in. */}
+          <p className="-mt-1 text-xs leading-relaxed text-black/45">
+            {source === 'system'
+              ? 'Captures a call/tab’s audio directly — no echo, best for transcribing Zoom or Meet in a browser tab.'
+              : 'Best for your own voice / the room you’re in. For a call, switch to System sound to avoid echo.'}
+          </p>
           <label className="flex items-center justify-between gap-3 text-sm">
             <span className="text-black/50">Engine</span>
             <select

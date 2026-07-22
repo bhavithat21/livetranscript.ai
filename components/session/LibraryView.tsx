@@ -108,7 +108,7 @@ function FeaturedCard({ session, now }: { session: SessionSummaryRow; now: numbe
             Shared
           </span>
         )}
-        <span className="ml-auto text-[color:var(--signal)] opacity-0 transition-opacity group-hover:opacity-100">
+        <span className="ml-auto text-[color:var(--signal)] opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
           Open →
         </span>
       </div>

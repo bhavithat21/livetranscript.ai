@@ -16,7 +16,7 @@ const PACKS = [
 export default function PricingPage() {
   return (
     <main className="min-h-dvh bg-[#faf9f7] text-[#16151a]">
-      <section className="mx-auto max-w-5xl px-8 pb-8 pt-24">
+      <section className="mx-auto max-w-5xl px-5 sm:px-8 pb-8 pt-24">
         <p className="rise-in text-sm font-medium uppercase tracking-widest text-[color:var(--signal)]">
           Pricing
         </p>
@@ -33,7 +33,7 @@ export default function PricingPage() {
       </section>
 
       {/* Free + Membership */}
-      <section className="mx-auto grid max-w-5xl gap-4 px-8 sm:grid-cols-2">
+      <section className="mx-auto grid max-w-5xl gap-4 px-5 sm:grid-cols-2 sm:px-8">
         <Tier
           name="Free"
           price="$0"
@@ -54,7 +54,7 @@ export default function PricingPage() {
       </section>
 
       {/* Credit packs */}
-      <section className="mx-auto max-w-5xl px-8 py-14">
+      <section className="mx-auto max-w-5xl px-5 sm:px-8 py-14">
         <h2 className="font-[family-name:var(--font-serif)] text-2xl tracking-[-0.01em]">Or buy credits</h2>
         <p className="mt-1 text-black/55">Pay once, use anytime. Credits never expire.</p>
         <div className="mt-6 grid gap-4 sm:grid-cols-3">

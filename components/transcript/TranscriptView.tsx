@@ -65,7 +65,7 @@ export function TranscriptView({
 
   if (segments.length === 0) {
     return (
-      <div className="px-6 py-16 text-center text-black/30">
+      <div className="px-4 py-16 text-center text-black/30 sm:px-6">
         <p className="font-[family-name:var(--font-serif)] text-lg">
           Your transcript will appear here.
         </p>
@@ -93,7 +93,7 @@ export function TranscriptView({
           of scrolling behind the controls. */}
       <div
         className={cn(
-          'mx-auto max-w-3xl px-6',
+          'mx-auto max-w-3xl px-4 sm:px-6',
           readerMode ? 'pt-10' : 'pt-6',
           fade || fill ? 'pb-40' : readerMode ? 'pb-10' : 'pb-6',
         )}
@@ -134,6 +134,7 @@ export function TranscriptView({
                     key={li}
                     className={cn(
                       inkBody,
+                      'break-words',
                       emphasized
                         ? 'text-3xl font-medium leading-snug transition-all sm:text-4xl'
                         : 'text-base leading-relaxed transition-all',
@@ -154,18 +155,18 @@ export function TranscriptView({
                 // colored rule anchors the whole turn to that speaker.
                 <div className="mb-1 flex items-center gap-2">
                   <span
-                    className="font-[family-name:var(--font-serif)] text-sm font-semibold"
+                    className="min-w-0 break-words font-[family-name:var(--font-serif)] text-sm font-semibold"
                     style={{ color }}
                   >
                     {name}
                   </span>
-                  <span className="h-px flex-1" style={{ background: `${color}22` }} aria-hidden />
+                  <span className="h-px flex-1 shrink-0" style={{ background: `${color}22` }} aria-hidden />
                 </div>
               )}
               {/* One statement per line — split the turn into sentences so it
                   reads (and repeats) cleanly instead of one run-on block. */}
               <div
-                className="flex flex-col gap-1"
+                className="flex min-w-0 flex-col gap-1"
                 style={{
                   borderLeft: s.speaker != null ? `2px solid ${color}33` : undefined,
                   paddingLeft: s.speaker != null ? '0.75rem' : undefined,
@@ -174,7 +175,7 @@ export function TranscriptView({
                 {sentencesOf(s).map((line, li) => (
                   <p
                     key={li}
-                    className={cn('text-lg leading-relaxed transition-opacity', inkBody)}
+                    className={cn('break-words text-lg leading-relaxed transition-opacity', inkBody)}
                     style={{ opacity: s.isFinal ? 1 : 0.55 }}
                   >
                     {line}

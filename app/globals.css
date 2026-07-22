@@ -115,8 +115,14 @@ body {
 }
 
 @layer components {
-  /* Signal button — the primary action. Emerald, tactile, presses in. */
+  /* Signal button — the primary action. Emerald, tactile, presses in.
+     min-height 44px + inline-flex so every pill clears the mobile touch-target
+     minimum without per-button classes. */
   .btn-signal {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
     background: #0f766e;
     color: #fff;
     border-radius: 9999px;
@@ -140,6 +146,10 @@ body {
 
   /* Stop button — live red. */
   .btn-stop {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
     background: #b91c1c;
     color: #fff;
     border-radius: 9999px;
@@ -153,8 +163,13 @@ body {
     box-shadow: 0 8px 28px rgba(185, 28, 28, 0.4);
   }
 
-  /* Ghost pill — secondary chrome buttons. */
+  /* Ghost pill — secondary chrome buttons. inline-flex + min-height so the tap
+     target clears 44px on touch (min-height alone can't grow an inline box). */
   .btn-ghost {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
     border-radius: 9999px;
     padding: 0.4rem 1rem;
     border: 1px solid rgba(20, 21, 26, 0.15);

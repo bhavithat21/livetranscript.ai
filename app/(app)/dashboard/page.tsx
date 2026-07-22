@@ -25,7 +25,7 @@ export default async function DashboardPage() {
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-sm font-medium uppercase tracking-widest text-[color:var(--signal)]">Library</p>
-          <h1 className="mt-1 font-[family-name:var(--font-serif)] text-5xl tracking-[-0.02em]">
+          <h1 className="mt-1 break-words font-[family-name:var(--font-serif)] text-3xl tracking-[-0.02em] sm:text-5xl">
             Your transcripts
           </h1>
         </div>

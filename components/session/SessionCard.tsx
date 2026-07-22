@@ -57,7 +57,7 @@ export function SessionCard({ session }: { session: SessionSummaryRow }) {
             disabled={pending}
             aria-label={`Delete ${session.title}`}
             title="Delete"
-            className="rounded-full p-1.5 text-black/30 opacity-0 transition-opacity hover:bg-[color:var(--stop)]/10 hover:text-[color:var(--stop)] focus:opacity-100 group-hover:opacity-100"
+            className="flex h-11 w-11 items-center justify-center rounded-full text-black/30 opacity-100 transition-opacity hover:bg-[color:var(--stop)]/10 hover:text-[color:var(--stop)] focus:opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
           >
             <Trash2 size={15} />
           </button>

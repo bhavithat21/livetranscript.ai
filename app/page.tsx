@@ -5,7 +5,7 @@ export default function Home() {
   return (
     <main className="min-h-dvh bg-[#faf9f7] text-[#16151a]">
       {/* Hero */}
-      <section className="mx-auto max-w-5xl px-8 pb-8 pt-24">
+      <section className="mx-auto max-w-5xl px-5 sm:px-8 pb-8 pt-24">
         <p
           className="rise-in mb-4 text-sm font-medium uppercase tracking-widest text-[color:var(--signal)]"
           style={{ animationDelay: '0ms' }}
@@ -38,7 +38,7 @@ export default function Home() {
       </section>
 
       {/* Feature bento — grid-breaking, unequal cells. */}
-      <section className="mx-auto max-w-5xl px-8 py-16">
+      <section className="mx-auto max-w-5xl px-5 sm:px-8 py-16">
         <div className="grid gap-4 sm:grid-cols-3">
           <Cell className="sm:col-span-2" title="Two-track accuracy" eyebrow="Live + correction">
             Fast live captions appear instantly, then a fail-soft AI pass cleans jargon and
@@ -59,8 +59,8 @@ export default function Home() {
       </section>
 
       {/* Quiet, honest proof strip. */}
-      <section className="mx-auto max-w-5xl px-8 pb-20">
-        <div className="glass flex flex-wrap items-center justify-between gap-6 rounded-3xl px-8 py-8">
+      <section className="mx-auto max-w-5xl px-5 sm:px-8 pb-20">
+        <div className="glass flex flex-wrap items-center justify-between gap-6 rounded-3xl px-5 py-6 sm:px-8 sm:py-8">
           <p className="max-w-md font-[family-name:var(--font-serif)] text-2xl leading-snug tracking-[-0.01em]">
             Built for meetings, lectures, notes, and dictation.
           </p>

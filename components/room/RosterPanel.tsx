@@ -24,14 +24,18 @@ export function RosterPanel({
   onClose: () => void
 }) {
   return (
-    <div className="glass absolute right-4 top-16 z-50 w-72 rounded-2xl p-2 shadow-lg">
+    <div className="glass absolute right-3 top-16 z-50 flex max-h-[calc(100dvh-6rem)] w-[min(18rem,calc(100vw-1.5rem))] flex-col rounded-2xl p-2 shadow-lg">
       <div className="flex items-center justify-between px-2 py-1.5">
         <span className="text-sm font-semibold">In this meeting · {members.length}</span>
-        <button onClick={onClose} className="rounded-full p-1 text-black/40 hover:bg-black/5" aria-label="Close">
-          <X size={15} />
+        <button
+          onClick={onClose}
+          className="flex h-11 w-11 items-center justify-center rounded-full text-black/40 hover:bg-black/5"
+          aria-label="Close"
+        >
+          <X size={16} />
         </button>
       </div>
-      <ul className="flex flex-col">
+      <ul className="flex flex-col overflow-y-auto">
         {members.map((m) => (
           <MemberRow
             key={m.clientId}
@@ -90,11 +94,15 @@ function MemberRow({
             className="min-w-0 flex-1 rounded-lg border border-black/15 bg-white px-2 py-1 text-sm outline-none focus:border-emerald-700"
             placeholder="Name"
           />
-          <button type="submit" className="rounded-full bg-emerald-700 p-1.5 text-white" aria-label="Save">
-            <Check size={13} />
+          <button
+            type="submit"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-emerald-700 text-white"
+            aria-label="Save"
+          >
+            <Check size={15} />
           </button>
         </form>
-        <div className="mt-2 flex items-center gap-1.5">
+        <div className="mt-2 flex flex-wrap items-center gap-1">
           {Array.from({ length: MAX_SPEAKERS }, (_, i) => {
             const c = speakerColor(i, 'light').color
             return (
@@ -102,10 +110,15 @@ function MemberRow({
                 key={i}
                 onClick={() => setPref(member.clientId, { colorSlot: i })}
                 data-active={i === slot}
-                className="h-6 w-6 rounded-full ring-offset-1 transition-transform hover:scale-110 data-[active=true]:ring-2 data-[active=true]:ring-black/40"
-                style={{ background: c }}
+                className="flex h-11 w-11 items-center justify-center rounded-full sm:h-9 sm:w-9"
                 aria-label={`Color ${i + 1}`}
-              />
+              >
+                <span
+                  className="h-6 w-6 rounded-full ring-offset-1 transition-transform active:scale-110 data-[active=true]:ring-2 data-[active=true]:ring-black/40"
+                  data-active={i === slot}
+                  style={{ background: c }}
+                />
+              </button>
             )
           })}
         </div>
@@ -121,17 +134,20 @@ function MemberRow({
         {isMe && <span className="ml-1 text-black/40">(you)</span>}
       </span>
       <span className="flex items-center gap-1 text-xs text-black/45" title={src.label}>
-        <SourceIcon size={13} />
+        <SourceIcon size={14} />
+        <span className="hidden sm:inline">{src.label}</span>
       </span>
+      {/* Visible by default on touch (no hover there); hover-reveal only on
+          pointer/desktop. 44px hit area. */}
       <button
         onClick={() => {
           setDraft(name)
           setEditing(true)
         }}
-        className="rounded-full p-1 text-black/30 opacity-0 transition-opacity hover:bg-black/5 hover:text-black/60 group-hover:opacity-100"
+        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-black/40 opacity-100 transition-opacity hover:bg-black/5 hover:text-black/70 focus-visible:opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
         aria-label="Edit name and color"
       >
-        <Pencil size={13} />
+        <Pencil size={15} />
       </button>
     </li>
   )

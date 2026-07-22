@@ -13,8 +13,8 @@ type Summary = { summary?: string } | null
 // feel like a real product, with a subtle path to try it.
 function ShareTopBar() {
   return (
-    <header className="flex items-center justify-between px-6 py-4">
-      <Link href="/" className="font-[family-name:var(--font-serif)] text-lg font-semibold">
+    <header className="flex items-center justify-between px-4 py-4 sm:px-6">
+      <Link href="/" className="inline-flex min-h-11 items-center font-[family-name:var(--font-serif)] text-lg font-semibold">
         Live<span className="text-[color:var(--signal)]">Transcript</span>
       </Link>
       <Link href="/" className="btn-signal text-sm">
@@ -58,12 +58,12 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
     <main className="min-h-dvh bg-[#faf9f7] text-[#16151a]">
       <ShareTopBar />
 
-      <article className="mx-auto max-w-3xl px-6 pb-16 pt-6">
+      <article className="mx-auto max-w-3xl px-4 pb-16 pt-6 sm:px-6">
         {/* Document masthead — turns an anonymous text dump into a forwardable briefing. */}
         <p className="text-sm font-medium uppercase tracking-widest text-[color:var(--signal)]">
           Shared transcript
         </p>
-        <h1 className="mt-2 font-[family-name:var(--font-serif)] text-4xl leading-tight tracking-[-0.01em]">
+        <h1 className="mt-2 break-words font-[family-name:var(--font-serif)] text-3xl leading-tight tracking-[-0.01em] sm:text-4xl">
           {row.title}
         </h1>
         <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-black/45">

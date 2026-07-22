@@ -21,7 +21,7 @@ export default async function SessionDetailPage({ params }: { params: Promise<{ 
   const text = transcriptText(segments)
 
   return (
-    <main className="mx-auto max-w-3xl px-6 pb-24 pt-10">
+    <main className="mx-auto max-w-3xl px-4 pb-24 pt-10 sm:px-6">
       <div className="flex items-center gap-3">
         <HomeMenu />
         <Link href="/dashboard" className="text-sm text-black/50 transition-colors hover:text-ink">
