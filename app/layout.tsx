@@ -42,6 +42,14 @@ export default function RootLayout({
       lang="en"
       className={`${fraunces.variable} ${plexSans.variable} h-full antialiased`}
     >
+      {/* Prime DNS + TLS to the ASR hosts before the user clicks record, so the
+          first caption isn't waiting on a cold handshake — matters most for users
+          far from the provider's region. Transport-only; no data sent. */}
+      <head>
+        <link rel="preconnect" href="https://api.deepgram.com" crossOrigin="anonymous" />
+        <link rel="preconnect" href="https://api.eu.deepgram.com" crossOrigin="anonymous" />
+        <link rel="preconnect" href="https://streaming.assemblyai.com" crossOrigin="anonymous" />
+      </head>
       {clerkConfigured ? <ClerkProvider>{body}</ClerkProvider> : body}
     </html>
   )

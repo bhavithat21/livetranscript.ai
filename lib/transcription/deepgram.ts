@@ -31,9 +31,14 @@ export class DeepgramProvider implements TranscriptionProvider {
     // large list can't get silently truncated mid-way by the server.
     config.keyterms.slice(0, 100).forEach((t) => params.append('keyterm', t))
 
+    // Region-configurable WS host: point at the endpoint NEAREST your users to cut
+    // RTT on both the handshake AND every interim result (Deepgram EU is GA:
+    // wss://api.eu.deepgram.com/v1/listen — same token). Defaults to the global
+    // (us) host, so behavior is unchanged unless NEXT_PUBLIC_DEEPGRAM_WS_URL is set.
+    const base = process.env.NEXT_PUBLIC_DEEPGRAM_WS_URL || 'wss://api.deepgram.com/v1/listen'
     // A MINTED JWT uses the "bearer" subprotocol keyword (raw API keys would use "token").
     await new Promise<void>((resolve, reject) => {
-      const ws = new WebSocket(`wss://api.deepgram.com/v1/listen?${params}`, ['bearer', token])
+      const ws = new WebSocket(`${base}?${params}`, ['bearer', token])
       this.ws = ws
       const timeout = setTimeout(() => {
         ws.close()
