@@ -40,6 +40,7 @@ export function AppNav({ clerkConfigured }: { clerkConfigured: boolean }) {
               </Show>
             )}
             <NavLink href="/pricing" active={pathname === '/pricing'}>Pricing</NavLink>
+            <NavLink href="/download" active={pathname === '/download'}>Download</NavLink>
             <NavLink href="/room/new">New room</NavLink>
           </div>
           <Link href="/record" className="btn-signal ml-1 px-4 text-sm">
@@ -72,6 +73,7 @@ export function AppNav({ clerkConfigured }: { clerkConfigured: boolean }) {
                 </Show>
               )}
               <MenuLink href="/pricing">Pricing</MenuLink>
+              <MenuLink href="/download">Download</MenuLink>
               <MenuLink href="/room/new">New room</MenuLink>
               {clerkConfigured && (
                 <Show when="signed-out">

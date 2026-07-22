@@ -18,6 +18,7 @@ export function SiteFooter() {
         <nav className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-black/55">
           <Link href="/record" className="hover:text-ink">Start transcribing</Link>
           <Link href="/room/new" className="hover:text-ink">Open a meeting</Link>
+          <Link href="/download" className="hover:text-ink">Desktop app</Link>
           <Link href="/pricing" className="hover:text-ink">Pricing</Link>
           <Link href="/sign-up" className="hover:text-ink">Sign up</Link>
         </nav>

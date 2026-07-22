@@ -2,3 +2,7 @@
 /target
 # Tauri-generated schemas/bindings (regenerated on build)
 /gen/schemas
+
+# Tauri updater signing key — SECRET, never commit
+updater-private.key
+*.key
