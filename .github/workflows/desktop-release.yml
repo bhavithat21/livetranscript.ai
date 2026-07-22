@@ -31,12 +31,18 @@ jobs:
         with:
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: pnpm
 
       - name: Install frontend deps (for the Tauri CLI)
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Build + publish desktop app
         uses: tauri-apps/tauri-action@v0
@@ -54,6 +60,8 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           projectPath: .
+          # @tauri-apps/cli isn't a project dep; npx fetches it on-demand in CI so
+          # the pnpm lockfile stays untouched. App deps still install via pnpm above.
           tauriScript: npx @tauri-apps/cli
           args: ${{ matrix.args }}
           tagName: ${{ github.ref_name }}
