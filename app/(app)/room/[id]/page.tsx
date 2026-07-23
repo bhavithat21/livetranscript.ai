@@ -14,6 +14,8 @@ import { useSpeakerPrefs } from '@/lib/room/useSpeakerPrefs'
 import { speakerColor } from '@/lib/speakers/palette'
 import { TranscriptView, type SpeakerOverrides } from '@/components/transcript/TranscriptView'
 import { ChatView } from '@/components/transcript/ChatView'
+import { TextSizeControl } from '@/components/transcript/TextSizeControl'
+import { useTextScale } from '@/lib/transcript/useTextScale'
 import { Waveform } from '@/components/transcript/Waveform'
 import { RosterPanel } from '@/components/room/RosterPanel'
 import { FollowAlong } from '@/components/room/FollowAlong'
@@ -200,6 +202,7 @@ function Meeting({ roomId }: { roomId: string }) {
   const router = useRouter()
   const displayName = useDisplayName()
   const { keyterms } = useKeytermPrefs()
+  const textScale = useTextScale() // reader text-size preference (localStorage)
   const { start, stop, error } = useMicStream()
   const {
     connected,
@@ -365,6 +368,12 @@ function Meeting({ roomId }: { roomId: string }) {
           <span className="hidden sm:inline">{connected ? '● connected' : '○ connecting…'}</span>
         </span>
         <div className="ml-auto flex items-center gap-2">
+          <TextSizeControl
+            onDec={textScale.dec}
+            onInc={textScale.inc}
+            canDec={textScale.canDec}
+            canInc={textScale.canInc}
+          />
           <div className="glass flex items-center rounded-full p-0.5 text-sm">
             <button
               onClick={() => setView('transcript')}
@@ -418,9 +427,9 @@ function Meeting({ roomId }: { roomId: string }) {
           under the header + above the dock without a second page scrollbar. */}
       <div className="min-h-0 flex-1">
         {view === 'chat' ? (
-          <ChatView segments={segments} theme="light" fill overrides={overrides} />
+          <ChatView segments={segments} theme="light" fill overrides={overrides} scale={textScale.scale} />
         ) : (
-          <TranscriptView segments={segments} theme="light" readerMode autoScroll fade fill overrides={overrides} />
+          <TranscriptView segments={segments} theme="light" readerMode autoScroll fade fill overrides={overrides} scale={textScale.scale} />
         )}
       </div>
 

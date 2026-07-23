@@ -12,11 +12,13 @@ export function ChatView({
   theme = 'light',
   fill = false,
   overrides,
+  scale = 1,
 }: {
   segments: Segment[]
   theme?: 'light' | 'dark'
   fill?: boolean
   overrides?: SpeakerOverrides
+  scale?: number
 }) {
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -61,7 +63,8 @@ export function ChatView({
               </span>
               <div
                 className="glass flex max-w-[85%] flex-col gap-1 self-start rounded-2xl rounded-tl-md px-4 py-2.5 leading-relaxed"
-                style={{ borderLeft: `3px solid ${speaker.color}`, opacity: pending ? 0.75 : 1 }}
+                // 1rem bubble base × the reader's text-size multiplier.
+                style={{ borderLeft: `3px solid ${speaker.color}`, opacity: pending ? 0.75 : 1, fontSize: `${scale}rem` }}
               >
                 {/* One statement per line inside the bubble instead of a run-on paragraph. */}
                 {splitSentences(g.segments.map((s) => s.text).join(' ')).map((line, li) => (

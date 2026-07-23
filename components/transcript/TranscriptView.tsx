@@ -27,6 +27,7 @@ export function TranscriptView({
   flow = false,
   fill = false,
   overrides,
+  scale = 1,
 }: {
   segments: Segment[]
   theme: 'light' | 'dark'
@@ -44,6 +45,9 @@ export function TranscriptView({
   fill?: boolean
   // Per-device name/color overrides keyed by sender (clientId). Undefined = none.
   overrides?: SpeakerOverrides
+  // Reader text-size multiplier (from useTextScale). 1 = default; scales the body
+  // line font-size so people can enlarge/shrink captions for comfort.
+  scale?: number
 }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   // Only follow the live edge when the reader is already near the bottom, so
@@ -135,11 +139,13 @@ export function TranscriptView({
                     className={cn(
                       inkBody,
                       'break-words',
-                      emphasized
-                        ? 'text-3xl font-medium leading-snug transition-all sm:text-4xl'
-                        : 'text-base leading-relaxed transition-all',
+                      emphasized ? 'font-medium leading-snug transition-all' : 'leading-relaxed transition-all',
                     )}
-                    style={{ opacity: emphasized ? (s.isFinal ? 1 : 0.6) : 0.4 }}
+                    // Emphasized shadow line ~2rem base; non-emphasized 1rem — both × scale.
+                    style={{
+                      opacity: emphasized ? (s.isFinal ? 1 : 0.6) : 0.4,
+                      fontSize: `${(emphasized ? 2 : 1) * scale}rem`,
+                    }}
                   >
                     {line}
                   </p>
@@ -175,8 +181,9 @@ export function TranscriptView({
                 {sentencesOf(s).map((line, li) => (
                   <p
                     key={li}
-                    className={cn('break-words text-lg leading-relaxed transition-opacity', inkBody)}
-                    style={{ opacity: s.isFinal ? 1 : 0.55 }}
+                    // text-lg (1.125rem) base × the reader's scale multiplier.
+                    className={cn('break-words leading-relaxed transition-opacity', inkBody)}
+                    style={{ opacity: s.isFinal ? 1 : 0.55, fontSize: `${1.125 * scale}rem` }}
                   >
                     {line}
                   </p>

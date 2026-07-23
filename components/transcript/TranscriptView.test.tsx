@@ -15,9 +15,10 @@ describe('TranscriptView Shadow Mode', () => {
     )
     const repeated = getByText('repeated line').closest('p')!
     const reference = getByText('reference line').closest('p')!
-    // emphasized line uses a large text class; reference does not
-    expect(repeated.className).toMatch(/text-3xl|text-4xl/)
-    expect(reference.className).not.toMatch(/text-3xl|text-4xl/)
+    // Sizing is inline fontSize now (so it can scale with the reader preference):
+    // the emphasized line is visibly larger than the non-emphasized one.
+    const px = (el: HTMLElement) => parseFloat(el.style.fontSize) || 0
+    expect(px(repeated)).toBeGreaterThan(px(reference))
     // reference is visibly dimmed
     expect(reference.style.opacity).toBe('0.4')
   })

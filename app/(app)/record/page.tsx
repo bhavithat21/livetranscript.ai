@@ -5,6 +5,8 @@ import { useMicStream, type AudioSource } from '@/lib/audio/useMicStream'
 import { connectWithFallback, type ProviderChoice } from '@/lib/transcription'
 import { mergeSegments, applyCorrection, transcriptText, type Segment } from '@/lib/transcript/store'
 import { TranscriptView } from '@/components/transcript/TranscriptView'
+import { TextSizeControl } from '@/components/transcript/TextSizeControl'
+import { useTextScale } from '@/lib/transcript/useTextScale'
 import { Waveform } from '@/components/transcript/Waveform'
 import { HomeMenu } from '@/components/nav/HomeMenu'
 import { saveSession } from './actions'
@@ -48,6 +50,7 @@ async function correctLine(
 export default function RecordPage() {
   const { start, stop, error } = useMicStream()
   const { keyterms } = useKeytermPrefs() // user-selected vocab packs (base + overlays)
+  const textScale = useTextScale() // reader text-size preference (localStorage)
   const [segments, setSegments] = useState<Segment[]>([])
   const [level, setLevel] = useState(0)
   const [recording, setRecording] = useState(false)
@@ -229,12 +232,20 @@ export default function RecordPage() {
               {engineLabel(engine)}
             </span>
           )}
-          <button
-            onClick={() => setReader(true)}
-            className="btn-ghost ml-auto flex items-center gap-1.5 text-sm"
-          >
-            <BookOpen size={15} /> Reader
-          </button>
+          <div className="ml-auto flex items-center gap-2">
+            <TextSizeControl
+              onDec={textScale.dec}
+              onInc={textScale.inc}
+              canDec={textScale.canDec}
+              canInc={textScale.canInc}
+            />
+            <button
+              onClick={() => setReader(true)}
+              className="btn-ghost flex items-center gap-1.5 text-sm"
+            >
+              <BookOpen size={15} /> Reader
+            </button>
+          </div>
         </header>
       )}
       {reader && (
@@ -262,6 +273,7 @@ export default function RecordPage() {
           theme="light"
           readerMode={reader}
           autoScroll={recording}
+          scale={textScale.scale}
           fade={recording && !reader}
           // Post-stop: let the PAGE scroll (main's pb-32 clears the floating
           // "New recording" button + avoids a double scroll with the summary).
