@@ -6,7 +6,8 @@ import { useScreenStream } from '@/lib/vision/useScreenStream'
 import { useStoryBank } from '@/lib/copilot/useStoryBank'
 import { useProactive } from '@/lib/copilot/useProactive'
 import { useAnswerFeed } from '@/lib/copilot/useAnswerFeed'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { useMeContext } from '@/lib/copilot/useMeContext'
+import { ChevronLeft, ChevronRight, Mic, MicOff } from 'lucide-react'
 import { MODE_ORDER, MODE_PROFILES, type CopilotMode } from '@/lib/copilot/modes'
 import { extractPython, runPython, type RunResult } from '@/lib/copilot/pyodideRunner'
 
@@ -35,6 +36,7 @@ export function CopilotPanel({
   const [input, setInput] = useState('')
   const [mode, setMode] = useState<CopilotMode>('general')
   const feed = useAnswerFeed()
+  const me = useMeContext() // opt-in mic stream: "what I said" as AI context, never in transcript
   const [showBankEditor, setShowBankEditor] = useState(false)
   const [auto, setAuto] = useState(false)
   const [view, setView] = useState<'chat' | 'answers'>('chat')
@@ -46,14 +48,18 @@ export function CopilotPanel({
   useProactive(auto, getTranscript, (q) => {
     setView('answers') // surface the feed as answers arrive
     void (async () => {
-      const ctx = mode === 'behavioral' && bank.count > 0 ? await bank.retrieve(q) : null
+      const story = mode === 'behavioral' && bank.count > 0 ? await bank.retrieve(q) : null
+      // Combine what YOU said (mic context, if listening) with any matched story —
+      // grounds the answer without either appearing in the transcript.
+      const parts = [me.getMeContext() && `What I said: ${me.getMeContext()}`, story].filter(Boolean)
+      const ctx = parts.length ? parts.join('\n\n') : null
       const image = screen.sharing ? screen.grabFrame() : null
       feed.answer(q, mode, ctx, image)
     })()
   })
 
   // Tear the screen stream down when the panel closes.
-  useEffect(() => () => screen.stop(), []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => { screen.stop(); me.stopListening() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Follow the newest tokens as the answer streams in.
   useEffect(() => {
@@ -90,6 +96,15 @@ export function CopilotPanel({
             <span className={auto ? 'live-dot' : 'hidden'} aria-hidden />
             <span className="hidden sm:inline">{auto ? 'Auto on' : 'Auto'}</span>
             <span className="sm:hidden">A</span>
+          </button>
+          <button
+            onClick={() => (me.listening ? me.stopListening() : me.startListening())}
+            data-active={me.listening}
+            title={me.listening ? 'Mic on — what you say feeds the AI (never shown in the transcript)' : 'Add your voice as AI context (not transcribed)'}
+            className="flex items-center gap-1 rounded-full px-2 py-1 text-xs text-black/55 transition-colors hover:bg-black/5 data-[active=true]:bg-emerald-700/10 data-[active=true]:text-emerald-800"
+          >
+            {me.listening ? <Mic size={13} /> : <MicOff size={13} />}
+            <span className="hidden sm:inline">{me.listening ? 'Mic (me)' : 'Mic'}</span>
           </button>
           <button
             onClick={() => (screen.sharing ? screen.stop() : screen.start())}
