@@ -52,6 +52,11 @@ final class AudioCapturer: NSObject, SCStreamOutput, SCStreamDelegate {
                                    sampleHandlerQueue: DispatchQueue(label: "audio.pcm"))
         try await stream.startCapture()
         self.stream = stream
+        // Readiness sentinel on stderr: capture is live. The Rust parent waits for
+        // this before telling the frontend audio is flowing — so a denied
+        // Screen-Recording permission (start throws, no READY) surfaces as a
+        // failure and the app falls back instead of silently recording nothing.
+        FileHandle.standardError.write("READY\n".data(using: .utf8)!)
     }
 
     func stream(_ stream: SCStream,

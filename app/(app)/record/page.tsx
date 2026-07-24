@@ -99,9 +99,17 @@ export default function RecordPage() {
       let provider: TranscriptionProvider | null = null
       const onPcm = (pcm: ArrayBuffer) => provider?.sendAudio(pcm)
       // Desktop + System source: try the native OS tap first (full-system audio,
-      // no screen-share picker). Returns 0 in the browser or if not native, so we
-      // fall back to the existing getDisplayMedia/getUserMedia path.
-      const nativeRate = source === 'system' ? await native.start(onPcm, setLevel) : 0
+      // no screen-share picker). Returns 0 in the browser / when not native; a
+      // real native failure (permission denied, no device) REJECTS — catch it so
+      // we still fall back to the browser path instead of hard-failing onStart.
+      let nativeRate = 0
+      if (source === 'system') {
+        try {
+          nativeRate = await native.start(onPcm, setLevel)
+        } catch (err) {
+          logError('record/native.start', err) // native tap failed — fall back to browser
+        }
+      }
       const actualRate =
         nativeRate ||
         (await start(onPcm, setLevel, { source, isMuted: () => mutedRef.current }))

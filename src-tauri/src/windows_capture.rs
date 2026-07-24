@@ -10,7 +10,9 @@
 // cpal's `Stream` is !Send, so it must be BUILT and OWNED on a single thread. We
 // spawn that thread, build+play the stream there, report the sample rate back
 // over a rendezvous channel, then keep the thread alive (holding the stream)
-// while it drains captured frames to the IPC channel until `running` clears.
+// while it drains captured frames to the IPC channel until this session's flag
+// clears. start() returns a Stopper that flips that flag, so teardown is
+// self-contained per session (no shared state that a restart could resurrect).
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -21,12 +23,14 @@ use cpal::SampleFormat;
 use crossbeam_channel::{bounded, TrySendError};
 use tauri::ipc::{Channel, InvokeResponseBody};
 
+use crate::Stopper;
+
 const FRAME_SAMPLES: usize = 2400; // ~50ms @48k mono
 
-pub fn start(
-    running: Arc<AtomicBool>,
-    on_frame: Channel<InvokeResponseBody>,
-) -> Result<u32, String> {
+pub fn start(on_frame: Channel<InvokeResponseBody>) -> Result<(u32, Stopper), String> {
+    let running = Arc::new(AtomicBool::new(true));
+    let running_thread = running.clone();
+
     // Rendezvous: the capture thread reports Ok(rate) once the stream is live,
     // or Err(msg) if device open/build/play failed. start() blocks on this.
     let (init_tx, init_rx) = bounded::<Result<u32, String>>(1);
@@ -113,8 +117,8 @@ pub fn start(
         let _ = init_tx.send(Ok(rate));
 
         // Hold the stream on this thread (dropping it stops capture) and forward
-        // frames to the IPC channel until stop clears `running`.
-        while running.load(Ordering::Relaxed) {
+        // frames to the IPC channel until this session's flag clears.
+        while running_thread.load(Ordering::Relaxed) {
             match rx.recv_timeout(Duration::from_millis(250)) {
                 Ok(samples) => {
                     let mut bytes = Vec::with_capacity(samples.len() * 2);
@@ -133,7 +137,11 @@ pub fn start(
     });
 
     match init_rx.recv() {
-        Ok(result) => result,
+        Ok(Ok(rate)) => {
+            let stopper: Stopper = Box::new(move || running.store(false, Ordering::SeqCst));
+            Ok((rate, stopper))
+        }
+        Ok(Err(e)) => Err(e),
         Err(_) => Err("capture thread died during init".into()),
     }
 }

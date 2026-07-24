@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Merged into the generated macOS Info.plist by the Tauri bundler.
+
+  WKWebView's getUserMedia() mic/camera prompt CANNOT appear without these usage
+  strings — the request silently fails, which is why "turn on mic" did nothing.
+  The Screen-Recording grant the native audio sidecar needs has no plist key
+  (it's a pure TCC toggle), so it isn't listed here.
+-->
+<plist version="1.0">
+  <dict>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>LiveTranscript uses your microphone to transcribe what you say.</string>
+    <key>NSCameraUsageDescription</key>
+    <string>LiveTranscript can use your camera for video features.</string>
+  </dict>
+</plist>

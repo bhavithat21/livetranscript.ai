@@ -4,6 +4,7 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { BookOpen, Check, Copy, Mic, MicOff, Sparkles, Users } from 'lucide-react'
 import { useMicStream, type AudioSource } from '@/lib/audio/useMicStream'
 import { useNativeCapture } from '@/lib/audio/useNativeCapture'
+import { logError } from '@/lib/log'
 import { connectWithFallback } from '@/lib/transcription'
 import { transcriptText, type Segment } from '@/lib/transcript/store'
 import { useRoom } from '@/lib/room/useRoom'
@@ -276,8 +277,17 @@ function Meeting({ roomId }: { roomId: string }) {
     try {
       let provider: TranscriptionProvider | null = null
       const onPcm = (pcm: ArrayBuffer) => provider?.sendAudio(pcm)
-      // Desktop + System source: native OS tap first; 0 → fall back to browser.
-      const nativeRate = source === 'system' ? await native.start(onPcm, setLevel) : 0
+      // Desktop + System source: native OS tap first. 0 = not native; a real
+      // native failure REJECTS — catch it so we fall back to the browser path
+      // instead of hard-failing onStart.
+      let nativeRate = 0
+      if (source === 'system') {
+        try {
+          nativeRate = await native.start(onPcm, setLevel)
+        } catch (err) {
+          logError('room/native.start', err) // native tap failed — fall back to browser
+        }
+      }
       const rate =
         nativeRate ||
         (await start(onPcm, setLevel, { source, isMuted: () => mutedRef.current }))

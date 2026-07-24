@@ -14,8 +14,7 @@
 // never seize the mic/output device, so Zoom keeps working with no echo. Frames
 // reach the web layer via an additive, feature-detected bridge
 // (lib/audio/useNativeCapture.ts).
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::Mutex;
 use tauri::ipc::{Channel, InvokeResponseBody};
 
 #[cfg(target_os = "macos")]
@@ -23,10 +22,15 @@ mod macos_capture;
 #[cfg(target_os = "windows")]
 mod windows_capture;
 
-// Shared "is capture running" flag, managed by Tauri so both commands see it.
+// A capture session's teardown handle: calling it stops THAT session's capture
+// (macOS: kills the sidecar; Windows: drops the cpal stream). Each start()
+// returns its own stopper, so a stop→start race can't resurrect a retired
+// session — the old one is fully torn down before a new one is stored.
+type Stopper = Box<dyn FnOnce() + Send>;
+
 #[derive(Default)]
 pub struct AudioState {
-    running: Arc<AtomicBool>,
+    session: Mutex<Option<Stopper>>,
 }
 
 // Toggle OS-level screen-capture exclusion at runtime (Windows
@@ -41,44 +45,50 @@ fn set_content_protection(window: tauri::Window, enabled: bool) -> Result<(), St
 
 // Start native system-audio capture. Returns the PCM sample rate (Hz); the
 // frontend passes it to the STT provider. Emits 16-bit little-endian mono PCM
-// frames over `on_frame` (arrive as ArrayBuffer in JS). Idempotent: a second
-// call while running is a no-op error, not a double-start.
+// frames over `on_frame` (arrive as ArrayBuffer in JS).
+//
+// A previous session is torn down first (stop is idempotent), then a fresh
+// per-session flag is created and handed to the platform capture, which BLOCKS
+// until capture is confirmed live (or returns Err). So a returned Ok means audio
+// is really flowing — the frontend can trust it and skip the browser fallback.
 #[tauri::command]
 fn start_native_audio(
     _app: tauri::AppHandle,
     state: tauri::State<'_, AudioState>,
     _on_frame: Channel<InvokeResponseBody>,
 ) -> Result<u32, String> {
-    if state.running.swap(true, Ordering::SeqCst) {
-        return Err("capture already running".into());
-    }
-    let running = state.running.clone();
+    // Retire any prior session before starting a new one (handles fast restart
+    // and a stuck session) so we never run two captures at once.
+    stop_session(&state);
 
     #[cfg(target_os = "macos")]
-    {
-        macos_capture::start(_app, running, _on_frame).inspect_err(|_| {
-            state.running.store(false, Ordering::SeqCst);
-        })
-    }
+    let result = macos_capture::start(_app, _on_frame);
     #[cfg(target_os = "windows")]
-    {
-        windows_capture::start(running, _on_frame).inspect_err(|_| {
-            state.running.store(false, Ordering::SeqCst);
-        })
-    }
+    let result = windows_capture::start(_on_frame);
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    {
-        let _ = running;
-        state.running.store(false, Ordering::SeqCst);
+    let result: Result<(u32, Stopper), String> = {
+        let _ = _on_frame;
         Err("native capture not supported on this platform".into())
-    }
+    };
+
+    let (rate, stopper) = result?;
+    *state.session.lock().unwrap() = Some(stopper);
+    Ok(rate)
 }
 
-// Stop native capture. The capture thread/task observes the flag and tears down
-// (macOS: closes the sidecar's stdout -> SIGPIPE; Windows: drops the cpal stream).
+// Stop native capture: tear down the current session (macOS kills the sidecar;
+// Windows drops the cpal stream). Idempotent.
 #[tauri::command]
 fn stop_native_audio(state: tauri::State<'_, AudioState>) {
-    state.running.store(false, Ordering::SeqCst);
+    stop_session(&state);
+}
+
+// Retire the active session, if any, by invoking its teardown handle.
+fn stop_session(state: &AudioState) {
+    let stopper = state.session.lock().unwrap().take();
+    if let Some(stop) = stopper {
+        stop();
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
