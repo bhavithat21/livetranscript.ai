@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server'
 import OpenAI from 'openai'
 import { currentUserId } from '@/lib/auth'
 import { logError } from '@/lib/log'
+import { modeProfile } from '@/lib/copilot/modes'
 
 // On-demand copilot answer. Streams tokens back grounded in the transcript the
 // caller passes. Mirrors the auth-guard + input-cap + fail-soft conventions of
@@ -24,14 +25,6 @@ const CONTROL_CHARS = new RegExp('[\\u0000-\\u001F\\u007F]', 'g')
 
 type ChatTurn = { role: 'user' | 'assistant'; content: string }
 
-const SYSTEM = `You are the assistant inside LiveTranscript, shown beside a live transcript.
-Answer the user's question using the TRANSCRIPT as your primary source — quote or
-reference what was actually said when it's relevant. If the transcript doesn't
-contain the answer, say so briefly ("That wasn't covered in the transcript") and
-answer from general knowledge only if clearly helpful, labelled as such. Never
-claim someone said something they didn't. Be concise and direct — this is a side
-panel, not an essay. Use short markdown.`
-
 // Collapse control chars to spaces (keeps normal text/whitespace) + cap. The
 // transcript/question are untrusted input.
 function clean(s: string, max: number): string {
@@ -42,13 +35,14 @@ export async function POST(req: NextRequest) {
   const userId = await currentUserId()
   if (!userId) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
-  let body: { question?: string; transcript?: string; history?: ChatTurn[] }
+  let body: { question?: string; transcript?: string; history?: ChatTurn[]; mode?: string }
   try {
     body = await req.json()
   } catch {
     return Response.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
+  const profile = modeProfile(body.mode) // coding / systemDesign / behavioral / general
   const question = clean(body.question?.trim() ?? '', MAX_QUESTION).trim()
   if (!question) return Response.json({ error: 'Empty question' }, { status: 400 })
   // Keep the MOST RECENT transcript (tail) — what "answer about what was just
@@ -69,11 +63,11 @@ export async function POST(req: NextRequest) {
     const stream = await client.chat.completions.create({
       model: 'gpt-4o-mini',
       stream: true,
-      temperature: 0.3, // factual, grounded answers
+      temperature: profile.temperature, // per-mode: factual coding vs looser behavioral
       messages: [
-        // Stable prefix first (system + transcript) → prompt-cacheable across
+        // Stable prefix first (mode system + transcript) → prompt-cacheable across
         // follow-ups; the volatile question goes LAST.
-        { role: 'system', content: SYSTEM },
+        { role: 'system', content: profile.system },
         { role: 'system', content: `TRANSCRIPT (most recent):\n${transcript || '(empty so far)'}` },
         ...history,
         { role: 'user', content: question },

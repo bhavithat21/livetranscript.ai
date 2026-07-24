@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Send, Sparkles, X } from 'lucide-react'
 import { useCopilot } from '@/lib/copilot/useCopilot'
+import { MODE_ORDER, MODE_PROFILES, type CopilotMode } from '@/lib/copilot/modes'
 
 // Ask-your-transcript side panel. Grounded, streaming answers from the live
 // transcript. Matches the app's editorial-glass language: glass surface, emerald
@@ -24,6 +25,7 @@ export function CopilotPanel({
 }) {
   const { turns, streaming, error, ask, clear } = useCopilot(getTranscript)
   const [input, setInput] = useState('')
+  const [mode, setMode] = useState<CopilotMode>('general')
   const scrollRef = useRef<HTMLDivElement>(null)
 
   // Follow the newest tokens as the answer streams in.
@@ -34,7 +36,7 @@ export function CopilotPanel({
 
   const submit = (q: string) => {
     if (!q.trim() || streaming) return
-    ask(q)
+    ask(q, mode)
     setInput('')
   }
 
@@ -59,6 +61,22 @@ export function CopilotPanel({
           </button>
         </div>
       </header>
+
+      {/* Mode selector — per-domain answer styling (coding / system design /
+          behavioral) on the same transcript grounding. */}
+      <div className="flex gap-1 overflow-x-auto border-b border-black/10 px-3 py-2">
+        {MODE_ORDER.map((m) => (
+          <button
+            key={m}
+            onClick={() => setMode(m)}
+            data-active={mode === m}
+            title={MODE_PROFILES[m].hint}
+            className="shrink-0 rounded-full px-3 py-1 text-xs text-black/55 transition-colors hover:bg-black/5 data-[active=true]:bg-ink data-[active=true]:text-white"
+          >
+            {MODE_PROFILES[m].label}
+          </button>
+        ))}
+      </div>
 
       <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4">
         {turns.length === 0 && !error && (
@@ -112,7 +130,7 @@ export function CopilotPanel({
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Ask about the transcript…"
+          placeholder={MODE_PROFILES[mode].hint + '…'}
           className="min-w-0 flex-1 rounded-full border border-black/15 bg-white/70 px-4 py-2.5 text-sm outline-none focus:border-emerald-700"
         />
         <button
