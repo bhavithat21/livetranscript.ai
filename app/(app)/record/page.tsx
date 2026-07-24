@@ -58,7 +58,9 @@ export default function RecordPage() {
   const [recording, setRecording] = useState(false)
   const [engine, setEngine] = useState<string | null>(null)
   const [providerChoice, setProviderChoice] = useState<ProviderChoice>('auto')
-  const [source, setSource] = useState<AudioSource>('mic')
+  // Default to System sound (getDisplayMedia loopback): a digital tap that never
+  // contends with Zoom for the mic/speaker device and can't echo. Mic is opt-in.
+  const [source, setSource] = useState<AudioSource>('system')
   const [reader, setReader] = useState(false)
   const [muted, setMuted] = useState(false)
   const [summary, setSummary] = useState<Summary | null>(null)
@@ -448,16 +450,17 @@ function LaunchConsole({
               disabled={busy}
               className="rounded-full border border-black/15 bg-white/70 px-3 py-1.5 text-sm outline-none focus:border-emerald-700"
             >
+              <option value="system">System sound (recommended)</option>
               <option value="mic">Microphone</option>
-              <option value="system">System sound</option>
             </select>
           </label>
-          {/* Echo guidance: for calls, System sound taps the audio digitally so
-              there's no speaker→mic echo loop. Mic is for the room you're in. */}
+          {/* Echo/contention guidance: System sound is a digital loopback — it
+              never grabs the mic/speaker device Zoom is using, so no echo and no
+              device conflict. Mic is only for transcribing the physical room. */}
           <p className="-mt-1 text-xs leading-relaxed text-black/45">
             {source === 'system'
-              ? 'Captures a call/tab’s audio directly — no echo, best for transcribing Zoom or Meet in a browser tab.'
-              : 'Best for your own voice / the room you’re in. For a call, switch to System sound to avoid echo.'}
+              ? 'Captures the call audio digitally — no echo, and it won’t conflict with Zoom/Meet using your mic or speakers.'
+              : 'Only for the physical room you’re in. In a call this can echo and fight Zoom for the mic — use System sound instead.'}
           </p>
           <label className="flex items-center justify-between gap-3 text-sm">
             <span className="text-black/50">Engine</span>

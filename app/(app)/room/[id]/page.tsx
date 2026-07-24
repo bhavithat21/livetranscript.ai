@@ -223,7 +223,9 @@ function Meeting({ roomId }: { roomId: string }) {
   const [level, setLevel] = useState(0)
   const [live, setLive] = useState(false)
   const [muted, setMuted] = useState(false)
-  const [source, setSource] = useState<AudioSource>('mic')
+  // Default to System sound (getDisplayMedia loopback) — no echo, no device
+  // contention with Zoom/Meet. Mic is opt-in for the physical room only.
+  const [source, setSource] = useState<AudioSource>('system')
   const [view, setView] = useState<'transcript' | 'chat'>('transcript')
   const [showRoster, setShowRoster] = useState(false)
   const [askOpen, setAskOpen] = useState(false) // copilot side panel
@@ -468,10 +470,10 @@ function Meeting({ roomId }: { roomId: string }) {
                   value={source}
                   onChange={(e) => setSource(e.target.value as AudioSource)}
                   className="rounded-full border border-black/15 bg-white/60 px-3 py-1.5 text-sm outline-none focus:border-emerald-700"
-                  title="Audio source — pick System sound to transcribe a call without echo; Microphone for your own voice"
+                  title="System sound is a digital loopback — no echo, no conflict with Zoom/Meet. Microphone is for the physical room only."
                 >
+                  <option value="system">System sound (recommended)</option>
                   <option value="mic">Microphone</option>
-                  <option value="system">System sound</option>
                 </select>
               )}
               {live && (
