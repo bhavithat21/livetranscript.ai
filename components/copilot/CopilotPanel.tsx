@@ -1,9 +1,10 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
-import { Monitor, MonitorOff, Send, Sparkles, X } from 'lucide-react'
+import { Check, Monitor, MonitorOff, Play, Send, Sparkles, X } from 'lucide-react'
 import { useCopilot } from '@/lib/copilot/useCopilot'
 import { useScreenStream } from '@/lib/vision/useScreenStream'
 import { MODE_ORDER, MODE_PROFILES, type CopilotMode } from '@/lib/copilot/modes'
+import { extractPython, runPython, type RunResult } from '@/lib/copilot/pyodideRunner'
 
 // Ask-your-transcript side panel. Grounded, streaming answers from the live
 // transcript. Matches the app's editorial-glass language: glass surface, emerald
@@ -132,14 +133,11 @@ export function CopilotPanel({
               </div>
             </div>
           ) : (
-            <div key={i} className="flex justify-start">
-              <div className="max-w-[92%] whitespace-pre-wrap break-words text-sm leading-relaxed text-ink">
-                {t.content}
-                {streaming && i === turns.length - 1 && (
-                  <span className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse bg-[color:var(--signal)] align-middle" aria-hidden />
-                )}
-              </div>
-            </div>
+            <AssistantTurn
+              key={i}
+              content={t.content}
+              streaming={streaming && i === turns.length - 1}
+            />
           ),
         )}
 
@@ -169,5 +167,60 @@ export function CopilotPanel({
         </button>
       </form>
     </aside>
+  )
+}
+
+// One assistant answer. If it contains a Python block, offer to RUN it in the
+// browser sandbox (Pyodide) — execution-verified correctness, the coding edge.
+function AssistantTurn({ content, streaming }: { content: string; streaming: boolean }) {
+  const [result, setResult] = useState<RunResult | null>(null)
+  const [running, setRunning] = useState(false)
+  // Only offer Run once the answer has finished streaming (code is complete).
+  const code = streaming ? null : extractPython(content)
+
+  const run = async () => {
+    if (!code) return
+    setRunning(true)
+    setResult(null)
+    setResult(await runPython(code))
+    setRunning(false)
+  }
+
+  return (
+    <div className="flex flex-col items-start gap-2">
+      <div className="max-w-[92%] whitespace-pre-wrap break-words text-sm leading-relaxed text-ink">
+        {content}
+        {streaming && (
+          <span className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse bg-[color:var(--signal)] align-middle" aria-hidden />
+        )}
+      </div>
+      {code && (
+        <div className="w-full">
+          <button
+            onClick={run}
+            disabled={running}
+            className="btn-ghost flex items-center gap-1.5 text-xs disabled:opacity-50"
+            title="Run the Python in a sandbox to verify it"
+          >
+            <Play size={12} /> {running ? 'Running…' : 'Run code'}
+          </button>
+          {result && (
+            <div
+              className={`mt-1.5 rounded-lg border px-3 py-2 font-mono text-xs ${
+                result.ok
+                  ? 'border-emerald-700/25 bg-emerald-700/5 text-emerald-900'
+                  : 'border-[color:var(--stop)]/25 bg-[color:var(--stop)]/5 text-[color:var(--stop)]'
+              }`}
+            >
+              <div className="mb-1 flex items-center gap-1.5 font-sans font-medium">
+                {result.ok ? <Check size={12} /> : <X size={12} />}
+                {result.ok ? 'Ran successfully' : 'Error'}
+              </div>
+              <pre className="whitespace-pre-wrap break-words">{result.error ?? result.output ?? '(no output)'}</pre>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   )
 }
