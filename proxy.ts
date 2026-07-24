@@ -32,8 +32,10 @@ export default clerkConfigured && !previewNoAuth
 
 export const config = {
   matcher: [
-    // Skip Next internals and static files unless in search params
-    '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
+    // Skip Next internals and static files unless in search params. Installer
+    // binaries (dmg/exe/msi/gz/sig) are public downloads — exclude them so Clerk
+    // doesn't rewrite /downloads/*.dmg to a 404 for signed-out visitors.
+    '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest|dmg|exe|msi|gz|sig)).*)',
     '/(api|trpc)(.*)',
     '/__clerk/(.*)',
   ],
