@@ -4,6 +4,7 @@ import { Check, Monitor, MonitorOff, Play, Send, Sparkles, X } from 'lucide-reac
 import { useCopilot } from '@/lib/copilot/useCopilot'
 import { useScreenStream } from '@/lib/vision/useScreenStream'
 import { useStoryBank } from '@/lib/copilot/useStoryBank'
+import { useProactive } from '@/lib/copilot/useProactive'
 import { MODE_ORDER, MODE_PROFILES, type CopilotMode } from '@/lib/copilot/modes'
 import { extractPython, runPython, type RunResult } from '@/lib/copilot/pyodideRunner'
 
@@ -32,7 +33,19 @@ export function CopilotPanel({
   const [input, setInput] = useState('')
   const [mode, setMode] = useState<CopilotMode>('general')
   const [showBankEditor, setShowBankEditor] = useState(false)
+  const [auto, setAuto] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
+
+  // Proactive: while auto is on, detected questions in the transcript are asked
+  // automatically in the current mode (behavioral also pulls the story-bank).
+  useProactive(auto, getTranscript, (q) => {
+    if (streaming) return // don't stack onto an in-flight answer
+    void (async () => {
+      const ctx = mode === 'behavioral' && bank.count > 0 ? await bank.retrieve(q) : null
+      const image = screen.sharing ? screen.grabFrame() : null
+      ask(q, mode, image, ctx)
+    })()
+  })
 
   // Tear the screen stream down when the panel closes.
   useEffect(() => () => screen.stop(), []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -42,6 +55,9 @@ export function CopilotPanel({
     const el = scrollRef.current
     if (el) el.scrollTop = el.scrollHeight
   }, [turns])
+
+  // Only this tab's thread — switching modes shows its own Q&A, not a shared one.
+  const visibleTurns = turns.map((t, i) => ({ t, i })).filter(({ t }) => t.mode === mode)
 
   const submit = async (q: string) => {
     if (!q.trim() || streaming) return
@@ -60,6 +76,16 @@ export function CopilotPanel({
         <span className="font-[family-name:var(--font-serif)] text-base font-semibold">Ask</span>
         <span className="hidden text-xs text-black/40 sm:inline">grounded in your transcript</span>
         <div className="ml-auto flex items-center gap-1">
+          <button
+            onClick={() => setAuto((v) => !v)}
+            data-active={auto}
+            title={auto ? 'Auto-answer is ON — questions heard are answered automatically' : 'Auto-answer questions from the meeting'}
+            className="flex items-center gap-1 rounded-full px-2 py-1 text-xs text-black/55 transition-colors hover:bg-black/5 data-[active=true]:bg-emerald-700/10 data-[active=true]:text-emerald-800"
+          >
+            <span className={auto ? 'live-dot' : 'hidden'} aria-hidden />
+            <span className="hidden sm:inline">{auto ? 'Auto on' : 'Auto'}</span>
+            <span className="sm:hidden">A</span>
+          </button>
           <button
             onClick={() => (screen.sharing ? screen.stop() : screen.start())}
             data-active={screen.sharing}
@@ -144,7 +170,7 @@ export function CopilotPanel({
       {screen.error && <p className="border-b border-black/10 px-4 py-1.5 text-xs text-[color:var(--stop)]">{screen.error}</p>}
 
       <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4">
-        {turns.length === 0 && !error && (
+        {visibleTurns.length === 0 && !error && (
           <div className="pt-6 text-center">
             <p className="font-[family-name:var(--font-serif)] text-lg text-black/40">
               Ask anything about what&rsquo;s being said.
@@ -163,7 +189,7 @@ export function CopilotPanel({
           </div>
         )}
 
-        {turns.map((t, i) =>
+        {visibleTurns.map(({ t, i }) =>
           t.role === 'user' ? (
             <div key={i} className="flex justify-end">
               <div className="max-w-[85%] rounded-2xl rounded-tr-md bg-ink px-3.5 py-2 text-sm text-white">

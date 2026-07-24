@@ -5,7 +5,11 @@ import { useCallback, useRef, useState } from 'react'
 // /api/copilot/answer and appends streamed tokens to the latest assistant turn.
 // A new question aborts the prior stream (AbortController) so a stale answer
 // never races the current one.
-export type CopilotTurn = { role: 'user' | 'assistant'; content: string }
+//
+// Each turn is tagged with the MODE it was asked in, so each tab (general /
+// coding / systemDesign / behavioral) shows its OWN thread — switching tabs
+// doesn't leak one mode's Q&A into another.
+export type CopilotTurn = { role: 'user' | 'assistant'; content: string; mode: string }
 
 export function useCopilot(getTranscript: () => string) {
   const [turns, setTurns] = useState<CopilotTurn[]>([])
@@ -17,7 +21,7 @@ export function useCopilot(getTranscript: () => string) {
   transcriptRef.current = getTranscript
 
   const ask = useCallback(
-    async (question: string, mode?: string, image?: string | null, context?: string | null) => {
+    async (question: string, mode: string = 'general', image?: string | null, context?: string | null) => {
       const q = question.trim()
       if (!q) return
       // Cancel any in-flight answer before starting a new one.
@@ -26,9 +30,9 @@ export function useCopilot(getTranscript: () => string) {
       abortRef.current = ctrl
       setError(null)
 
-      // History = prior turns BEFORE this question (bounded server-side too).
-      const history = turns.slice(-8)
-      setTurns((t) => [...t, { role: 'user', content: q }, { role: 'assistant', content: '' }])
+      // History = prior turns in the SAME mode (each tab is its own thread).
+      const history = turns.filter((t) => t.mode === mode).slice(-8).map(({ role, content }) => ({ role, content }))
+      setTurns((t) => [...t, { role: 'user', content: q, mode }, { role: 'assistant', content: '', mode }])
       setStreaming(true)
 
       try {
