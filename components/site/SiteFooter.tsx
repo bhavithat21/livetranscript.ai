@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { Wordmark } from '@/components/nav/Wordmark'
 
 // Shared footer for the public surfaces (landing + shared-transcript view) — the
 // cheapest "this is a real product" trust signal, and it closes the share-view
@@ -8,8 +9,8 @@ export function SiteFooter() {
     <footer className="border-t border-black/10 px-6 py-10">
       <div className="mx-auto flex max-w-5xl flex-col items-start justify-between gap-6 sm:flex-row sm:items-center">
         <div>
-          <Link href="/" className="font-[family-name:var(--font-serif)] text-lg font-semibold">
-            Live<span className="text-[color:var(--signal)]">Transcript</span>
+          <Link href="/">
+            <Wordmark className="text-lg" />
           </Link>
           <p className="mt-1 max-w-xs text-sm text-black/45">
             Real-time AI transcription — every word, the moment it&rsquo;s said.

@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { Menu } from 'lucide-react'
 import { Show, SignInButton, SignUpButton, UserButton } from '@clerk/nextjs'
+import { Wordmark } from './Wordmark'
 
 // The global shell nav. Present on the marketing + library surfaces, and
 // deliberately ABSENT on the focused reading/doing screens (live record, meeting
@@ -21,11 +22,8 @@ export function AppNav({ clerkConfigured }: { clerkConfigured: boolean }) {
         aria-label="Main"
         className="glass glass-interactive mx-auto flex max-w-6xl items-center gap-3 rounded-full px-4 py-2 sm:gap-6 sm:px-5 sm:py-2.5"
       >
-        <Link
-          href="/"
-          className="font-[family-name:var(--font-serif)] text-lg font-semibold tracking-[-0.01em]"
-        >
-          Live<span className="text-emerald-700">Transcript</span>
+        <Link href="/">
+          <Wordmark className="text-lg" />
         </Link>
 
         {/* Desktop: full link row. Phone (< md): collapse secondary links into a
