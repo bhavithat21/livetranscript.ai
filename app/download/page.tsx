@@ -4,12 +4,16 @@ import Link from 'next/link'
 import { Apple, Monitor } from 'lucide-react'
 import { SiteFooter } from '@/components/site/SiteFooter'
 
-// Desktop download page. Links resolve to the LATEST GitHub release (built +
-// signed by the release CI workflow on each version tag). Points at the releases
-// page so users get the current signed installers.
-const REPO = 'https://github.com/bhavithat21/livetranscript.ai'
-const MAC_URL = `${REPO}/releases/latest`
-const WIN_URL = `${REPO}/releases/latest`
+// Desktop download page. Installer URLs are ENV-CONFIGURABLE so we can host the
+// signed .dmg / .exe wherever we like (Vercel Blob public storage, a CDN, a
+// releases page) without touching code — set NEXT_PUBLIC_DOWNLOAD_MAC_URL /
+// NEXT_PUBLIC_DOWNLOAD_WIN_URL when installers exist. Until then the cards show
+// "Coming soon" (no dead links to an empty/private releases page).
+//
+// Recommended host: Vercel Blob (public, same platform, no new vendor) — upload
+// the signed installers and point these env vars at the returned public URLs.
+const MAC_URL = process.env.NEXT_PUBLIC_DOWNLOAD_MAC_URL || ''
+const WIN_URL = process.env.NEXT_PUBLIC_DOWNLOAD_WIN_URL || ''
 
 type OS = 'mac' | 'windows' | 'other'
 
@@ -57,6 +61,16 @@ export default function DownloadPage() {
         />
       </section>
 
+      {(!MAC_URL || !WIN_URL) && (
+        <p className="mx-auto max-w-4xl px-5 pt-4 text-center text-sm text-black/45 sm:px-8">
+          Desktop apps are on the way. In the meantime,{' '}
+          <Link href="/record" className="text-[color:var(--signal)] hover:underline">
+            use LiveTranscript in your browser
+          </Link>
+          .
+        </p>
+      )}
+
       <section className="mx-auto max-w-4xl px-5 py-14 sm:px-8">
         <div className="glass rounded-2xl p-6">
           <h2 className="font-[family-name:var(--font-serif)] text-xl">Automatic updates</h2>
@@ -89,22 +103,38 @@ function DownloadCard({
   detail: string
   highlighted: boolean
 }) {
-  return (
-    <a
-      href={href}
-      className={`glass flex flex-col gap-4 rounded-3xl p-7 transition-transform hover:-translate-y-0.5 ${
-        highlighted ? 'ring-2 ring-emerald-700/40' : ''
-      }`}
-    >
+  const available = Boolean(href)
+  const inner = (
+    <>
       <div className="flex items-center gap-3">
         <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-black/5">{icon}</span>
         <div>
           <div className="font-[family-name:var(--font-serif)] text-xl">{platform}</div>
-          {highlighted && <div className="text-xs font-medium text-emerald-700">Detected — recommended</div>}
+          {available && highlighted && (
+            <div className="text-xs font-medium text-emerald-700">Detected — recommended</div>
+          )}
         </div>
       </div>
       <p className="text-sm text-black/55">{detail}</p>
-      <span className="btn-signal mt-auto w-full">Download for {platform}</span>
+      {available ? (
+        <span className="btn-signal mt-auto w-full">Download for {platform}</span>
+      ) : (
+        <span className="mt-auto w-full cursor-not-allowed rounded-full border border-black/15 bg-black/5 py-2.5 text-center text-sm font-medium text-black/45">
+          Coming soon
+        </span>
+      )}
+    </>
+  )
+  const cls = `glass flex flex-col gap-4 rounded-3xl p-7 ${
+    available ? 'transition-transform hover:-translate-y-0.5' : 'opacity-80'
+  } ${available && highlighted ? 'ring-2 ring-emerald-700/40' : ''}`
+
+  // Real link only when an installer URL is configured; otherwise a static card.
+  return available ? (
+    <a href={href} className={cls} download>
+      {inner}
     </a>
+  ) : (
+    <div className={cls}>{inner}</div>
   )
 }
