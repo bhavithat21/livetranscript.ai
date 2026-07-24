@@ -13,10 +13,21 @@
 // #[tauri::command] here and feed PCM to the web layer via an additive,
 // feature-detected bridge.
 
+// Toggle OS-level screen-capture exclusion at runtime (Windows
+// WDA_EXCLUDEFROMCAPTURE / macOS sharingType=none). The window is created with
+// contentProtected=true, so it's hidden from screen shares by default; this lets
+// the web UI flip it (e.g. a "visible to me only" switch). Feature-detected on the
+// JS side via window.__TAURI__ so the browser build ignores it.
+#[tauri::command]
+fn set_content_protection(window: tauri::Window, enabled: bool) -> Result<(), String> {
+    window.set_content_protected(enabled).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .invoke_handler(tauri::generate_handler![set_content_protection])
         // Auto-update the NATIVE SHELL. Note the web UI already updates on every
         // launch (frontendDist is the remote site); this keeps the wrapper current.
         .plugin(tauri_plugin_updater::Builder::new().build())

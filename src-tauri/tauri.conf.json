@@ -15,9 +15,12 @@
         "minWidth": 380,
         "minHeight": 600,
         "resizable": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "transparent": true,
+        "contentProtected": true
       }
     ],
+    "macOSPrivateApi": true,
     "security": {
       "csp": null
     }
@@ -25,7 +28,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "createUpdaterArtifacts": true,
+    "createUpdaterArtifacts": false,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
