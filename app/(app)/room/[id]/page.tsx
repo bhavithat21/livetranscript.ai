@@ -1,7 +1,7 @@
 'use client'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
-import { BookOpen, Check, Copy, Mic, MicOff, Users } from 'lucide-react'
+import { BookOpen, Check, Copy, Mic, MicOff, Sparkles, Users } from 'lucide-react'
 import { useMicStream, type AudioSource } from '@/lib/audio/useMicStream'
 import { connectWithFallback } from '@/lib/transcription'
 import { transcriptText, type Segment } from '@/lib/transcript/store'
@@ -19,6 +19,7 @@ import { useTextScale } from '@/lib/transcript/useTextScale'
 import { Waveform } from '@/components/transcript/Waveform'
 import { RosterPanel } from '@/components/room/RosterPanel'
 import { FollowAlong } from '@/components/room/FollowAlong'
+import { CopilotPanel } from '@/components/copilot/CopilotPanel'
 import { HomeMenu } from '@/components/nav/HomeMenu'
 import type { TranscriptionProvider } from '@/lib/transcription/types'
 
@@ -225,6 +226,7 @@ function Meeting({ roomId }: { roomId: string }) {
   const [source, setSource] = useState<AudioSource>('mic')
   const [view, setView] = useState<'transcript' | 'chat'>('transcript')
   const [showRoster, setShowRoster] = useState(false)
+  const [askOpen, setAskOpen] = useState(false) // copilot side panel
   const [followSource, setFollowSource] = useState<string | null>(null)
   const [startError, setStartError] = useState<string | null>(null)
   const providerRef = useRef<TranscriptionProvider | null>(null)
@@ -390,6 +392,14 @@ function Meeting({ roomId }: { roomId: string }) {
               Chat
             </button>
           </div>
+          <button
+            onClick={() => setAskOpen((v) => !v)}
+            data-active={askOpen}
+            className="glass glass-interactive flex min-h-10 items-center gap-1.5 rounded-full px-3 text-sm text-black/60 data-[active=true]:text-emerald-800"
+            title="Ask the transcript"
+          >
+            <Sparkles size={15} /> Ask
+          </button>
           <button onClick={onEnd} className="btn-stop" title="End meeting for everyone (Esc)">
             End
           </button>
@@ -490,6 +500,20 @@ function Meeting({ roomId }: { roomId: string }) {
           )}
         </div>
       </div>
+
+      {/* Copilot drawer — grounded in the meeting transcript. Full-width sheet on
+          phones, ~24rem column on desktop. */}
+      {askOpen && (
+        <>
+          <div className="fixed inset-0 z-50 bg-black/10 sm:hidden" onClick={() => setAskOpen(false)} aria-hidden />
+          <div className="fixed inset-y-0 right-0 z-50 w-full sm:w-[24rem]">
+            <CopilotPanel
+              getTranscript={() => transcriptText(segments)}
+              onClose={() => setAskOpen(false)}
+            />
+          </div>
+        </>
+      )}
     </main>
   )
 }

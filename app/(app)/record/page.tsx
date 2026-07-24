@@ -1,12 +1,13 @@
 'use client'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { BookOpen, Mic, MicOff, X } from 'lucide-react'
+import { BookOpen, Mic, MicOff, Sparkles, X } from 'lucide-react'
 import { useMicStream, type AudioSource } from '@/lib/audio/useMicStream'
 import { connectWithFallback, type ProviderChoice } from '@/lib/transcription'
 import { mergeSegments, applyCorrection, transcriptText, type Segment } from '@/lib/transcript/store'
 import { TranscriptView } from '@/components/transcript/TranscriptView'
 import { TextSizeControl } from '@/components/transcript/TextSizeControl'
 import { useTextScale } from '@/lib/transcript/useTextScale'
+import { CopilotPanel } from '@/components/copilot/CopilotPanel'
 import { Waveform } from '@/components/transcript/Waveform'
 import { HomeMenu } from '@/components/nav/HomeMenu'
 import { saveSession } from './actions'
@@ -51,6 +52,7 @@ export default function RecordPage() {
   const { start, stop, error } = useMicStream()
   const { keyterms } = useKeytermPrefs() // user-selected vocab packs (base + overlays)
   const textScale = useTextScale() // reader text-size preference (localStorage)
+  const [askOpen, setAskOpen] = useState(false) // copilot side panel
   const [segments, setSegments] = useState<Segment[]>([])
   const [level, setLevel] = useState(0)
   const [recording, setRecording] = useState(false)
@@ -240,6 +242,14 @@ export default function RecordPage() {
               canInc={textScale.canInc}
             />
             <button
+              onClick={() => setAskOpen((v) => !v)}
+              data-active={askOpen}
+              className="btn-ghost flex items-center gap-1.5 text-sm data-[active=true]:border-emerald-700/40 data-[active=true]:text-emerald-800"
+              title="Ask the transcript"
+            >
+              <Sparkles size={15} /> Ask
+            </button>
+            <button
               onClick={() => setReader(true)}
               className="btn-ghost flex items-center gap-1.5 text-sm"
             >
@@ -354,6 +364,24 @@ export default function RecordPage() {
             <Mic size={16} /> New recording
           </button>
         </div>
+      )}
+
+      {/* Copilot: right-side drawer. Full-width sheet on phones, ~24rem column on
+          desktop. Grounds each answer in the live transcript via segmentsRef. */}
+      {askOpen && (
+        <>
+          <div
+            className="fixed inset-0 z-50 bg-black/10 sm:hidden"
+            onClick={() => setAskOpen(false)}
+            aria-hidden
+          />
+          <div className="fixed inset-y-0 right-0 z-50 w-full sm:w-[24rem]">
+            <CopilotPanel
+              getTranscript={() => transcriptText(segmentsRef.current)}
+              onClose={() => setAskOpen(false)}
+            />
+          </div>
+        </>
       )}
     </main>
   )
