@@ -4,16 +4,12 @@ import Link from 'next/link'
 import { Apple, Monitor } from 'lucide-react'
 import { SiteFooter } from '@/components/site/SiteFooter'
 
-// Desktop download page. Installer URLs are ENV-CONFIGURABLE so we can host the
-// signed .dmg / .exe wherever we like (Vercel Blob public storage, a CDN, a
-// releases page) without touching code — set NEXT_PUBLIC_DOWNLOAD_MAC_URL /
-// NEXT_PUBLIC_DOWNLOAD_WIN_URL when installers exist. Until then the cards show
-// "Coming soon" (no dead links to an empty/private releases page).
-//
-// Recommended host: Vercel Blob (public, same platform, no new vendor) — upload
-// the signed installers and point these env vars at the returned public URLs.
-const MAC_URL = process.env.NEXT_PUBLIC_DOWNLOAD_MAC_URL || ''
-const WIN_URL = process.env.NEXT_PUBLIC_DOWNLOAD_WIN_URL || ''
+// Desktop download page. Installers ship as static assets under /downloads
+// (same origin — no external host needed) so beta users can grab them today.
+// The env vars still OVERRIDE the defaults, so we can later point at a signed
+// build on a CDN / Vercel Blob without touching code.
+const MAC_URL = process.env.NEXT_PUBLIC_DOWNLOAD_MAC_URL || '/downloads/LiveTranscript-mac-arm64.dmg'
+const WIN_URL = process.env.NEXT_PUBLIC_DOWNLOAD_WIN_URL || '/downloads/LiveTranscript-win-x64-setup.exe'
 
 type OS = 'mac' | 'windows' | 'other'
 
@@ -61,15 +57,23 @@ export default function DownloadPage() {
         />
       </section>
 
-      {(!MAC_URL || !WIN_URL) && (
-        <p className="mx-auto max-w-4xl px-5 pt-4 text-center text-sm text-black/45 sm:px-8">
-          Desktop apps are on the way. In the meantime,{' '}
+      {/* Beta honesty: these builds are unsigned, so the OS shows a first-launch
+          warning, and macOS system-audio needs a one-time Screen Recording grant. */}
+      <div className="mx-auto max-w-4xl px-5 pt-5 sm:px-8">
+        <div className="rounded-xl border border-black/10 bg-black/[0.02] p-4 text-sm leading-relaxed text-black/60">
+          <span className="font-medium text-black/75">Beta build.</span> These
+          installers aren&rsquo;t code-signed yet, so on first launch macOS
+          (right-click → Open) and Windows (More info → Run anyway) will ask you
+          to confirm. On Mac, allow{' '}
+          <span className="font-medium text-black/75">Screen&nbsp;Recording</span>{' '}
+          when prompted — that&rsquo;s what lets the app hear a Zoom/Meet call
+          without using your microphone. Prefer no install?{' '}
           <Link href="/record" className="text-[color:var(--signal)] hover:underline">
-            use LiveTranscript in your browser
+            Use it in your browser
           </Link>
           .
-        </p>
-      )}
+        </div>
+      </div>
 
       <section className="mx-auto max-w-4xl px-5 py-14 sm:px-8">
         <div className="glass rounded-2xl p-6">
