@@ -1,8 +1,8 @@
 import { NextRequest } from 'next/server'
-import OpenAI from 'openai'
 import { currentUserId } from '@/lib/auth'
 import { logError } from '@/lib/log'
-import { modeProfile, modelForTier } from '@/lib/copilot/modes'
+import { modeProfile, modelForTier, vendorForModel } from '@/lib/copilot/modes'
+import { streamAnswer } from '@/lib/copilot/providers'
 
 // On-demand copilot answer. Streams tokens back grounded in the transcript the
 // caller passes. Mirrors the auth-guard + input-cap + fail-soft conventions of
@@ -73,56 +73,29 @@ export async function POST(req: NextRequest) {
         .map((t) => ({ role: t.role, content: clean(t.content, MAX_QUESTION) }))
     : []
 
-  const key = process.env.OPENAI_API_KEY
-  if (!key) return Response.json({ error: 'Assistant unavailable' }, { status: 500 })
+  // Purpose-specific model: coding/design => smart (Claude), behavioral/general
+  // => fast (OpenAI). A screen read needs the stronger vision model, so force
+  // 'smart' when an image is attached.
+  let model = modelForTier(image ? 'smart' : profile.tier)
+  // If the smart tier resolves to Anthropic but no key is set, fall back to the
+  // fast (OpenAI) model so the copilot still answers rather than erroring.
+  if (vendorForModel(model) === 'anthropic' && !process.env.ANTHROPIC_API_KEY) {
+    model = modelForTier('fast')
+  }
+  if (vendorForModel(model) === 'openai' && !process.env.OPENAI_API_KEY) {
+    return Response.json({ error: 'Assistant unavailable' }, { status: 500 })
+  }
 
   try {
-    const client = new OpenAI({ apiKey: key })
-    // Final turn is multimodal only when a screen frame is attached. detail:'low'
-    // keeps the image at a flat ~85 tokens — cost-controlled screen reads.
-    const userContent: OpenAI.Chat.ChatCompletionUserMessageParam['content'] = image
-      ? [
-          { type: 'text', text: question },
-          { type: 'image_url', image_url: { url: image, detail: 'low' } },
-        ]
-      : question
-    // Purpose-specific model: the mode's tier (coding/design => smart, behavioral/
-    // general => fast). A screen read needs the stronger vision model regardless
-    // of mode, so force 'smart' when an image is attached.
-    const model = modelForTier(image ? 'smart' : profile.tier)
-    const stream = await client.chat.completions.create({
+    const readable = streamAnswer({
       model,
-      stream: true,
-      temperature: profile.temperature, // per-mode: factual coding vs looser behavioral
-      messages: [
-        // Stable prefix first (mode system + transcript) → prompt-cacheable across
-        // follow-ups; the volatile question (+ optional frame) goes LAST.
-        { role: 'system', content: profile.system },
-        { role: 'system', content: `TRANSCRIPT (most recent):\n${transcript || '(empty so far)'}` },
-        // Retrieved personal grounding (behavioral): the user's own story to base
-        // the STAR answer on. Only present when the story-bank matched.
-        ...(context
-          ? [{ role: 'system' as const, content: `YOUR BACKGROUND (ground the answer in this, do not invent beyond it):\n${context}` }]
-          : []),
-        ...history,
-        { role: 'user', content: userContent },
-      ],
-    })
-
-    const encoder = new TextEncoder()
-    const readable = new ReadableStream<Uint8Array>({
-      async start(controller) {
-        try {
-          for await (const chunk of stream) {
-            const delta = chunk.choices[0]?.delta?.content
-            if (delta) controller.enqueue(encoder.encode(delta))
-          }
-        } catch (e) {
-          logError('api/copilot/answer/stream', e)
-        } finally {
-          controller.close()
-        }
-      },
+      system: profile.system,
+      transcript,
+      context: context || null,
+      history,
+      question,
+      image,
+      temperature: profile.temperature,
     })
     return new Response(readable, {
       headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' },

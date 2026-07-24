@@ -18,18 +18,26 @@ export interface ModeProfile {
   // Purpose-specific model TIER (resolved to a concrete model at request time):
   //   'fast'   — latency-critical, cheap (router/behavioral/general)
   //   'smart'  — strong reasoning, correctness-first (coding/system design)
-  // The concrete model per tier is env-overridable (COPILOT_MODEL_FAST /
-  // COPILOT_MODEL_SMART) so tuning needs no code change or new key.
+  // The concrete model + vendor per tier is env-overridable (COPILOT_MODEL_FAST /
+  // COPILOT_MODEL_SMART) so tuning needs no code change.
   tier: 'fast' | 'smart'
 }
 
-const TIER_DEFAULTS = { fast: 'gpt-4o-mini', smart: 'gpt-4o' } as const
+// Best-per-purpose defaults (2026): fast = OpenAI gpt-4o-mini (cheap, low TTFT);
+// smart = Anthropic Claude Sonnet 5 (best coder + dense-code vision). The vendor
+// is inferred from the model id prefix ('claude-' => Anthropic, else OpenAI), so
+// an env override can switch vendor with no code change.
+const TIER_DEFAULTS = { fast: 'gpt-4o-mini', smart: 'claude-sonnet-5' } as const
 
-// Resolve a tier to a concrete OpenAI model, honoring env overrides. Server-only
-// (reads process.env); the client only ever sends the mode id.
+export type Vendor = 'openai' | 'anthropic'
+
 export function modelForTier(tier: 'fast' | 'smart'): string {
   if (tier === 'smart') return process.env.COPILOT_MODEL_SMART || TIER_DEFAULTS.smart
   return process.env.COPILOT_MODEL_FAST || TIER_DEFAULTS.fast
+}
+
+export function vendorForModel(model: string): Vendor {
+  return model.startsWith('claude') ? 'anthropic' : 'openai'
 }
 
 const GENERAL = `You are the assistant inside LiveTranscript, shown beside a live transcript.

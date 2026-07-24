@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { modeProfile, modelForTier, MODE_PROFILES, MODE_ORDER } from './modes'
+import { modeProfile, modelForTier, vendorForModel, MODE_PROFILES, MODE_ORDER } from './modes'
 
 describe('modeProfile', () => {
   it('returns the requested mode', () => {
@@ -34,5 +34,13 @@ describe('purpose-specific model tiers', () => {
     expect(modelForTier('smart')).toBeTruthy()
     // smart != fast by default (stronger model for correctness-first modes)
     expect(modelForTier('smart')).not.toBe(modelForTier('fast'))
+  })
+  it('routes smart tier to Anthropic (Claude) and fast to OpenAI by default', () => {
+    expect(vendorForModel(modelForTier('smart'))).toBe('anthropic')
+    expect(vendorForModel(modelForTier('fast'))).toBe('openai')
+  })
+  it('vendorForModel infers vendor from the model id prefix', () => {
+    expect(vendorForModel('claude-sonnet-5')).toBe('anthropic')
+    expect(vendorForModel('gpt-4o-mini')).toBe('openai')
   })
 })
