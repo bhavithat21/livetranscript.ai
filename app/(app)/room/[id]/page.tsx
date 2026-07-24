@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { BookOpen, Check, Copy, Mic, MicOff, Sparkles, Users } from 'lucide-react'
 import { useMicStream, type AudioSource } from '@/lib/audio/useMicStream'
+import { useNativeCapture } from '@/lib/audio/useNativeCapture'
 import { connectWithFallback } from '@/lib/transcription'
 import { transcriptText, type Segment } from '@/lib/transcript/store'
 import { useRoom } from '@/lib/room/useRoom'
@@ -205,6 +206,9 @@ function Meeting({ roomId }: { roomId: string }) {
   const { keyterms } = useKeytermPrefs()
   const textScale = useTextScale() // reader text-size preference (localStorage)
   const { start, stop, error } = useMicStream()
+  // Desktop app only: native system-audio tap (macOS ScreenCaptureKit / Windows
+  // WASAPI loopback). No-ops in the browser (start returns 0 → mic path).
+  const native = useNativeCapture()
   const {
     connected,
     error: roomError,
@@ -271,10 +275,12 @@ function Meeting({ roomId }: { roomId: string }) {
     setStartError(null)
     try {
       let provider: TranscriptionProvider | null = null
-      const rate = await start((pcm) => provider?.sendAudio(pcm), setLevel, {
-        source,
-        isMuted: () => mutedRef.current,
-      })
+      const onPcm = (pcm: ArrayBuffer) => provider?.sendAudio(pcm)
+      // Desktop + System source: native OS tap first; 0 → fall back to browser.
+      const nativeRate = source === 'system' ? await native.start(onPcm, setLevel) : 0
+      const rate =
+        nativeRate ||
+        (await start(onPcm, setLevel, { source, isMuted: () => mutedRef.current }))
       const res = await connectWithFallback({ keyterms, sampleRate: rate, maxSpeakers: 1 })
       provider = res.provider
       providerRef.current = provider
@@ -291,14 +297,15 @@ function Meeting({ roomId }: { roomId: string }) {
       stop()
       setStartError(e instanceof Error ? e.message : 'Failed to start')
     }
-  }, [start, stop, publish, mySlot, myClientId, displayName, source, keyterms])
+  }, [start, stop, native, publish, mySlot, myClientId, displayName, source, keyterms])
 
   const onStop = useCallback(async () => {
     stop()
+    void native.stop() // tear down the native tap too (no-op in the browser)
     await providerRef.current?.disconnect()
     setLive(false)
     setLevel(0)
-  }, [stop])
+  }, [stop, native])
 
   // Ending broadcasts to everyone, then leaves. Peers receive 'end' and leave too.
   const onEnd = useCallback(async () => {

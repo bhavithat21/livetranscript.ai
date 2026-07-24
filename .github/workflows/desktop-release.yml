@@ -44,6 +44,20 @@ jobs:
       - name: Install frontend deps (for the Tauri CLI)
         run: pnpm install --frozen-lockfile
 
+      # macOS: compile the ScreenCaptureKit audio sidecar (universal) into the
+      # externalBin path before bundling. Signed with the app identity by
+      # tauri-action so it inherits the app's single Screen-Recording grant.
+      - name: Build macOS audio-capture sidecar
+        if: matrix.platform == 'macos-latest'
+        run: bash scripts/build-audio-helper.sh
+
+      # Windows has no ScreenCaptureKit helper (capture is in-process cpal), but
+      # externalBin still needs a file for the target triple. Drop a placeholder.
+      - name: Placeholder sidecar (Windows)
+        if: matrix.platform == 'windows-latest'
+        run: New-Item -ItemType File -Force src-tauri/binaries/audio-capture-x86_64-pc-windows-msvc.exe
+        shell: pwsh
+
       - name: Build + publish desktop app
         uses: tauri-apps/tauri-action@v0
         env:

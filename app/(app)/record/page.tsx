@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { BookOpen, Mic, MicOff, Sparkles, X } from 'lucide-react'
 import { useMicStream, type AudioSource } from '@/lib/audio/useMicStream'
+import { useNativeCapture } from '@/lib/audio/useNativeCapture'
 import { connectWithFallback, type ProviderChoice } from '@/lib/transcription'
 import { mergeSegments, applyCorrection, transcriptText, type Segment } from '@/lib/transcript/store'
 import { TranscriptView } from '@/components/transcript/TranscriptView'
@@ -50,6 +51,10 @@ async function correctLine(
 
 export default function RecordPage() {
   const { start, stop, error } = useMicStream()
+  // Desktop app only: native system-audio tap (macOS ScreenCaptureKit / Windows
+  // WASAPI loopback). Hears the whole call — incl. the Zoom desktop app, which a
+  // browser tab can't on macOS. No-ops in the browser (start returns 0).
+  const native = useNativeCapture()
   const { keyterms } = useKeytermPrefs() // user-selected vocab packs (base + overlays)
   const textScale = useTextScale() // reader text-size preference (localStorage)
   const [askOpen, setAskOpen] = useState(false) // copilot side panel
@@ -92,10 +97,14 @@ export default function RecordPage() {
     try {
       // Open the source first so we know the REAL sample rate, then tell the provider.
       let provider: TranscriptionProvider | null = null
-      const actualRate = await start((pcm) => provider?.sendAudio(pcm), setLevel, {
-        source,
-        isMuted: () => mutedRef.current,
-      })
+      const onPcm = (pcm: ArrayBuffer) => provider?.sendAudio(pcm)
+      // Desktop + System source: try the native OS tap first (full-system audio,
+      // no screen-share picker). Returns 0 in the browser or if not native, so we
+      // fall back to the existing getDisplayMedia/getUserMedia path.
+      const nativeRate = source === 'system' ? await native.start(onPcm, setLevel) : 0
+      const actualRate =
+        nativeRate ||
+        (await start(onPcm, setLevel, { source, isMuted: () => mutedRef.current }))
       const res = await connectWithFallback(
         { keyterms: keytermsRef.current, sampleRate: actualRate, maxSpeakers: 5 },
         undefined,
@@ -122,10 +131,11 @@ export default function RecordPage() {
     } finally {
       setBusy(false)
     }
-  }, [start, stop, providerChoice, source])
+  }, [start, stop, native, providerChoice, source])
 
   const onStop = useCallback(async () => {
     stop()
+    void native.stop() // tear down the native tap too (no-op in the browser)
     await providerRef.current?.disconnect()
     setRecording(false)
     setLevel(0)
@@ -160,7 +170,7 @@ export default function RecordPage() {
         setBusy(false)
       }
     }
-  }, [stop])
+  }, [stop, native])
 
   const onShare = useCallback(
     async (ttlHours: number, label: string) => {

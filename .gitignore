@@ -42,3 +42,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 .firecrawl/
+
+# compiled native audio-capture sidecars (built by scripts/build-audio-helper.sh
+# on the macOS runner / dev; the .swift source + script are committed)
+src-tauri/binaries/audio-capture-*

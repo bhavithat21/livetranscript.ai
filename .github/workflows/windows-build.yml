@@ -1,0 +1,61 @@
+name: Windows build (unsigned)
+
+# Fast feedback: build an installable NSIS .exe on every push/PR to main and on
+# demand, downloadable as an artifact. Signed releases + the updater manifest
+# stay in desktop-release.yml (tag-triggered only). frontendDist is a remote URL,
+# so there is no web build step — only the Rust/Tauri Windows bundle.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install deps (Tauri CLI + @tauri-apps/api)
+        run: pnpm install --frozen-lockfile
+
+      # externalBin requires a file for the target triple even though the Windows
+      # capture path is in-process cpal and never spawns a sidecar. Drop a no-op
+      # placeholder so the bundler resolves it.
+      - name: Placeholder sidecar (Windows has no ScreenCaptureKit helper)
+        run: New-Item -ItemType File -Force src-tauri/binaries/audio-capture-x86_64-pc-windows-msvc.exe
+        shell: pwsh
+
+      - name: Build unsigned NSIS installer
+        uses: tauri-apps/tauri-action@v0
+        with:
+          projectPath: .
+          tauriScript: npx @tauri-apps/cli
+          args: --target x86_64-pc-windows-msvc --bundles nsis
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-nsis-unsigned
+          path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error

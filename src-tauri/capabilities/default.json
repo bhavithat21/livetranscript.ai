@@ -3,9 +3,22 @@
   "identifier": "default",
   "description": "Base capabilities for the LiveTranscript desktop window.",
   "windows": ["main"],
+  "remote": {
+    "urls": ["https://livetranscript.ai"]
+  },
   "permissions": [
     "core:default",
     "opener:default",
-    "updater:default"
+    "updater:default",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "name": "audio-capture",
+          "sidecar": true,
+          "args": false
+        }
+      ]
+    }
   ]
 }
