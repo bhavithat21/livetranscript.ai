@@ -5,6 +5,8 @@ import { useCopilot } from '@/lib/copilot/useCopilot'
 import { useScreenStream } from '@/lib/vision/useScreenStream'
 import { useStoryBank } from '@/lib/copilot/useStoryBank'
 import { useProactive } from '@/lib/copilot/useProactive'
+import { useAnswerFeed } from '@/lib/copilot/useAnswerFeed'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { MODE_ORDER, MODE_PROFILES, type CopilotMode } from '@/lib/copilot/modes'
 import { extractPython, runPython, type RunResult } from '@/lib/copilot/pyodideRunner'
 
@@ -32,18 +34,21 @@ export function CopilotPanel({
   const bank = useStoryBank()
   const [input, setInput] = useState('')
   const [mode, setMode] = useState<CopilotMode>('general')
+  const feed = useAnswerFeed()
   const [showBankEditor, setShowBankEditor] = useState(false)
   const [auto, setAuto] = useState(false)
+  const [view, setView] = useState<'chat' | 'answers'>('chat')
   const scrollRef = useRef<HTMLDivElement>(null)
 
-  // Proactive: while auto is on, detected questions in the transcript are asked
-  // automatically in the current mode (behavioral also pulls the story-bank).
+  // Proactive: while auto is on, questions heard in the transcript are answered
+  // automatically into the SEPARATE navigable answer feed (not the chat thread).
+  // Behavioral pulls the story-bank; a screen frame attaches if sharing is on.
   useProactive(auto, getTranscript, (q) => {
-    if (streaming) return // don't stack onto an in-flight answer
+    setView('answers') // surface the feed as answers arrive
     void (async () => {
       const ctx = mode === 'behavioral' && bank.count > 0 ? await bank.retrieve(q) : null
       const image = screen.sharing ? screen.grabFrame() : null
-      ask(q, mode, image, ctx)
+      feed.answer(q, mode, ctx, image)
     })()
   })
 
@@ -126,6 +131,25 @@ export function CopilotPanel({
         ))}
       </div>
 
+      {/* Chat vs Answers: the Answers feed holds auto-generated Q&A (proactive),
+          paged prev/next — a separate view from the chat thread. */}
+      <div className="flex items-center gap-1 border-b border-black/10 px-3 py-1.5 text-xs">
+        <button
+          onClick={() => setView('chat')}
+          data-active={view === 'chat'}
+          className="rounded-full px-2.5 py-1 text-black/55 data-[active=true]:bg-ink data-[active=true]:text-white"
+        >
+          Chat
+        </button>
+        <button
+          onClick={() => setView('answers')}
+          data-active={view === 'answers'}
+          className="rounded-full px-2.5 py-1 text-black/55 data-[active=true]:bg-ink data-[active=true]:text-white"
+        >
+          Answers{feed.count > 0 ? ` (${feed.count})` : ''}
+        </button>
+      </div>
+
       {/* Behavioral story-bank — paste resume/STAR stories once; answers ground in
           YOUR real history (the personalization moat). Stored on this device. */}
       {mode === 'behavioral' && (
@@ -169,6 +193,9 @@ export function CopilotPanel({
       )}
       {screen.error && <p className="border-b border-black/10 px-4 py-1.5 text-xs text-[color:var(--stop)]">{screen.error}</p>}
 
+      {view === 'answers' ? (
+        <AnswersView feed={feed} auto={auto} />
+      ) : (
       <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4">
         {visibleTurns.length === 0 && !error && (
           <div className="pt-6 text-center">
@@ -207,6 +234,7 @@ export function CopilotPanel({
 
         {error && <p className="text-sm text-[color:var(--stop)]">{error}</p>}
       </div>
+      )}
 
       <form
         onSubmit={(e) => {
@@ -266,6 +294,49 @@ function StoryBankEditor({
         <span className="text-[11px] text-black/40">Stored locally · used only to ground your answers</span>
       </div>
       {error && <p className="mt-1 text-xs text-[color:var(--stop)]">{error}</p>}
+    </div>
+  )
+}
+
+// The navigable auto-answer feed: one Q&A card at a time, paged prev/next.
+function AnswersView({
+  feed,
+  auto,
+}: {
+  feed: ReturnType<typeof useAnswerFeed>
+  auto: boolean
+}) {
+  if (feed.count === 0) {
+    return (
+      <div className="flex-1 overflow-y-auto px-4 py-8 text-center">
+        <p className="font-[family-name:var(--font-serif)] text-lg text-black/40">
+          {auto ? 'Listening… answers to questions will appear here.' : 'Turn on Auto to auto-answer questions from the meeting.'}
+        </p>
+      </div>
+    )
+  }
+  const e = feed.current
+  return (
+    <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="flex items-center gap-2 border-b border-black/10 px-4 py-2 text-xs text-black/50">
+        <button onClick={feed.prev} disabled={feed.cursor === 0} className="rounded-full p-1 hover:bg-black/5 disabled:opacity-30" aria-label="Previous">
+          <ChevronLeft size={16} />
+        </button>
+        <span className="tabular-nums">{feed.cursor + 1} / {feed.count}</span>
+        <button onClick={feed.next} disabled={feed.cursor >= feed.count - 1} className="rounded-full p-1 hover:bg-black/5 disabled:opacity-30" aria-label="Next">
+          <ChevronRight size={16} />
+        </button>
+        <button onClick={feed.clear} className="ml-auto rounded-full px-2 py-1 text-black/45 hover:bg-black/5 hover:text-ink">Clear</button>
+      </div>
+      <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
+        <div className="text-xs font-medium uppercase tracking-wide text-[color:var(--signal)]">Question</div>
+        <p className="text-sm font-medium text-ink">{e?.question}</p>
+        <div className="text-xs font-medium uppercase tracking-wide text-black/40">Answer</div>
+        <div className="whitespace-pre-wrap break-words text-sm leading-relaxed text-ink">
+          {e?.answer}
+          {e?.streaming && <span className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse bg-[color:var(--signal)] align-middle" aria-hidden />}
+        </div>
+      </div>
     </div>
   )
 }
