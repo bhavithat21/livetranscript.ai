@@ -208,3 +208,144 @@ Each phase clones the `/api/correct` template (auth guard + caps + fail-soft + `
 ---
 
 **Deferred deliberately (add when triggered):** multi-model racing (cost > marginal latency), self-hosted STT (Deepgram's ~300ms floor is already good), a custom cache/diffing library (hand-rolled MAD covers it). — skipped: over-abstraction; add when the simple path measurably falls short.
+
+---
+
+# ADDENDUM — Domain Excellence: Coding, System Design, Behavioral
+
+**Status:** Design, pre-build · **Owner:** Principal Eng · **Reviewer:** Founder
+**Scope:** turn the generic §1–§10 copilot into a *best-in-market* interview/work copilot that beats Cluely on the three modes that actually decide interviews. **Nothing here is a new architecture** — every mode is a preset over the router/vision/grounding primitives already designed above.
+
+## A1. The thesis
+
+One answer engine can't be best at all three modes because the three modes want *opposite* things: coding is vision-heavy and latency-tolerant (correctness > 0.9s), system design is transcript-heavy and stateful over 45 min, behavioral is transcript-only and latency-critical (<1s or it's visible). Cluely and the whole OSS/commercial field run **one engine for everything** and are therefore mediocre-everywhere and wrong-often. Our edge is **mode-specialization riding the router we already built**: a `mode` label added to Tier-R turns each mode into a **router profile** that presets `{needsScreen, needsWeb, complexity}` + capability tier + grounding source + output format. Coding inverts the transcript-first default (`needsScreen=true, complexity=reasoning`, synchronous high-detail vision); system design is the reasoning-default mode (`complexity=reasoning`, rolling-memo state, async diagram vision); behavioral is the speed mode (`needsScreen=false`, Tier-A only, retrieval-bound, speculative-on-interim). Same plumbing, three presets — that's the whole trick, and it's cheap to build because §3's router already emits the flags each profile just needs to hard-set.
+
+## A2. Competitive landscape
+
+| Tool | Coding | System Design | Behavioral | Core weakness we exploit |
+|---|---|---|---|---|
+| **Cluely** (a16z, ~$20M) | "mostly wrong" (Reddit) — prints, never runs | none (stateless transcript-tail) | generic + **fabricates resume experience** (Business Insider caught it) | advertises ~300ms, measured 5–10s; one engine; undetect paywalled $149.99/mo |
+| **Interview Coder** (~$60/mo) | strong, screenshot→solution+complexity, never runs | none | none | coding-only screenshotter, no audio, no grounding |
+| **Final Round AI** (10M+ users, the real threat) | decent | none (routes by type, same model) | resume-upload personalization (shallow) | jack-of-all-trades depth; "within seconds" not sub-1s; no story bank; no design canvas |
+| **LockedIn AI** (869k, $54.99/mo) | coding-optimized | none | generic | credit anxiety, undifferentiated latency |
+| **Sensei AI** ($89/mo) | weak | none | resume/JD context | "fails in live calls" (Reddit), browser-only stealth/latency ceiling |
+| **cheating-daddy / Glass / cue** (OSS) | ungrounded | none | ungrounded | single live socket → structurally can't route/ground/specialize; confabulate freely |
+
+**The 5–7 edges we win on (all defensible, hard to retrofit):**
+1. **Grounded-or-refuse everywhere** — the already-designed Tier-R `answerable` flag + refuse-when-absent (§6.1–2). Directly kills the field's #1 failure: confident fabrication.
+2. **True per-mode specialization** — `mode:{coding|systemDesign|behavioral|generic}` on Tier-R selects prompt + tier + input priority + **output format**. Highest leverage-to-effort win; nobody else does it.
+3. **Per-user grounding layer (the moat)** — resume + projects + STAR story bank embedded pre-interview, retrieved into every turn. Beats Final Round's shallow resume-upload; compounds per user.
+4. **System-design canvas + capacity-KB grounding** — the empty category; a stateful framework scaffold no competitor ships.
+5. **Honest mode-aware latency SLAs** — behavioral pinned <1s, coding/design 2–4s. Real numbers vs Cluely's fictional 300ms are a marketing weapon.
+6. **Speakable, not readable output** — glanceable STAR cues / narratable approach-first code / a design checklist you drive. Attacks the "scripted delivery" detection vector everyone ignores.
+7. **Screen-vision first-class for coding/design, gated OFF behavioral** — the `needsScreen × mode` matrix stops coding from being "mostly wrong" without taxing behavioral latency.
+
+## A3. Mode profiles
+
+### A3.1 Coding — vision-heavy, execution-verified
+
+**A-grade answer:** correct AND optimal at the complexity the on-screen constraints demand, in the exact language + method signature shown, verified by running the problem's own sample cases. Reads statement/constraints/examples/stub with zero OCR drift; picks the algorithm the constraint budget allows (`n≤1e5 ⇒ O(n log n)`, `n≤20 ⇒ bitmask`, `n≤500 ⇒ O(n³)` is fine) and says why; matches `class Solution.method` (never a rogue `main()`); proves it by executing samples and self-repairing; hands over approach + Time/Space + edge cases the candidate narrates as their own; keeps follow-ups ("optimize it", "huge input") coherent with the *same* problem.
+
+**Router profile (inverts the §1 transcript-first default):** `mode=coding` hard-sets `needsScreen=true`, `complexity=reasoning`, `needsWeb=false`. Tier-R does **not** gate the initial solve — it only classifies follow-up intent (new-problem vs optimize vs explain vs dry-run vs scroll).
+
+**Inputs (captured DIFFERENTLY from §5's ambient path):** SCREEN is primary and dominant — full/near-full-res crop of the problem panel + editor at **JPEG q0.9**, NOT §5's 768px/q0.6/low-detail. Dense text is the whole point: `10^5` vs `10^9`, `<=` vs `<`, `l` vs `1` flip the correct algorithm, so §3's flat-85-token `detail:low` read is disqualifying here. Audio is secondary but essential (verbal constraints the screen never shows — "assume sorted", "no built-in sort" — and follow-up intent). User docs: not needed.
+
+**Model tier + pass strategy — 2 model + 1 execution + conditional repair, escalate never race:**
+1. **VISION EXTRACT** → structured schema `{statement, constraints, examples[], signature, language, existingCode}`. Tier-A/B vision at **HIGH detail**; escalate Tier-C only on dense code/diagrams/handwriting or low OCR confidence.
+2. **SOLVE** — Tier-B strong coder default; escalate Tier-C for DP/graph/hard or after a failed repair.
+3. **VERIFY = EXECUTION-first** — run the extracted samples in an isolated sandbox (deterministic, cheaper, far more accurate than an LLM judge). On failure, repair loop (feed failing case + error back, max ~2 iters). LLM self-critique (Tier-B/C) only when there are no runnable examples.
+   - **Sandbox:** start client-side WASM (**Pyodide** for Python, JS-in-worker) — covers most interview languages, zero server cost, discreet, low-latency. Add a server/Vercel isolated sandbox for compiled langs (Java/C++/Go) only when needed. **Security is a hard trust boundary:** ephemeral, no network, no filesystem, CPU/mem/time caps; never `eval` in-process or on the app server.
+
+**Grounding + accuracy:** ground strictly in the extracted on-screen schema, **not the model's memory of a same-named problem** (the anti-pattern is confidently solving canonical "Two Sum" when the screen shows a twist). Empirical grounding is the core — a failing sample triggers repair and is NEVER shown as verified. **Constraint→complexity is a HARD gate:** correct-but-TLE code for the stated `n` is a fail, not a pass. Fuse verbal constraints from the transcript. Surface low-OCR-confidence lines; flag "constraints may be below the fold" on a scrolled problem rather than guessing. No runnable examples ⇒ LLM self-trace, clearly labelled *unverified*.
+
+**Latency (tolerant, must feel fast):** biggest win is **proactive pre-extraction** — the moment coding mode is on and a code-screen is detected (cheap OCR heuristic), extract the schema into the rolling memo *before* the user asks, so solve fires instantly at hotkey time. Stream approach-first (intuition ~1.5–2.5s), code streams, then Time/Space; the **verify badge fills in async** — never block render on the sandbox. Full verified solution ~4–8s. Parallelize solve-then-stream with sandbox-verify. Follow-ups skip re-OCR: schema lives in the memo and the MAD gate distinguishes scroll-of-same-problem from a new one.
+
+**UX/output (streaming + narratable):** (1) one-line intuition/approach (streams first); (2) language- + signature-matched code block w/ copy; (3) `Time O(…) · Space O(…)` + one-clause why; (4) terse edge-cases bullets (empty/single/dupes/overflow/negatives); (5) async verify badge (`✓ 3/3 samples` / `⚠ failed #2 — repairing`); (6) a "say-this" narration track. Follow-up chips: Optimize · Explain complexity · Dry-run · Huge-input variant. Dim, small, hotkey-driven, no focus-steal.
+
+**Beats Cluely by:** we EXECUTE the problem's own samples and self-repair — empirical correctness vs their print-and-pray. Plus constraint-driven complexity targeting, high-fidelity OCR of dense operators, exact signature/language match, solving the on-screen *variant* not the famous look-alike, and instant-feeling proactive pre-extraction.
+
+### A3.2 System Design — stateful, diagram-aware, the empty category
+
+**A-grade answer:** track the WHOLE evolving 45-min conversation, not one question. Hold accurate state of requirements as they drift (functional + non-functional: scale/latency/consistency), decisions made and WHY; know where the discussion sits in the canonical arc (requirements → estimation → API → data model → high-level → scale/bottlenecks → tradeoffs) and surface the next unaddressed step; read the Excalidraw/whiteboard diagram and reconcile it against what was SAID ("you said shard by user_id but the canvas shows one DB"); give reasoning-tier tradeoffs that cite WHY (an NFR or napkin-math, not tech-name-dropping — "add a cache because reads need <200ms p99"); proactively flag open threads and missing components. Correctness of state and reasoning beats speed.
+
+**Router profile (THE reasoning mode):** `mode=systemDesign` sets `complexity=reasoning` almost always, `needsScreen=true` (diagram matters more here than any mode — the diagram *is* the artifact; §5's already-open `getDisplayMedia` video track, thrown away today, is kept), `needsWeb=false` (grounding is the memo + a curated KB, not the web). Tier-R gates each turn. **Default answer = Tier-B**; escalate **Tier-C** for diagram reads, deep tradeoffs, and capacity math. This is the one mode where §6.4's reserved verification pass actually fires — a cheap LLM-judge checks tradeoff/math claims for unsupported assertions.
+
+**Inputs (ranked):** (1) AUDIO transcript — the spine; the whole conversation matters. (2) SCREEN frames of the diagram — diagram vision = **Tier-C** (Excalidraw boxes/arrows/labels need OCR + spatial reasoning; this is §3's reserved "look closely" case), async-cached into a `diagramState`, refreshed only when the MAD gate detects the canvas changed. (3) A small curated **capacity/latency reference sheet** (QPS/storage constants, single-Redis ~100k ops/s, SSD read ~1ms, the latency ladder) so estimation cites real numbers with `[n]` ids (§6.3 pre-render-validated). User docs: low value. The `systems` keyterm pack (consistent hashing, sharding, backpressure, P99…) is already in `DEFAULT_PACK_IDS`, so ASR of design jargon is already helped.
+
+**Multi-pass (latency headroom exists):** (a) async **rolling-memo update off `onFinal`** (cheap Tier-A/B diff-merge, OFF the answer critical path — same fire-and-forget pattern as `correctLine`); (b) Tier-R gate; (c) Tier-B/C structured answer; (d) verification pass. The memo is a structured living object — `{reqs, estimates, api, dataModel, components[onDiagram], decisions[+tradeoff], openThreads, interviewerSignals}` — updated by incremental **correcting** diff-merge on finals and **periodically rebuilt from scratch (~every 10 min or on topic shift)** to stop compounding drift. It lives client-side like `segments[]` ⇒ ~0ms context assembly.
+
+**Grounding:** ground in the memo + recent transcript deltas, NOT the web. §6.1's "refuse when absent" reframes here as **"flag what is still undecided"** rather than confabulate (design has no single right answer). Cross-modal grounding is the differentiator: reconcile spoken decisions against the drawn diagram, tie every suggestion to a stated requirement/NFR. The reference sheet is the one place light RAG earns its keep — estimation cites real numbers, never hallucinated math (the classic system-design failure).
+
+**Latency (least sensitive — the candidate monologues):** first token ~1.5–2.5s, full structured answer ~3–5s acceptable. Make slow-but-smart FEEL fast: stream section headers first (framework skeleton paints <1s); the memo means we **never re-read the growing raw transcript**, so prefill stays cheap and TTFT stays ~1.5s even at minute 45; prefix-cache `[system + memo]` (memo append-stable, current question LAST — §7.4); **proactive "next component / open thread" nudges precomputed on the async memo track** so they're already in the panel at ask time (0 latency); §7.5 1-token prewarm on session start.
+
+**UX/output:** framework-mapped collapsible sections (Requirements | Estimates | API | Data Model | High-Level | Deep Dives | Tradeoffs) with a **stage-progress rail** (covered-vs-open). A persistent non-interrupting **Open threads / Next** side rail. Diagram-reconciliation callout chips ("canvas vs spoken mismatch"). Tradeoffs render as a compact **Option A/B table** (consistency / latency / cost / complexity), not prose, + a suggested **diagram delta** ("add: CDN on the read path"). Estimation SHOWS the math (`QPS = DAU × actions × peak / 86400`), not just the number.
+
+**Beats Cluely by:** the rolling memo = accurate whole-conversation state at flat per-request cost (at minute 40 it still knows the requirement from minute 3); framework-stage tracker + "what you haven't covered" coaching shapes the arc; spoken-vs-drawn reconciliation an audio-only overlay literally cannot do; reasoning default + verification + napkin-math grounding = cited tradeoffs not guesses; all heavy reasoning runs on the async memo track so the smartest tier costs no perceived latency.
+
+### A3.3 Behavioral — retrieval-bound, speed mode, the personalization unlock
+
+**A-grade answer:** a true, specific, defensible STAR answer from the USER'S real history, on screen as glanceable bullets before they finish being asked. Pull the right prepared story for the competency (conflict/failure/leadership/ambiguity/deadline/disagreement/influence-without-authority); reshape into crisp S-T-A-R bullets fitted to the exact question; surface the real numbers/names to say aloud; **NEVER fabricate** an achievement, metric, company, or outcome. The reasoning was already done when the user wrote the story — this mode is **retrieve + reframe + refuse-to-invent**, not deep reasoning. Non-negotiable: below the similarity threshold, say "no prepared story for X — nearest is Y" and fall back to resume bullets. An answer the user can't defend under follow-up is worse than no answer.
+
+**Router profile (speed mode):** `mode=behavioral` hard-sets `needsScreen=false` (the whole §5 vision path stays OFF — that alone removes the biggest latency tax), `complexity=simple` (never a reasoning turn ⇒ **never pays the §6.4 verification tax**), `needsWeb=false`. Detection is **heuristic-first**: regex on the utterance for behavioral shape ("tell me about a time", "describe a situation", "give me an example", "how did you handle", "walk me through when…") + a competency keyword map — 0 cost, 0 latency on the common case. Tier-R model only on ambiguous phrasing. ANSWER = **Tier-A only, single-pass, streamed markdown** (no `json_object`). No escalation, no vision, no verification — escalation only behind an explicit "reframe/polish" tap (Tier-B), never hot-path.
+
+**Inputs (ranked):** (1) USER CORPUS is everything — resume + a prepared STAR-stories doc (+ optional brag doc / LinkedIn / project write-ups), uploaded once and embedded at ingest (see §A4). (2) audio transcript of the question — already in `segments[]`; the **interim utterance is the latency lever**. (3) screen: off. Corpus > audio >> screen(off).
+
+**Grounding (ONLY the user's corpus — the polar opposite of Cluely's question-only generation):** system prompt: *"Compose a STAR answer using ONLY the retrieved story below. Do not invent companies, roles, metrics, dates, or outcomes not present in the source. If the retrieved story doesn't fit, say so."* Match competency → best story (tag-match, then cosine top-1, keep top-2 as swap fallback). Every retrieved chunk + transcript slice is untrusted → existing `sanitizeKeyterms` scrub (a live interviewer can say "ignore previous instructions"). Refuse-when-absent renders "No prepared story for '<competency>' — closest is '<title>', or improvise from these resume bullets". `temperature` 0–0.3.
+
+**Latency — hard target: bullets visible AS the interviewer finishes asking (~sub-1s after question-end, often earlier):**
+1. **Speculative draft on the interim** — reuse §3/§7's speculative pattern and the existing `onFinal`/interim closure in `record/page.tsx`: the moment the interim reads "tell me about a time you had a con…", classify (heuristic, 0ms), retrieve, start streaming the draft; if the final diverges, `AbortController` kills it (same per-turn abort already used). Buys the whole question-tail (~1–2s of the interviewer still talking) for free.
+2. **Retrieval is effectively free** — corpus pre-embedded at upload, so at question time it's tag-match first (0 network), then only if no tag hit ONE query embed (~150–300ms) + brute-force cosine over <50 vectors (<1ms). No index build, no DB round trip.
+3. Tier-A streamed TTFT ~0.7–0.9s, overlapping the embed. §7.5 prewarm removes cold-prefill on the first question. Net: first STAR bullet lands ~0.3–0.9s after question-end.
+
+**UX/output:** a glanceable STAR scaffold, **never a paragraph, never a verbatim script** (reading verbatim sounds robotic → detectable). Headline = matched story title + competency ("Conflict → 'The API migration standoff'"), then four labeled one-line bullets **S / T / A / R**, first-person, with the concrete **number/name BOLDED** (the load-bearing bit under cross-examination). ~5 bullets, large high-contrast type, scannable in a peripheral glance while speaking. A "different story" chip swaps to the top-2 match. Streams token-by-token via `res.body.getReader()` so S is usable while A/R arrive. Optional one-tap "reframe" (Tier-B).
+
+**Beats Cluely by:** Cluely invents a plausible "time I had conflict" that isn't true, doesn't match the resume the interviewer is holding, can't survive follow-up, and is the same canned story every user gets. We retrieve the user's OWN prepared story — true, specific, resume-consistent, defensible — and it's *faster* because retrieval is near-zero and we draft speculatively on the interim. Personalization + refuse-to-fabricate + speculative-on-interim is the edge.
+
+## A4. Personalization layer (the behavioral unlock)
+
+This is the biggest differentiator vs generic Cluely and the one thing incumbents can't cheaply retrofit (they've productized the confident guess). It is deliberately **tiny and boring** — no vector DB.
+
+- **Upload (pre-interview prep flow, not live):** user uploads resume + a STAR-stories doc (+ optional brag doc / LinkedIn export / project write-ups). Ingest chunks the resume into role/achievement chunks and the STAR doc into **one-chunk-per-story (~200–400 tok each)**.
+- **Embed (once, at upload):** batch-embed all chunks with a small embedding model (e.g. `text-embedding-3-small`, 1536d) in a **single call**. Store `{id, text, embedding, competencyTags, storyTitle}`.
+- **Storage — no vector DB:** corpus is tiny (<~50 chunks / <100KB), so it lives in **IndexedDB client-side** (or one user-scoped server row). `ponytail:` NO pgvector/Pinecone/index for 50 vectors — **brute-force cosine in JS is microseconds**; upgrade path is a real vector store only if a user's corpus ever exceeds a few hundred chunks, which an interview prep corpus won't.
+- **Retrieval latency:** tag-match first (0 network) → on miss, one query embed (~150–300ms) + brute-force cosine over <50 vectors (<1ms). Meets the <1s bar with margin. Re-embed on upload/edit so a changed resume never serves stale vectors.
+- **Privacy:** resume + stories are sensitive PII — store user-scoped, encrypt at rest, **never log payloads** (reuse §5's `logError`-context-not-payload rule), keep the corpus client-side (IndexedDB) where feasible so it never leaves the device except as a transient retrieval slice in the prompt.
+- **Cross-mode payoff:** coding/design can also cite the user's *real* stack/experience from this same corpus ("you did this at scale on the Kafka pipeline in your resume").
+
+## A5. The accuracy bar (avoid plausible-but-wrong — the field's #1 failure)
+
+The category-wide gap is that everyone confabulates because nobody grounds+refuses. Per mode:
+
+- **Coding:** code that **compiles and passes the problem's own sample cases** in the sandbox — empirical, not judged. Constraint→complexity is a hard gate (TLE = fail). Solve the on-screen variant, not the look-alike. No runnable examples ⇒ label *unverified*. This is the exact fix for Cluely's "mostly wrong" coding reputation.
+- **System Design:** tradeoffs grounded in a stated NFR or napkin-math, not tech-name-dropping; capacity estimates grounded in the reference sheet (`[n]` cited, pre-render-validated) so throughput numbers are real; the verification pass checks math + unsupported assertions; spoken-vs-drawn reconciliation catches self-contradiction. "Flag what's undecided" instead of inventing a false single answer.
+- **Behavioral:** grounded STRICTLY in the user's corpus; hard refuse-when-absent tuned **conservatively** (a too-eager "find a story" recreates Cluely's fabrication — the honest "no strong match, improvise from these bullets" is the whole point). This is the exact fix for the Business-Insider-documented resume fabrication.
+
+Shared plumbing already designed: `[n]` citations with pre-render validation, `sanitizeKeyterms` scrub of every untrusted slice, `temperature` 0–0.3, reasoning-only verification pass.
+
+## A6. The latency bar (honest per-mode SLAs — the opposite of Cluely's fictional 300ms)
+
+| Mode | First visible token | Full answer | The move that gets there |
+|---|---|---|---|
+| **Behavioral** | **<1s** (~0.3–0.9s after question-end) | streamed | **speculative draft on the interim** + pre-embedded retrieval + Tier-A + no vision + prewarm. Hardest + clearest daylight vs the 5–10s field — the SLA to obsess over. |
+| **Coding** | approach ~1.5–2.5s | verified ~4–8s | proactive pre-extraction (schema cached before ask) + stream approach-first + **async verify badge** (never block on sandbox) + parallel solve/verify |
+| **System Design** | ~1.5–2.5s | ~3–5s | rolling memo (never re-read raw transcript) + stream section headers first + precomputed nudges (0 latency) + prefix-cache `[system+memo]` |
+
+Shared levers already in §7: token-streaming, fast-model-default + on-demand escalation, vision off the text critical path (async-cached), prefix caching, MAD diff gate. Add ~50–150ms client RTT. **The behavioral <1s under real audio jitter (accents, crosstalk, incomplete sentences) is the genuine engineering challenge** — the same conditions that blew Cluely from 300ms to 5–10s. It's the headline claim, so it must be real; budget engineering time for it.
+
+## A7. Phasing onto the base plan
+
+Ship in **difficulty order** — the cheap edges alone put us ahead of Cluely for near-zero build cost.
+
+- **Layers onto Phase 1 (transcript chat):** add the `mode:{coding|systemDesign|behavioral|generic}` label to Tier-R (heuristic-first, edge #2) + mode-specific **output formats** (edge #6) + **behavioral mode end-to-end** (Tier-A, transcript-only, speculative-on-interim, refuse-when-absent) *if* the personalization corpus is ready. Behavioral needs no vision, so it can ship on the Phase-1 streaming route. **CHEAP: prompt/format + router-label work.**
+- **Layers onto Phase 2 (screen vision):** **coding mode** (edge #7 + high-detail vision extract + sandbox verify) and the `needsScreen × mode` matrix. Coding's high-detail q0.9 capture is a *variant* of Phase 2's `useScreenStream`, not new capture. Sandbox (Pyodide client-side) is the one genuinely new component. **MEDIUM.**
+- **Layers onto Phase 3 (router + RAG + proactive):** **system-design canvas** (rolling memo already in Phase 3, extended to the structured design object + capacity KB via the RAG lane + diagram Tier-C vision + verification pass), and the **per-user personalization store** (uses Phase 3's embedding/vector budget, but stays IndexedDB + brute-force cosine — no pgvector). **HARD ceiling: defer the canvas but plan it; don't gate launch on it.**
+
+**Blocked on founder** (extends §9's list):
+- **User-doc upload + embedding/vector store** — the personalization corpus (resume/STAR bank). Needs the prep-flow UX sign-off + embedding-model budget (tiny: <50 chunks/user, one batch call at upload). This is the moat — prioritize it.
+- **Model budgets** — Tier-B/C for coding solve + design reasoning ($3/$15 balanced, $5/$25 flagship, but router-gated to a small fraction of turns); embedding-model spend (negligible).
+- **Coding sandbox decision** — client-side Pyodide/JS-worker covers most; server isolated sandbox for compiled langs only if interview demand shows it.
+- **Capacity/latency reference sheet** — curate the ~1-page KB of real numbers for system-design estimation grounding.
+
+## A8. Positioning note
+
+There is a real tension between **interview-assist** and **legitimate live-notes/meeting copilot**, and the honest move is to hold both rather than pretend it away. Frame and default the product as a **live meeting/prep copilot grounded in truth**: the durable moat is per-user grounding + mode specialization + accuracy — data/UX moats an OS feature (Apple Intelligence / Windows Copilot / Gemini-in-Meet, all absorbing the overlay commodity in ~12–18 months) won't replicate — **not** stealth, which is a commoditizing dead-end and the source of Cluely's liability profile (surprise billing, ARR-lie press, detection arms race). So: name the modes for their *legitimate* use (interview *prep* + real-time notes, design-review copilot, coding pair-notes), default to grounded-and-truthful (behavioral literally *refuses to fabricate*, which is both the ethical and the competitive position), and let discretion be a user setting, not the pitch. Screen-share invisibility is one layer; gaze/audio/proctoring detection is unaddressed by every tool and out of scope to "solve." Positioning around genuine prep + truthful grounding is both more defensible and more durable than the "cheat undetectably" liability we'd inherit by aping Cluely's marketing.
