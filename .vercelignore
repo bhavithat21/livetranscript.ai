@@ -1,0 +1,8 @@
+# The web app is all Vercel needs. Exclude the native desktop crate — its Rust
+# build output (src-tauri/target) is gigabytes and was blowing up the upload,
+# stalling deploys. None of this ships to the web runtime.
+#
+# NOTE: do NOT ignore *.dmg/*.exe globally — public/downloads/*.dmg is the Mac
+# installer the /download page serves and must be uploaded.
+src-tauri
+.firecrawl
