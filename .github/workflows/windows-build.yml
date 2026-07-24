@@ -6,7 +6,9 @@ name: Windows build (unsigned)
 # so there is no web build step — only the Rust/Tauri Windows bundle.
 on:
   push:
-    branches: [main]
+    # Production + working branch is `master` (Vercel deploys from it); `main` is
+    # kept for anyone who fast-forwards it. Either triggers the build.
+    branches: [master, main]
   pull_request:
   workflow_dispatch:
 
