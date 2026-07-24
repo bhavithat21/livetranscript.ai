@@ -17,7 +17,7 @@ export function useCopilot(getTranscript: () => string) {
   transcriptRef.current = getTranscript
 
   const ask = useCallback(
-    async (question: string, mode?: string) => {
+    async (question: string, mode?: string, image?: string | null) => {
       const q = question.trim()
       if (!q) return
       // Cancel any in-flight answer before starting a new one.
@@ -35,7 +35,7 @@ export function useCopilot(getTranscript: () => string) {
         const res = await fetch('/api/copilot/answer', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ question: q, transcript: transcriptRef.current(), history, mode }),
+          body: JSON.stringify({ question: q, transcript: transcriptRef.current(), history, mode, image: image ?? undefined }),
           signal: ctrl.signal,
         })
         if (!res.ok || !res.body) {

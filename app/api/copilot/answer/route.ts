@@ -18,6 +18,8 @@ import { modeProfile } from '@/lib/copilot/modes'
 const MAX_TRANSCRIPT = 60_000
 const MAX_QUESTION = 2_000
 const MAX_HISTORY = 8
+// A downscaled JPEG data URL is well under this; caps a hostile/oversized payload.
+const MAX_IMAGE_CHARS = 1_200_000 // ~900KB base64
 
 // Match C0 control chars (0x00-0x1F) + DEL (0x7F), built without literal control
 // chars in source so the file stays clean-editable.
@@ -35,7 +37,13 @@ export async function POST(req: NextRequest) {
   const userId = await currentUserId()
   if (!userId) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
-  let body: { question?: string; transcript?: string; history?: ChatTurn[]; mode?: string }
+  let body: {
+    question?: string
+    transcript?: string
+    history?: ChatTurn[]
+    mode?: string
+    image?: string // optional screen frame, base64 data URL (Phase 2 vision)
+  }
   try {
     body = await req.json()
   } catch {
@@ -43,6 +51,13 @@ export async function POST(req: NextRequest) {
   }
 
   const profile = modeProfile(body.mode) // coding / systemDesign / behavioral / general
+  // Only accept a well-formed, size-capped image data URL; ignore anything else.
+  const image =
+    typeof body.image === 'string' &&
+    body.image.startsWith('data:image/') &&
+    body.image.length <= MAX_IMAGE_CHARS
+      ? body.image
+      : null
   const question = clean(body.question?.trim() ?? '', MAX_QUESTION).trim()
   if (!question) return Response.json({ error: 'Empty question' }, { status: 400 })
   // Keep the MOST RECENT transcript (tail) — what "answer about what was just
@@ -60,17 +75,25 @@ export async function POST(req: NextRequest) {
 
   try {
     const client = new OpenAI({ apiKey: key })
+    // Final turn is multimodal only when a screen frame is attached. detail:'low'
+    // keeps the image at a flat ~85 tokens — cost-controlled screen reads.
+    const userContent: OpenAI.Chat.ChatCompletionUserMessageParam['content'] = image
+      ? [
+          { type: 'text', text: question },
+          { type: 'image_url', image_url: { url: image, detail: 'low' } },
+        ]
+      : question
     const stream = await client.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: 'gpt-4o-mini', // multimodal — handles text + image
       stream: true,
       temperature: profile.temperature, // per-mode: factual coding vs looser behavioral
       messages: [
         // Stable prefix first (mode system + transcript) → prompt-cacheable across
-        // follow-ups; the volatile question goes LAST.
+        // follow-ups; the volatile question (+ optional frame) goes LAST.
         { role: 'system', content: profile.system },
         { role: 'system', content: `TRANSCRIPT (most recent):\n${transcript || '(empty so far)'}` },
         ...history,
-        { role: 'user', content: question },
+        { role: 'user', content: userContent },
       ],
     })
 

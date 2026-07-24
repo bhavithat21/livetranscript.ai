@@ -1,7 +1,8 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
-import { Send, Sparkles, X } from 'lucide-react'
+import { Monitor, MonitorOff, Send, Sparkles, X } from 'lucide-react'
 import { useCopilot } from '@/lib/copilot/useCopilot'
+import { useScreenStream } from '@/lib/vision/useScreenStream'
 import { MODE_ORDER, MODE_PROFILES, type CopilotMode } from '@/lib/copilot/modes'
 
 // Ask-your-transcript side panel. Grounded, streaming answers from the live
@@ -24,9 +25,13 @@ export function CopilotPanel({
   onClose: () => void
 }) {
   const { turns, streaming, error, ask, clear } = useCopilot(getTranscript)
+  const screen = useScreenStream()
   const [input, setInput] = useState('')
   const [mode, setMode] = useState<CopilotMode>('general')
   const scrollRef = useRef<HTMLDivElement>(null)
+
+  // Tear the screen stream down when the panel closes.
+  useEffect(() => () => screen.stop(), []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Follow the newest tokens as the answer streams in.
   useEffect(() => {
@@ -36,7 +41,9 @@ export function CopilotPanel({
 
   const submit = (q: string) => {
     if (!q.trim() || streaming) return
-    ask(q, mode)
+    // Attach a screen frame only when the user has screen-sharing on.
+    const image = screen.sharing ? screen.grabFrame() : null
+    ask(q, mode, image)
     setInput('')
   }
 
@@ -47,6 +54,15 @@ export function CopilotPanel({
         <span className="font-[family-name:var(--font-serif)] text-base font-semibold">Ask</span>
         <span className="hidden text-xs text-black/40 sm:inline">grounded in your transcript</span>
         <div className="ml-auto flex items-center gap-1">
+          <button
+            onClick={() => (screen.sharing ? screen.stop() : screen.start())}
+            data-active={screen.sharing}
+            title={screen.sharing ? 'Stop sharing your screen' : 'Let the assistant see your screen'}
+            className="flex items-center gap-1 rounded-full px-2 py-1 text-xs text-black/55 transition-colors hover:bg-black/5 data-[active=true]:bg-emerald-700/10 data-[active=true]:text-emerald-800"
+          >
+            {screen.sharing ? <Monitor size={13} /> : <MonitorOff size={13} />}
+            <span className="hidden sm:inline">{screen.sharing ? 'Seeing screen' : 'See screen'}</span>
+          </button>
           {turns.length > 0 && (
             <button onClick={clear} className="rounded-full px-2 py-1 text-xs text-black/45 hover:bg-black/5 hover:text-ink">
               Clear
@@ -77,6 +93,16 @@ export function CopilotPanel({
           </button>
         ))}
       </div>
+
+      {/* Visible privacy indicator — the assistant only sees your screen while
+          this is showing, and only the frame at the moment you ask. */}
+      {screen.sharing && (
+        <div className="flex items-center gap-2 border-b border-emerald-700/15 bg-emerald-700/5 px-4 py-1.5 text-xs text-emerald-800">
+          <span className="live-dot" aria-hidden />
+          Sharing your screen — a frame is sent only when you ask.
+        </div>
+      )}
+      {screen.error && <p className="border-b border-black/10 px-4 py-1.5 text-xs text-[color:var(--stop)]">{screen.error}</p>}
 
       <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4">
         {turns.length === 0 && !error && (
