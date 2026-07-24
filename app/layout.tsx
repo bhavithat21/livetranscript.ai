@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { Fraunces, IBM_Plex_Sans } from 'next/font/google'
 import { ClerkProvider } from '@clerk/nextjs'
 import { AppNav } from '@/components/nav/AppNav'
+import { DesktopChrome } from '@/components/DesktopChrome'
 import { Providers } from './providers'
 import './globals.css'
 
@@ -32,6 +33,7 @@ export default function RootLayout({
 }>) {
   const body = (
     <body className="min-h-full font-[family-name:var(--font-body)]">
+      <DesktopChrome />
       <AppNav clerkConfigured={clerkConfigured} />
       <Providers>{children}</Providers>
     </body>

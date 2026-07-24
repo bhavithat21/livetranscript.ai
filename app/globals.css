@@ -41,6 +41,19 @@ body {
   background-attachment: fixed;
 }
 
+/* Desktop (Tauri) transparency: when running inside the native shell — which has
+   a transparent window (tauri.conf.json) — drop the opaque paper background so the
+   desktop shows through and the app floats as a Cluely-style glass overlay. The
+   class is added only inside Tauri (see DesktopChrome), so the WEB app is never
+   transparent. Hardcoded bg-[#faf9f7] page wrappers also relax to transparent. */
+html.lt-desktop,
+html.lt-desktop body {
+  background: transparent !important;
+}
+html.lt-desktop .bg-\[\#faf9f7\] {
+  background-color: transparent !important;
+}
+
 /* Liquid Glass — translucent, blurs content behind, soft light edge.
    Reserved for chrome (headers, buttons, cards). Not for reading text.
    In @layer utilities so Tailwind's Lightning CSS keeps the backdrop-filter
