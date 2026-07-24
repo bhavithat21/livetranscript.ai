@@ -43,6 +43,7 @@ export async function POST(req: NextRequest) {
     history?: ChatTurn[]
     mode?: string
     image?: string // optional screen frame, base64 data URL (Phase 2 vision)
+    context?: string // optional retrieved grounding (behavioral story-bank, Phase 3 RAG)
   }
   try {
     body = await req.json()
@@ -63,6 +64,8 @@ export async function POST(req: NextRequest) {
   // Keep the MOST RECENT transcript (tail) — what "answer about what was just
   // said" needs, and it bounds token cost.
   const transcript = clean((body.transcript ?? '').slice(-MAX_TRANSCRIPT), MAX_TRANSCRIPT)
+  // Retrieved grounding (e.g. the user's matched STAR story) — untrusted, capped.
+  const context = clean((body.context ?? '').slice(0, MAX_TRANSCRIPT), MAX_TRANSCRIPT)
   const history: ChatTurn[] = Array.isArray(body.history)
     ? body.history
         .filter((t) => (t?.role === 'user' || t?.role === 'assistant') && typeof t.content === 'string')
@@ -96,6 +99,11 @@ export async function POST(req: NextRequest) {
         // follow-ups; the volatile question (+ optional frame) goes LAST.
         { role: 'system', content: profile.system },
         { role: 'system', content: `TRANSCRIPT (most recent):\n${transcript || '(empty so far)'}` },
+        // Retrieved personal grounding (behavioral): the user's own story to base
+        // the STAR answer on. Only present when the story-bank matched.
+        ...(context
+          ? [{ role: 'system' as const, content: `YOUR BACKGROUND (ground the answer in this, do not invent beyond it):\n${context}` }]
+          : []),
         ...history,
         { role: 'user', content: userContent },
       ],

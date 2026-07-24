@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Check, Monitor, MonitorOff, Play, Send, Sparkles, X } from 'lucide-react'
 import { useCopilot } from '@/lib/copilot/useCopilot'
 import { useScreenStream } from '@/lib/vision/useScreenStream'
+import { useStoryBank } from '@/lib/copilot/useStoryBank'
 import { MODE_ORDER, MODE_PROFILES, type CopilotMode } from '@/lib/copilot/modes'
 import { extractPython, runPython, type RunResult } from '@/lib/copilot/pyodideRunner'
 
@@ -27,8 +28,10 @@ export function CopilotPanel({
 }) {
   const { turns, streaming, error, ask, clear } = useCopilot(getTranscript)
   const screen = useScreenStream()
+  const bank = useStoryBank()
   const [input, setInput] = useState('')
   const [mode, setMode] = useState<CopilotMode>('general')
+  const [showBankEditor, setShowBankEditor] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   // Tear the screen stream down when the panel closes.
@@ -40,12 +43,14 @@ export function CopilotPanel({
     if (el) el.scrollTop = el.scrollHeight
   }, [turns])
 
-  const submit = (q: string) => {
+  const submit = async (q: string) => {
     if (!q.trim() || streaming) return
+    setInput('')
     // Attach a screen frame only when the user has screen-sharing on.
     const image = screen.sharing ? screen.grabFrame() : null
-    ask(q, mode, image)
-    setInput('')
+    // Behavioral mode: ground the answer in the user's OWN matched story (RAG).
+    const context = mode === 'behavioral' && bank.count > 0 ? await bank.retrieve(q) : null
+    ask(q, mode, image, context)
   }
 
   return (
@@ -94,6 +99,39 @@ export function CopilotPanel({
           </button>
         ))}
       </div>
+
+      {/* Behavioral story-bank — paste resume/STAR stories once; answers ground in
+          YOUR real history (the personalization moat). Stored on this device. */}
+      {mode === 'behavioral' && (
+        <div className="border-b border-black/10 bg-black/[0.02] px-4 py-2">
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-black/55">
+              {bank.count > 0 ? `Your background: ${bank.count} snippets loaded` : 'No background yet — answers stay generic'}
+            </span>
+            <button
+              onClick={() => setShowBankEditor((v) => !v)}
+              className="ml-auto rounded-full px-2 py-0.5 text-emerald-800 hover:bg-emerald-700/10"
+            >
+              {bank.count > 0 ? 'Edit' : 'Add your background'}
+            </button>
+            {bank.count > 0 && (
+              <button onClick={bank.clear} className="rounded-full px-2 py-0.5 text-black/45 hover:bg-black/5">
+                Clear
+              </button>
+            )}
+          </div>
+          {showBankEditor && (
+            <StoryBankEditor
+              saving={bank.saving}
+              error={bank.error}
+              onSave={async (text) => {
+                await bank.save(text)
+                setShowBankEditor(false)
+              }}
+            />
+          )}
+        </div>
+      )}
 
       {/* Visible privacy indicator — the assistant only sees your screen while
           this is showing, and only the frame at the moment you ask. */}
@@ -167,6 +205,42 @@ export function CopilotPanel({
         </button>
       </form>
     </aside>
+  )
+}
+
+// Paste-and-save editor for the behavioral story-bank. Text is chunked + embedded
+// on save; nothing persists server-side.
+function StoryBankEditor({
+  saving,
+  error,
+  onSave,
+}: {
+  saving: boolean
+  error: string | null
+  onSave: (text: string) => void
+}) {
+  const [text, setText] = useState('')
+  return (
+    <div className="mt-2">
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        rows={5}
+        placeholder="Paste your resume and a few STAR stories (separate stories with a blank line)…"
+        className="w-full rounded-lg border border-black/15 bg-white/80 p-2 text-xs outline-none focus:border-emerald-700"
+      />
+      <div className="mt-1.5 flex items-center gap-2">
+        <button
+          onClick={() => onSave(text)}
+          disabled={saving || !text.trim()}
+          className="btn-signal px-3 py-1.5 text-xs disabled:opacity-50"
+        >
+          {saving ? 'Saving…' : 'Save to this device'}
+        </button>
+        <span className="text-[11px] text-black/40">Stored locally · used only to ground your answers</span>
+      </div>
+      {error && <p className="mt-1 text-xs text-[color:var(--stop)]">{error}</p>}
+    </div>
   )
 }
 
