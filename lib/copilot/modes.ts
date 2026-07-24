@@ -15,6 +15,21 @@ export interface ModeProfile {
   hint: string
   temperature: number
   system: string
+  // Purpose-specific model TIER (resolved to a concrete model at request time):
+  //   'fast'   — latency-critical, cheap (router/behavioral/general)
+  //   'smart'  — strong reasoning, correctness-first (coding/system design)
+  // The concrete model per tier is env-overridable (COPILOT_MODEL_FAST /
+  // COPILOT_MODEL_SMART) so tuning needs no code change or new key.
+  tier: 'fast' | 'smart'
+}
+
+const TIER_DEFAULTS = { fast: 'gpt-4o-mini', smart: 'gpt-4o' } as const
+
+// Resolve a tier to a concrete OpenAI model, honoring env overrides. Server-only
+// (reads process.env); the client only ever sends the mode id.
+export function modelForTier(tier: 'fast' | 'smart'): string {
+  if (tier === 'smart') return process.env.COPILOT_MODEL_SMART || TIER_DEFAULTS.smart
+  return process.env.COPILOT_MODEL_FAST || TIER_DEFAULTS.fast
 }
 
 const GENERAL = `You are the assistant inside LiveTranscript, shown beside a live transcript.
@@ -62,10 +77,11 @@ resume/story grounding is added later; for now, if there's no personal context,
 give a strong STAR *structure* the user fills with their real story, and say so.)`
 
 export const MODE_PROFILES: Record<CopilotMode, ModeProfile> = {
-  general: { id: 'general', label: 'General', hint: 'Ask anything about the transcript', temperature: 0.3, system: GENERAL },
-  coding: { id: 'coding', label: 'Coding', hint: 'Approach, complexity, code, edge cases', temperature: 0.2, system: CODING },
-  systemDesign: { id: 'systemDesign', label: 'System design', hint: 'Structured design, tradeoffs, next step', temperature: 0.3, system: SYSTEM_DESIGN },
-  behavioral: { id: 'behavioral', label: 'Behavioral', hint: 'STAR scaffold from what was said', temperature: 0.4, system: BEHAVIORAL },
+  // fast tier: latency-critical / retrieval-shaped. smart tier: correctness-first reasoning.
+  general: { id: 'general', label: 'General', hint: 'Ask anything about the transcript', temperature: 0.3, system: GENERAL, tier: 'fast' },
+  coding: { id: 'coding', label: 'Coding', hint: 'Approach, complexity, code, edge cases', temperature: 0.2, system: CODING, tier: 'smart' },
+  systemDesign: { id: 'systemDesign', label: 'System design', hint: 'Structured design, tradeoffs, next step', temperature: 0.3, system: SYSTEM_DESIGN, tier: 'smart' },
+  behavioral: { id: 'behavioral', label: 'Behavioral', hint: 'STAR scaffold from what was said', temperature: 0.4, system: BEHAVIORAL, tier: 'fast' },
 }
 
 export const MODE_ORDER: CopilotMode[] = ['general', 'coding', 'systemDesign', 'behavioral']

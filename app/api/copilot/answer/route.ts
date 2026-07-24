@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server'
 import OpenAI from 'openai'
 import { currentUserId } from '@/lib/auth'
 import { logError } from '@/lib/log'
-import { modeProfile } from '@/lib/copilot/modes'
+import { modeProfile, modelForTier } from '@/lib/copilot/modes'
 
 // On-demand copilot answer. Streams tokens back grounded in the transcript the
 // caller passes. Mirrors the auth-guard + input-cap + fail-soft conventions of
@@ -83,8 +83,12 @@ export async function POST(req: NextRequest) {
           { type: 'image_url', image_url: { url: image, detail: 'low' } },
         ]
       : question
+    // Purpose-specific model: the mode's tier (coding/design => smart, behavioral/
+    // general => fast). A screen read needs the stronger vision model regardless
+    // of mode, so force 'smart' when an image is attached.
+    const model = modelForTier(image ? 'smart' : profile.tier)
     const stream = await client.chat.completions.create({
-      model: 'gpt-4o-mini', // multimodal — handles text + image
+      model,
       stream: true,
       temperature: profile.temperature, // per-mode: factual coding vs looser behavioral
       messages: [
