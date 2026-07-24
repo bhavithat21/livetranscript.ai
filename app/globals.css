@@ -41,17 +41,105 @@ body {
   background-attachment: fixed;
 }
 
-/* Desktop (Tauri) transparency: when running inside the native shell — which has
-   a transparent window (tauri.conf.json) — drop the opaque paper background so the
-   desktop shows through and the app floats as a Cluely-style glass overlay. The
-   class is added only inside Tauri (see DesktopChrome), so the WEB app is never
-   transparent. Hardcoded bg-[#faf9f7] page wrappers also relax to transparent. */
+/* ═══════════════════════════════════════════════════════════════════════════════
+   Desktop (Tauri) overlay theme — "always-on-top dark glass panel"
+   ═══════════════════════════════════════════════════════════════════════════════
+   When running inside the native shell (transparent window, contentProtected,
+   macOSPrivateApi) the app floats as a see-through overlay like Cluely. The
+   outer edges are transparent (desktop shows through); content areas are dark
+   semi-opaque with light text so everything is READABLE over any wallpaper.
+   The class `lt-desktop` is added by DesktopChrome.tsx; the WEB app never gets
+   it, so none of this applies to livetranscript.ai in a browser. */
+
+/* Root: truly transparent — the window edges are see-through */
 html.lt-desktop,
 html.lt-desktop body {
   background: transparent !important;
+  color: #f0f0f0 !important;
 }
+/* Main content containers: dark frosted surface (readable over any wallpaper) */
+html.lt-desktop main,
 html.lt-desktop .bg-\[\#faf9f7\] {
-  background-color: transparent !important;
+  background: rgba(15, 15, 20, 0.82) !important;
+  border-radius: 16px;
+  color: #f0f0f0;
+}
+/* Glass elements: dark-tinted glass (nav, dock, cards) — visible but not opaque */
+html.lt-desktop .glass {
+  background: rgba(25, 25, 35, 0.72) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3) !important;
+}
+html.lt-desktop .glass-interactive:hover {
+  background: rgba(40, 40, 55, 0.85) !important;
+}
+/* Reader surface (transcript area): slightly lighter dark for reading comfort */
+html.lt-desktop .reader-surface {
+  background: rgba(20, 20, 28, 0.88) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
+/* All text: force light — the web app's dark colors are invisible on dark bg */
+html.lt-desktop,
+html.lt-desktop * {
+  --ink: #f0f0f0;
+  --paper: transparent;
+}
+html.lt-desktop .text-\[\#16151a\],
+html.lt-desktop .text-ink {
+  color: #f0f0f0 !important;
+}
+html.lt-desktop .text-black\/65,
+html.lt-desktop .text-black\/60,
+html.lt-desktop .text-black\/55,
+html.lt-desktop .text-black\/50,
+html.lt-desktop .text-black\/45,
+html.lt-desktop .text-black\/40,
+html.lt-desktop .text-black\/30 {
+  color: rgba(255, 255, 255, 0.65) !important;
+}
+html.lt-desktop .text-black\/70,
+html.lt-desktop .text-black\/75 {
+  color: rgba(255, 255, 255, 0.80) !important;
+}
+/* Signal color stays emerald (high contrast on dark) */
+html.lt-desktop .text-\[color\:var\(--signal\)\] {
+  color: #34d399 !important;
+}
+/* Borders: lighten for dark mode */
+html.lt-desktop .border-black\/10,
+html.lt-desktop .border-black\/15 {
+  border-color: rgba(255, 255, 255, 0.10) !important;
+}
+/* Inputs: dark field with light text */
+html.lt-desktop input,
+html.lt-desktop textarea,
+html.lt-desktop select {
+  background: rgba(30, 30, 40, 0.80) !important;
+  color: #f0f0f0 !important;
+  border-color: rgba(255, 255, 255, 0.15) !important;
+}
+/* Buttons: signal stays emerald, ghost gets light border */
+html.lt-desktop .btn-ghost {
+  border-color: rgba(255, 255, 255, 0.20) !important;
+  color: rgba(255, 255, 255, 0.75) !important;
+}
+html.lt-desktop .btn-ghost:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+html.lt-desktop .btn-ghost[data-active='true'] {
+  background: rgba(255, 255, 255, 0.90) !important;
+  color: #16151a !important;
+}
+/* Hairline dividers */
+html.lt-desktop .hairline,
+html.lt-desktop .bg-black\/10 {
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+/* Nav top bar: always visible, slightly more opaque for clarity */
+html.lt-desktop nav[aria-label="Main"] {
+  background: rgba(20, 20, 28, 0.88) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(140%) !important;
+  backdrop-filter: blur(20px) saturate(140%) !important;
 }
 
 /* Liquid Glass — translucent, blurs content behind, soft light edge.
