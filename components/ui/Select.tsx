@@ -38,6 +38,10 @@ export function Select<T extends string>({
 }: SelectProps<T>) {
   const [open, setOpen] = useState(false)
   const [activeIndex, setActiveIndex] = useState(0)
+  // Open upward when the trigger sits near the viewport bottom (e.g. the meeting's
+  // bottom control dock) — otherwise the menu renders below the fold and options
+  // get clipped off-screen (that's how "Microphone" was disappearing).
+  const [dropUp, setDropUp] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const listboxId = useId()
   const optionId = (i: number) => `${listboxId}-${i}`
@@ -57,8 +61,16 @@ export function Select<T extends string>({
   const openMenu = useCallback(() => {
     if (disabled) return
     setActiveIndex(selectedIndex)
+    // Estimate the menu height (~40px/option + padding) and flip up if there
+    // isn't room below the trigger. Cheap and reliable for these short lists.
+    const rect = rootRef.current?.getBoundingClientRect()
+    if (rect) {
+      const estMenuHeight = options.length * 40 + 16
+      const spaceBelow = window.innerHeight - rect.bottom
+      setDropUp(spaceBelow < estMenuHeight && rect.top > spaceBelow)
+    }
     setOpen(true)
-  }, [disabled, selectedIndex])
+  }, [disabled, selectedIndex, options.length])
 
   const commit = useCallback(
     (i: number) => {
@@ -132,7 +144,9 @@ export function Select<T extends string>({
           id={listboxId}
           role="listbox"
           aria-label={ariaLabel}
-          className="glass absolute right-0 z-50 mt-1 min-w-full overflow-hidden rounded-2xl p-1 shadow-lg"
+          className={`glass absolute right-0 z-50 max-h-[min(16rem,60vh)] min-w-full overflow-y-auto rounded-2xl p-1 shadow-lg ${
+            dropUp ? 'bottom-full mb-1' : 'top-full mt-1'
+          }`}
         >
           {options.map((opt, i) => {
             const isSelected = opt.value === value
