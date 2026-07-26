@@ -48,12 +48,16 @@ jobs:
         run: New-Item -ItemType File -Force src-tauri/binaries/audio-capture-x86_64-pc-windows-msvc.exe
         shell: pwsh
 
+      # This is the fast, UNSIGNED feedback build — it has no updater signing key.
+      # tauri.conf.json now sets createUpdaterArtifacts:true (needed for the signed
+      # RELEASE build in desktop-release.yml), which would make this build fail with
+      # "no private key". The config merge turns updater artifacts back OFF here only.
       - name: Build unsigned NSIS installer
         uses: tauri-apps/tauri-action@v0
         with:
           projectPath: .
           tauriScript: npx @tauri-apps/cli
-          args: --target x86_64-pc-windows-msvc --bundles nsis
+          args: --target x86_64-pc-windows-msvc --bundles nsis --config src-tauri/tauri.no-updater.conf.json
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
