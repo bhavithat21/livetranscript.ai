@@ -35,8 +35,8 @@ export default function DownloadPage() {
           LiveTranscript on your desktop.
         </h1>
         <p className="rise-in mt-5 max-w-2xl text-lg leading-relaxed text-black/65" style={{ animationDelay: '160ms' }}>
-          A native window for Mac and Windows — the full app, always up to date.
-          It updates itself automatically, so you&rsquo;re never on an old version.
+          A native window for Mac and Windows — the full app in its own window.
+          During beta, grab new versions here; download again when there&rsquo;s an update.
         </p>
       </section>
 
@@ -77,10 +77,11 @@ export default function DownloadPage() {
 
       <section className="mx-auto max-w-4xl px-5 py-14 sm:px-8">
         <div className="glass rounded-2xl p-6">
-          <h2 className="font-[family-name:var(--font-serif)] text-xl">Automatic updates</h2>
+          <h2 className="font-[family-name:var(--font-serif)] text-xl">Staying up to date</h2>
           <p className="mt-2 text-sm leading-relaxed text-black/60">
-            The desktop app checks for updates on launch and installs them in the
-            background — no manual re-downloads. Prefer no install?{' '}
+            During beta, download the latest version from this page when a new one
+            ships. Automatic in-app updates are rolling out — until then, a quick
+            re-download keeps you current. Prefer no install?{' '}
             <Link href="/record" className="text-[color:var(--signal)] hover:underline">
               Use it right in your browser
             </Link>
