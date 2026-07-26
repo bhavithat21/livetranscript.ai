@@ -32,9 +32,22 @@ export function useMicStream() {
       try {
         let stream: MediaStream
         if (source === 'system') {
-          // System / tab audio. Chrome requires video:true to expose the audio
-          // picker; we grab the audio track and drop video. User-gesture required.
-          const display = await navigator.mediaDevices.getDisplayMedia({ audio: true, video: true })
+          // System / tab audio. Chromium requires video:true to expose the audio
+          // option, so we request it then immediately drop the video track (we only
+          // want audio). The extra options steer the picker toward the least-scary
+          // experience the BROWSER allows: prefer system audio, keep the surface
+          // switcher, and hint a window over the whole monitor. NOTE: a browser
+          // ALWAYS shows this picker per session and can't persist the grant — the
+          // desktop app's native audio tap is the only way to avoid the prompt
+          // entirely (silent, asked once). These options are non-standard, hence
+          // the cast; unknown keys are ignored by browsers that don't support them.
+          const display = await navigator.mediaDevices.getDisplayMedia({
+            audio: true,
+            video: true,
+            systemAudio: 'include',
+            surfaceSwitching: 'include',
+            monitorTypeSurfaces: 'exclude', // nudge the picker away from "Entire Screen"
+          } as MediaStreamConstraints)
           display.getVideoTracks().forEach((t) => t.stop())
           if (display.getAudioTracks().length === 0) {
             display.getTracks().forEach((t) => t.stop())
