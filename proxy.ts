@@ -10,6 +10,7 @@ const isPublicRoute = createRouteMatcher([
   '/shadow-demo',
   '/pricing',
   '/download',
+  '/updates/(.*)', // desktop updater manifest + installers — fetched UNauthenticated
   '/__clerk/(.*)',
 ])
 
