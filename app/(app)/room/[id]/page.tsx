@@ -24,6 +24,7 @@ import { ShortcutHelp, MOD } from '@/components/ui/ShortcutHelp'
 import { RosterPanel } from '@/components/room/RosterPanel'
 import { FollowAlong } from '@/components/room/FollowAlong'
 import { CopilotPanel } from '@/components/copilot/CopilotPanel'
+import { usePanelWidth } from '@/lib/copilot/usePanelWidth'
 import { HomeMenu } from '@/components/nav/HomeMenu'
 import type { TranscriptionProvider } from '@/lib/transcription/types'
 
@@ -249,6 +250,7 @@ function Meeting({ roomId }: { roomId: string }) {
   const [view, setView] = useState<'transcript' | 'chat'>('transcript')
   const [showRoster, setShowRoster] = useState(false)
   const [askOpen, setAskOpen] = useState(false) // copilot side panel
+  const panel = usePanelWidth() // shared width so the transcript reflows beside the panel
   const [followSource, setFollowSource] = useState<string | null>(null)
   const [startError, setStartError] = useState<string | null>(null)
   const providerRef = useRef<TranscriptionProvider | null>(null)
@@ -431,7 +433,12 @@ function Meeting({ roomId }: { roomId: string }) {
   return (
     // Lock the meeting to ONE viewport: header fixed, transcript is the only
     // scroll region — otherwise the page AND the transcript both scroll ("two scrolls").
-    <main className="relative flex h-dvh flex-col overflow-hidden bg-[#faf9f7] text-[#16151a]">
+    <main
+      // Ask panel open on desktop → reserve its width as right-padding so the
+      // meeting header/transcript reflow beside it (not under it). Mobile: sheet.
+      className="relative flex h-dvh flex-col overflow-hidden bg-[#faf9f7] text-[#16151a] sm:pr-[var(--ask-w,0px)] sm:transition-[padding] sm:duration-200"
+      style={askOpen ? ({ '--ask-w': `${panel.width}px` } as React.CSSProperties) : undefined}
+    >
       <ShortcutHelp
         shortcuts={[
           { keys: 'S', label: live ? 'Stop' : 'Start' },
@@ -542,7 +549,7 @@ function Meeting({ roomId }: { roomId: string }) {
       {/* Bottom-center control dock: follow-along, source, mic mute, start/stop.
           Wraps + caps width so it never overflows a phone; rounded-3xl so a
           wrapped multi-row dock still looks intentional. */}
-      <div className="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex justify-center px-3">
+      <div className="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex justify-center sm:right-[var(--ask-w,0px)] px-3">
         <div className="glass pointer-events-auto flex max-w-[calc(100vw-1.5rem)] flex-wrap items-center justify-center gap-2 rounded-3xl px-4 py-2.5 sm:gap-3">
           {/* Follow along — repeat the latest line aloud, guided word-by-word.
               Available to everyone (a listener repeating the speaker is the point). */}
@@ -607,6 +614,8 @@ function Meeting({ roomId }: { roomId: string }) {
             <CopilotPanel
               getTranscript={() => transcriptText(segments)}
               onClose={() => setAskOpen(false)}
+              width={panel.width}
+              onResizeStart={panel.onResizeStart}
             />
           </div>
         </>

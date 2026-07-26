@@ -9,6 +9,7 @@ import { TranscriptView } from '@/components/transcript/TranscriptView'
 import { TextSizeControl } from '@/components/transcript/TextSizeControl'
 import { useTextScale } from '@/lib/transcript/useTextScale'
 import { CopilotPanel } from '@/components/copilot/CopilotPanel'
+import { usePanelWidth } from '@/lib/copilot/usePanelWidth'
 import { Waveform } from '@/components/transcript/Waveform'
 import { HomeMenu } from '@/components/nav/HomeMenu'
 import { Select } from '@/components/ui/Select'
@@ -60,6 +61,7 @@ export default function RecordPage() {
   const { keyterms } = useKeytermPrefs() // user-selected vocab packs (base + overlays)
   const textScale = useTextScale() // reader text-size preference (localStorage)
   const [askOpen, setAskOpen] = useState(false) // copilot side panel
+  const panel = usePanelWidth() // shared width so the transcript reflows beside the panel (not under it)
   const [segments, setSegments] = useState<Segment[]>([])
   const [level, setLevel] = useState(0)
   const [recording, setRecording] = useState(false)
@@ -301,7 +303,14 @@ export default function RecordPage() {
   )
 
   return (
-    <main className="relative min-h-dvh bg-[#faf9f7] pb-32 text-[#16151a]">
+    <main
+      // When the Ask panel is open on desktop, reserve its width as right-padding
+      // (sm:pr reads --ask-w, defaulting to 0 when the panel is closed) so the
+      // transcript reflows into the remaining space instead of being covered by
+      // the overlay. Mobile keeps the full-screen sheet (no sm: padding).
+      className="relative min-h-dvh bg-[#faf9f7] pb-32 text-[#16151a] sm:pr-[var(--ask-w,0px)] sm:transition-[padding] sm:duration-200"
+      style={askOpen ? ({ '--ask-w': `${panel.width}px` } as React.CSSProperties) : undefined}
+    >
       <ShortcutHelp
         shortcuts={[
           { keys: 'S', label: recording ? 'Stop recording' : 'Start recording' },
@@ -442,7 +451,7 @@ export default function RecordPage() {
       {/* Bottom control dock. Live: zoned mute | waveform | stop with breathing glow.
           Post-stop: a single calm "New recording". Absent in idle (console owns it). */}
       {!reader && recording && (
-        <div className="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex justify-center px-3">
+        <div className="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex justify-center sm:right-[var(--ask-w,0px)] px-3">
           <div className="glass dock-live pointer-events-auto flex max-w-[calc(100vw-1.5rem)] flex-wrap items-center justify-center gap-2 rounded-3xl px-4 py-2.5 sm:gap-3">
             <button
               onClick={() => setMuted((m) => !m)}
@@ -466,15 +475,15 @@ export default function RecordPage() {
         </div>
       )}
       {!reader && !recording && segments.length > 0 && (
-        <div className="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex justify-center px-4">
+        <div className="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex justify-center sm:right-[var(--ask-w,0px)] px-4">
           <button onClick={onStart} className="btn-signal glass pointer-events-auto flex items-center gap-2">
             <Mic size={16} /> New recording
           </button>
         </div>
       )}
 
-      {/* Copilot: right-side drawer. Full-width sheet on phones, ~24rem column on
-          desktop. Grounds each answer in the live transcript via segmentsRef. */}
+      {/* Copilot: side-by-side panel on desktop (the transcript reflows beside it
+          via main's sm:pr above), full-screen sheet on phones. */}
       {askOpen && (
         <>
           <div
@@ -486,6 +495,8 @@ export default function RecordPage() {
             <CopilotPanel
               getTranscript={() => transcriptText(segmentsRef.current)}
               onClose={() => setAskOpen(false)}
+              width={panel.width}
+              onResizeStart={panel.onResizeStart}
             />
           </div>
         </>
