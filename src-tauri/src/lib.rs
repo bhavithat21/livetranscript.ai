@@ -249,8 +249,11 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         protect_on,
         None::<&str>,
     )?;
+    // Manual update: tray-only apps have no window chrome for a button, so the
+    // "Check for Updates" control lives here — always reachable, even when hidden.
+    let update = MenuItem::with_id(app, "check_update", "Check for Updates…", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit LiveTranscript", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show, &protect, &quit])?;
+    let menu = Menu::with_items(app, &[&show, &protect, &update, &quit])?;
 
     // Stash the checkbox so apply_protection can keep it in sync with the flag.
     *lock(&app.state::<TrayHandles>().protection_item) = Some(protect.clone());
@@ -274,6 +277,14 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         .on_menu_event(|app, event| match event.id().as_ref() {
             "show_hide" => toggle_main_window(app),
             "toggle_protection" => toggle_protection(app),
+            "check_update" => {
+                // Manual update check from the tray. Runs off the UI thread; shows
+                // the window so the user sees progress / any error, then installs.
+                let handle = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    run_update_check(handle, true).await;
+                });
+            }
             "quit" => app.exit(0),
             _ => {}
         })
@@ -323,7 +334,7 @@ pub fn run() {
             {
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
-                    check_for_update(handle).await;
+                    run_update_check(handle, false).await; // silent on launch
                 });
 
                 // Panic-hide: CmdOrCtrl+Shift+H toggles window visibility globally.
@@ -383,16 +394,50 @@ pub fn run() {
         .expect("error while running LiveTranscript desktop");
 }
 
+// Check for a shell update and install it if found. `manual` = triggered from the
+// tray "Check for Updates" item: reveal the window so the user sees progress, and
+// log the outcome (up-to-date / error) so the click isn't a silent no-op. The
+// launch-time call passes manual=false (fully silent, fail-soft).
 #[cfg(desktop)]
-async fn check_for_update(app: tauri::AppHandle) {
+async fn run_update_check(app: tauri::AppHandle, manual: bool) {
+    use tauri::Manager;
     use tauri_plugin_updater::UpdaterExt;
-    // Fail-soft: any error (offline, no release yet, endpoint down) just skips the
-    // update — the app runs fine on the current version.
+
+    if manual {
+        // Bring the window forward so any progress/error is visible.
+        if let Some(win) = app.get_webview_window("main") {
+            let _ = win.unminimize();
+            let _ = win.show();
+            let _ = win.set_focus();
+        }
+    }
+
+    // Fail-soft: any error (offline, no release yet, endpoint down) just skips —
+    // the app keeps running on the current version.
     let updater = match app.updater() {
         Ok(u) => u,
-        Err(_) => return,
+        Err(e) => {
+            if manual {
+                eprintln!("[updater] unavailable: {e}");
+            }
+            return;
+        }
     };
-    if let Ok(Some(update)) = updater.check().await {
-        let _ = update.download_and_install(|_chunk, _total| {}, || {}).await;
+
+    match updater.check().await {
+        Ok(Some(update)) => {
+            // Newer version available → download + install, then the app relaunches.
+            let _ = update.download_and_install(|_chunk, _total| {}, || {}).await;
+        }
+        Ok(None) => {
+            if manual {
+                eprintln!("[updater] already up to date");
+            }
+        }
+        Err(e) => {
+            if manual {
+                eprintln!("[updater] check failed: {e}");
+            }
+        }
     }
 }
