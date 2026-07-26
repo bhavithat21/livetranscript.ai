@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { cosine, chunkCorpus } from './useStoryBank'
+import { cosine, chunkCorpus } from './useModeContext'
 
 describe('cosine', () => {
   it('is 1 for identical vectors, 0 for orthogonal', () => {
@@ -18,9 +18,9 @@ describe('cosine', () => {
 describe('chunkCorpus', () => {
   it('splits on blank lines and drops trivial fragments', () => {
     const raw =
-      'A meaningful story about leading a migration under deadline.\n\nAnother story about resolving a stakeholder conflict.\n\nok'
+      'A meaningful paragraph describing the product requirements in detail.\n\nAnother paragraph covering the API contract.\n\nok'
     const chunks = chunkCorpus(raw)
     expect(chunks).toHaveLength(2) // "ok" is < 20 chars, dropped
-    expect(chunks[0]).toMatch(/migration/)
+    expect(chunks[0]).toMatch(/requirements/)
   })
 })

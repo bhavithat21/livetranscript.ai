@@ -16,7 +16,13 @@ export function useAnswerFeed() {
   // `meContext` = what the user said (mic) — grounds the answer without being
   // shown in the transcript.
   const answer = useCallback(
-    async (question: string, mode: string, meContext: string | null, image: string | null) => {
+    async (
+      question: string,
+      mode: string,
+      meContext: string | null,
+      image: string | null,
+      instructions?: string | null,
+    ) => {
       const id = ++idRef.current
       setEntries((e) => [...e, { id, question, answer: '', streaming: true }])
       setCursor(() => idRef.current - 1) // jump the view to the newest
@@ -30,6 +36,7 @@ export function useAnswerFeed() {
             mode,
             image: image ?? undefined,
             context: meContext ?? undefined,
+            instructions: instructions ?? undefined,
           }),
         })
         if (!res.ok || !res.body) throw new Error('Assistant unavailable')
