@@ -15,7 +15,7 @@ export type AnswerParams = {
   model: string
   system: string
   transcript: string
-  context: string | null // retrieved grounding (behavioral story-bank)
+  context: string | null // retrieved grounding (per-mode uploaded context documents)
   history: { role: 'user' | 'assistant'; content: string }[]
   question: string
   image: string | null // base64 data URL, cost-controlled screen frame

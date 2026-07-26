@@ -18,6 +18,7 @@ import { streamAnswer } from '@/lib/copilot/providers'
 const MAX_TRANSCRIPT = 60_000
 const MAX_QUESTION = 2_000
 const MAX_HISTORY = 8
+const MAX_INSTRUCTIONS = 4_000
 // A downscaled JPEG data URL is well under this; caps a hostile/oversized payload.
 const MAX_IMAGE_CHARS = 1_200_000 // ~900KB base64
 
@@ -43,7 +44,8 @@ export async function POST(req: NextRequest) {
     history?: ChatTurn[]
     mode?: string
     image?: string // optional screen frame, base64 data URL (Phase 2 vision)
-    context?: string // optional retrieved grounding (behavioral story-bank, Phase 3 RAG)
+    context?: string // optional retrieved grounding (per-mode uploaded documents, Phase 3 RAG)
+    instructions?: string // optional user-authored "how to answer" for this mode's chat
   }
   try {
     body = await req.json()
@@ -64,8 +66,13 @@ export async function POST(req: NextRequest) {
   // Keep the MOST RECENT transcript (tail) — what "answer about what was just
   // said" needs, and it bounds token cost.
   const transcript = clean((body.transcript ?? '').slice(-MAX_TRANSCRIPT), MAX_TRANSCRIPT)
-  // Retrieved grounding (e.g. the user's matched STAR story) — untrusted, capped.
+  // Retrieved grounding (e.g. a matched chunk from the user's uploaded context
+  // documents) — untrusted, capped.
   const context = clean((body.context ?? '').slice(0, MAX_TRANSCRIPT), MAX_TRANSCRIPT)
+  // User-authored instructions for HOW this mode's chat should answer (e.g. "cite
+  // page numbers", "answer in French") — untrusted, capped, appended to the
+  // mode's fixed system prompt rather than replacing it.
+  const instructions = clean((body.instructions ?? '').trim().slice(0, MAX_INSTRUCTIONS), MAX_INSTRUCTIONS)
   const history: ChatTurn[] = Array.isArray(body.history)
     ? body.history
         .filter((t) => (t?.role === 'user' || t?.role === 'assistant') && typeof t.content === 'string')
@@ -86,10 +93,16 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: 'Assistant unavailable' }, { status: 500 })
   }
 
+  // Append the user's own instructions to the mode's fixed system prompt (never
+  // replace it — the mode's grounding/format rules still apply).
+  const system = instructions
+    ? `${profile.system}\n\nADDITIONAL INSTRUCTIONS from the user for how to answer in this chat:\n${instructions}`
+    : profile.system
+
   try {
     const readable = streamAnswer({
       model,
-      system: profile.system,
+      system,
       transcript,
       context: context || null,
       history,

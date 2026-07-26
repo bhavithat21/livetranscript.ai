@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Check, Monitor, MonitorOff, Play, Send, Sparkles, X } from 'lucide-react'
 import { useCopilot } from '@/lib/copilot/useCopilot'
 import { useScreenStream } from '@/lib/vision/useScreenStream'
-import { useStoryBank } from '@/lib/copilot/useStoryBank'
+import { useModeContext } from '@/lib/copilot/useModeContext'
 import { useProactive } from '@/lib/copilot/useProactive'
 import { useAnswerFeed } from '@/lib/copilot/useAnswerFeed'
 import { useMeContext } from '@/lib/copilot/useMeContext'
@@ -32,29 +32,30 @@ export function CopilotPanel({
 }) {
   const { turns, streaming, error, ask, clear } = useCopilot(getTranscript)
   const screen = useScreenStream()
-  const bank = useStoryBank()
   const [input, setInput] = useState('')
   const [mode, setMode] = useState<CopilotMode>('general')
+  const context = useModeContext(mode) // per-mode uploaded documents + answer instructions
   const feed = useAnswerFeed()
   const me = useMeContext() // opt-in mic stream: "what I said" as AI context, never in transcript
-  const [showBankEditor, setShowBankEditor] = useState(false)
+  const [showContextEditor, setShowContextEditor] = useState(false)
   const [auto, setAuto] = useState(false)
   const [view, setView] = useState<'chat' | 'answers'>('chat')
   const scrollRef = useRef<HTMLDivElement>(null)
 
   // Proactive: while auto is on, questions heard in the transcript are answered
   // automatically into the SEPARATE navigable answer feed (not the chat thread).
-  // Behavioral pulls the story-bank; a screen frame attaches if sharing is on.
+  // Pulls this mode's uploaded-document context; a screen frame attaches if
+  // sharing is on.
   useProactive(auto, getTranscript, (q) => {
     setView('answers') // surface the feed as answers arrive
     void (async () => {
-      const story = mode === 'behavioral' && bank.count > 0 ? await bank.retrieve(q) : null
-      // Combine what YOU said (mic context, if listening) with any matched story —
-      // grounds the answer without either appearing in the transcript.
-      const parts = [me.getMeContext() && `What I said: ${me.getMeContext()}`, story].filter(Boolean)
+      const retrieved = context.count > 0 ? await context.retrieve(q) : null
+      // Combine what YOU said (mic context, if listening) with any matched context
+      // document chunk — grounds the answer without either appearing in the transcript.
+      const parts = [me.getMeContext() && `What I said: ${me.getMeContext()}`, retrieved].filter(Boolean)
       const ctx = parts.length ? parts.join('\n\n') : null
       const image = screen.sharing ? screen.grabFrame() : null
-      feed.answer(q, mode, ctx, image)
+      feed.answer(q, mode, ctx, image, context.instructions || null)
     })()
   })
 
@@ -75,9 +76,9 @@ export function CopilotPanel({
     setInput('')
     // Attach a screen frame only when the user has screen-sharing on.
     const image = screen.sharing ? screen.grabFrame() : null
-    // Behavioral mode: ground the answer in the user's OWN matched story (RAG).
-    const context = mode === 'behavioral' && bank.count > 0 ? await bank.retrieve(q) : null
-    ask(q, mode, image, context)
+    // Ground the answer in this mode's uploaded context documents (RAG), if any.
+    const retrieved = context.count > 0 ? await context.retrieve(q) : null
+    ask(q, mode, image, retrieved, context.instructions || null)
   }
 
   return (
@@ -165,38 +166,30 @@ export function CopilotPanel({
         </button>
       </div>
 
-      {/* Behavioral story-bank — paste resume/STAR stories once; answers ground in
-          YOUR real history (the personalization moat). Stored on this device. */}
-      {mode === 'behavioral' && (
-        <div className="border-b border-black/10 bg-black/[0.02] px-4 py-2">
-          <div className="flex items-center gap-2 text-xs">
-            <span className="text-black/55">
-              {bank.count > 0 ? `Your background: ${bank.count} snippets loaded` : 'No background yet — answers stay generic'}
-            </span>
-            <button
-              onClick={() => setShowBankEditor((v) => !v)}
-              className="ml-auto rounded-full px-2 py-0.5 text-emerald-800 hover:bg-emerald-700/10"
-            >
-              {bank.count > 0 ? 'Edit' : 'Add your background'}
+      {/* Context — upload documents + set instructions for how THIS mode's chat
+          should answer. Separate per mode (coding/system design/behavioral/general
+          each keep their own); chunked, embedded, and stored on this device. */}
+      <div className="border-b border-black/10 bg-black/[0.02] px-4 py-2">
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-black/55">
+            {context.docs.length > 0 || context.instructions
+              ? `Context: ${context.docs.length} doc${context.docs.length === 1 ? '' : 's'}${context.instructions ? ' · instructions set' : ''}`
+              : 'No context yet — answers stay generic'}
+          </span>
+          <button
+            onClick={() => setShowContextEditor((v) => !v)}
+            className="ml-auto rounded-full px-2 py-0.5 text-emerald-800 hover:bg-emerald-700/10"
+          >
+            {showContextEditor ? 'Hide' : context.docs.length > 0 || context.instructions ? 'Edit' : 'Add context'}
+          </button>
+          {(context.docs.length > 0 || context.instructions) && (
+            <button onClick={context.clear} className="rounded-full px-2 py-0.5 text-black/45 hover:bg-black/5">
+              Clear
             </button>
-            {bank.count > 0 && (
-              <button onClick={bank.clear} className="rounded-full px-2 py-0.5 text-black/45 hover:bg-black/5">
-                Clear
-              </button>
-            )}
-          </div>
-          {showBankEditor && (
-            <StoryBankEditor
-              saving={bank.saving}
-              error={bank.error}
-              onSave={async (text) => {
-                await bank.save(text)
-                setShowBankEditor(false)
-              }}
-            />
           )}
         </div>
-      )}
+        {showContextEditor && <ContextEditor context={context} />}
+      </div>
 
       {/* Visible privacy indicator — the assistant only sees your screen while
           this is showing, and only the frame at the moment you ask. */}
@@ -277,38 +270,102 @@ export function CopilotPanel({
   )
 }
 
-// Paste-and-save editor for the behavioral story-bank. Text is chunked + embedded
-// on save; nothing persists server-side.
-function StoryBankEditor({
-  saving,
-  error,
-  onSave,
-}: {
-  saving: boolean
-  error: string | null
-  onSave: (text: string) => void
-}) {
-  const [text, setText] = useState('')
+// Upload documents (files or pasted text) + set answer instructions for the
+// active mode's chat. Files are read client-side, chunked + embedded on add;
+// nothing persists server-side — vectors live in this device's localStorage.
+function ContextEditor({ context }: { context: ReturnType<typeof useModeContext> }) {
+  const [pasteText, setPasteText] = useState('')
+  const [instructionsDraft, setInstructionsDraft] = useState(context.instructions)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Switching modes swaps the whole context object — keep the draft in sync.
+  useEffect(() => setInstructionsDraft(context.instructions), [context.instructions])
+
+  const onFiles = async (files: FileList | null) => {
+    if (!files?.length) return
+    for (const file of Array.from(files)) {
+      await context.addDocument(file.name, await file.text())
+    }
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  const addPaste = async () => {
+    if (!pasteText.trim()) return
+    await context.addDocument(`Pasted ${new Date().toLocaleDateString()}`, pasteText)
+    setPasteText('')
+  }
+
   return (
-    <div className="mt-2">
-      <textarea
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        rows={5}
-        placeholder="Paste your resume and a few STAR stories (separate stories with a blank line)…"
-        className="w-full rounded-lg border border-black/15 bg-white/80 p-2 text-xs outline-none focus:border-emerald-700"
-      />
-      <div className="mt-1.5 flex items-center gap-2">
-        <button
-          onClick={() => onSave(text)}
-          disabled={saving || !text.trim()}
-          className="btn-signal px-3 py-1.5 text-xs disabled:opacity-50"
-        >
-          {saving ? 'Saving…' : 'Save to this device'}
-        </button>
-        <span className="text-[11px] text-black/40">Stored locally · used only to ground your answers</span>
+    <div className="mt-2 space-y-3">
+      <div>
+        <label className="text-[11px] font-medium uppercase tracking-wide text-black/40">Instructions</label>
+        <textarea
+          value={instructionsDraft}
+          onChange={(e) => setInstructionsDraft(e.target.value)}
+          onBlur={() => context.setInstructions(instructionsDraft)}
+          rows={3}
+          placeholder="How should this chat answer? e.g. &quot;Cite the section number&quot;, &quot;Keep answers under 3 sentences&quot;…"
+          className="mt-1 w-full rounded-lg border border-black/15 bg-white/80 p-2 text-xs outline-none focus:border-emerald-700"
+        />
       </div>
-      {error && <p className="mt-1 text-xs text-[color:var(--stop)]">{error}</p>}
+
+      <div>
+        <label className="text-[11px] font-medium uppercase tracking-wide text-black/40">Documents</label>
+        {context.docs.length > 0 && (
+          <ul className="mt-1 space-y-1">
+            {context.docs.map((d) => (
+              <li key={d.id} className="flex items-center gap-2 rounded-lg bg-black/[0.03] px-2 py-1 text-xs">
+                <span className="truncate">{d.name}</span>
+                <span className="shrink-0 text-black/40">
+                  {d.chunks.length} snippet{d.chunks.length === 1 ? '' : 's'}
+                </span>
+                <button
+                  onClick={() => context.removeDocument(d.id)}
+                  aria-label={`Remove ${d.name}`}
+                  className="ml-auto shrink-0 text-black/40 hover:text-[color:var(--stop)]"
+                >
+                  <X size={12} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="mt-1.5 flex items-center gap-2">
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={context.saving}
+            className="btn-ghost px-3 py-1.5 text-xs disabled:opacity-50"
+          >
+            {context.saving ? 'Adding…' : 'Upload file'}
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".txt,.md,text/plain,text/markdown"
+            multiple
+            onChange={(e) => onFiles(e.target.files)}
+            className="hidden"
+          />
+          <span className="text-[11px] text-black/40">.txt / .md · stored on this device</span>
+        </div>
+        <div className="mt-2">
+          <textarea
+            value={pasteText}
+            onChange={(e) => setPasteText(e.target.value)}
+            rows={3}
+            placeholder="…or paste text to add as a document"
+            className="w-full rounded-lg border border-black/15 bg-white/80 p-2 text-xs outline-none focus:border-emerald-700"
+          />
+          <button
+            onClick={addPaste}
+            disabled={context.saving || !pasteText.trim()}
+            className="btn-signal mt-1.5 px-3 py-1.5 text-xs disabled:opacity-50"
+          >
+            {context.saving ? 'Adding…' : 'Add pasted text'}
+          </button>
+        </div>
+        {context.error && <p className="mt-1 text-xs text-[color:var(--stop)]">{context.error}</p>}
+      </div>
     </div>
   )
 }
