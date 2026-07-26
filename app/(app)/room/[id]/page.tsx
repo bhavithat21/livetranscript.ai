@@ -603,7 +603,7 @@ function Meeting({ roomId }: { roomId: string }) {
       {askOpen && (
         <>
           <div className="fixed inset-0 z-50 bg-black/10 sm:hidden" onClick={() => setAskOpen(false)} aria-hidden />
-          <div className="fixed inset-y-0 right-0 z-50 w-full sm:w-[24rem]">
+          <div className="fixed inset-y-0 right-0 z-50 w-full sm:w-auto">
             <CopilotPanel
               getTranscript={() => transcriptText(segments)}
               onClose={() => setAskOpen(false)}

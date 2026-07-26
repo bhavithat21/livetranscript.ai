@@ -482,7 +482,7 @@ export default function RecordPage() {
             onClick={() => setAskOpen(false)}
             aria-hidden
           />
-          <div className="fixed inset-y-0 right-0 z-50 w-full sm:w-[24rem]">
+          <div className="fixed inset-y-0 right-0 z-50 w-full sm:w-auto">
             <CopilotPanel
               getTranscript={() => transcriptText(segmentsRef.current)}
               onClose={() => setAskOpen(false)}

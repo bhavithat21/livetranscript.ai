@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { Check, Monitor, MonitorOff, Play, Send, Sparkles, X } from 'lucide-react'
 import { useCopilot } from '@/lib/copilot/useCopilot'
 import { useScreenStream } from '@/lib/vision/useScreenStream'
@@ -34,6 +34,64 @@ const QUICK_ACTIONS = [
   'What did I miss?',
 ]
 
+// Resizable-width state for the desktop drawer, persisted so the user's preferred
+// width sticks across sessions. Mobile ignores it (the panel is full-width there).
+const PANEL_WIDTH_KEY = 'lt.copilot.width'
+const DEFAULT_WIDTH = 384 // 24rem — the previous fixed width
+const MIN_WIDTH = 320
+const MAX_WIDTH = 900
+
+function clampWidth(px: number): number {
+  return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.round(px)))
+}
+
+// Drag the panel's left edge to resize; width is persisted to localStorage. The
+// draggable edge is disabled on touch/mobile (the panel is full-width there).
+function readSavedWidth(): number {
+  if (typeof window === 'undefined') return DEFAULT_WIDTH // SSR renders the default
+  try {
+    const saved = Number(localStorage.getItem(PANEL_WIDTH_KEY))
+    return Number.isFinite(saved) && saved > 0 ? clampWidth(saved) : DEFAULT_WIDTH
+  } catch {
+    return DEFAULT_WIDTH
+  }
+}
+
+function useResizableWidth() {
+  // Lazy initializer reads the saved width once at mount (browser only) — no
+  // effect + setState, so no cascading-render hop and the panel opens at the
+  // user's width immediately. SSR/first paint uses DEFAULT_WIDTH.
+  const [width, setWidth] = useState<number>(readSavedWidth)
+
+  const onResizeStart = useCallback((e: React.PointerEvent) => {
+    e.preventDefault()
+    // Drag the LEFT edge: the panel is right-anchored, so width grows as the
+    // pointer moves left (distance from the viewport's right edge).
+    const move = (ev: PointerEvent) => {
+      setWidth(clampWidth(window.innerWidth - ev.clientX))
+    }
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      document.body.style.userSelect = ''
+      // Persist inside the state updater so we save the final committed value.
+      setWidth((w) => {
+        try {
+          localStorage.setItem(PANEL_WIDTH_KEY, String(w))
+        } catch {
+          /* ignore */
+        }
+        return w
+      })
+    }
+    document.body.style.userSelect = 'none' // no text selection while dragging
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }, [])
+
+  return { width, onResizeStart }
+}
+
 export function CopilotPanel({
   getTranscript,
   onClose,
@@ -52,6 +110,7 @@ export function CopilotPanel({
   const orchestrator = useOrchestrator(ask)
   const [auto, setAuto] = useState(false)
   const [view, setView] = useState<'chat' | 'answers'>('chat')
+  const { width, onResizeStart } = useResizableWidth()
   // The turn index the orchestrator's auto test result belongs to. Pinned when
   // the result is produced so a later coding-mode chat answer (a new last turn)
   // doesn't inherit the stale panel. Derived during render (React's store-prev
@@ -130,7 +189,21 @@ export function CopilotPanel({
   }
 
   return (
-    <aside className="glass flex h-full w-full flex-col overflow-hidden border-l border-black/10 sm:rounded-l-3xl">
+    <aside
+      // Full-width on mobile; on ≥sm the width follows the drag-resized value
+      // (--panel-w), so the drawer is user-resizable and the preference sticks.
+      className="glass relative flex h-full w-full flex-col overflow-hidden border-l border-black/10 sm:w-[var(--panel-w)] sm:rounded-l-3xl"
+      style={{ '--panel-w': `${width}px` } as CSSProperties}
+    >
+      {/* Left-edge resize handle (desktop only). Drag to widen/narrow the panel. */}
+      <div
+        onPointerDown={onResizeStart}
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize assistant panel"
+        title="Drag to resize"
+        className="absolute inset-y-0 left-0 z-10 hidden w-1.5 cursor-ew-resize touch-none bg-transparent hover:bg-emerald-700/20 sm:block"
+      />
       <header className="flex items-center gap-2 border-b border-black/10 px-4 py-3">
         <Sparkles size={16} className="text-[color:var(--signal)]" />
         <span className="font-[family-name:var(--font-serif)] text-base font-semibold">Ask</span>
