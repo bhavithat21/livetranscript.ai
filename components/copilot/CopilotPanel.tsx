@@ -7,7 +7,7 @@ import { useModeContext } from '@/lib/copilot/useModeContext'
 import { useProactive } from '@/lib/copilot/useProactive'
 import { useAnswerFeed } from '@/lib/copilot/useAnswerFeed'
 import { useMeContext } from '@/lib/copilot/useMeContext'
-import { ChevronLeft, ChevronRight, Mic, MicOff } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, Mic, MicOff } from 'lucide-react'
 import { MODE_ORDER, MODE_PROFILES, type CopilotMode } from '@/lib/copilot/modes'
 import {
   extractCode,
@@ -341,9 +341,16 @@ function ContextEditor({ context }: { context: ReturnType<typeof useModeContext>
   const [pasteText, setPasteText] = useState('')
   const [instructionsDraft, setInstructionsDraft] = useState(context.instructions)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  // Documents list collapses so a long list of uploads doesn't push the composer
+  // off-screen. Default open only when there's nothing yet (nudge to add).
+  const [docsOpen, setDocsOpen] = useState(true)
 
   // Switching modes swaps the whole context object — keep the draft in sync.
   useEffect(() => setInstructionsDraft(context.instructions), [context.instructions])
+
+  // The saved instructions are dirty when the draft diverges from what's persisted.
+  const instructionsDirty = instructionsDraft !== context.instructions
+  const saveInstructions = () => context.setInstructions(instructionsDraft)
 
   const onFiles = async (files: FileList | null) => {
     if (!files?.length) return
@@ -366,15 +373,43 @@ function ContextEditor({ context }: { context: ReturnType<typeof useModeContext>
         <textarea
           value={instructionsDraft}
           onChange={(e) => setInstructionsDraft(e.target.value)}
-          onBlur={() => context.setInstructions(instructionsDraft)}
+          onBlur={saveInstructions}
           rows={3}
           placeholder="How should this chat answer? e.g. &quot;Cite the section number&quot;, &quot;Keep answers under 3 sentences&quot;…"
           className="mt-1 w-full rounded-lg border border-black/15 bg-white/80 p-2 text-xs outline-none focus:border-emerald-700"
         />
+        {/* Explicit Save (autosave on blur still runs) so it's clear the
+            instructions are stored, and mobile/keyboard users have a real control. */}
+        <div className="mt-1 flex items-center gap-2">
+          <button
+            onClick={saveInstructions}
+            disabled={!instructionsDirty}
+            className="btn-signal px-3 py-1 text-xs disabled:opacity-40"
+          >
+            {instructionsDirty ? 'Save instructions' : 'Saved'}
+          </button>
+          {!instructionsDirty && instructionsDraft && (
+            <span className="flex items-center gap-1 text-[11px] text-emerald-800">
+              <Check size={11} /> Saved
+            </span>
+          )}
+        </div>
       </div>
 
       <div>
-        <label className="text-[11px] font-medium uppercase tracking-wide text-black/40">Documents</label>
+        <button
+          onClick={() => setDocsOpen((v) => !v)}
+          aria-expanded={docsOpen}
+          className="flex w-full items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-black/40 hover:text-black/60"
+        >
+          <ChevronDown
+            size={12}
+            className={`shrink-0 transition-transform ${docsOpen ? '' : '-rotate-90'}`}
+          />
+          Documents{context.docs.length > 0 ? ` (${context.docs.length})` : ''}
+        </button>
+        {docsOpen && (
+        <>
         {context.docs.length > 0 && (
           <ul className="mt-1 space-y-1">
             {context.docs.map((d) => (
@@ -429,6 +464,8 @@ function ContextEditor({ context }: { context: ReturnType<typeof useModeContext>
           </button>
         </div>
         {context.error && <p className="mt-1 text-xs text-[color:var(--stop)]">{context.error}</p>}
+        </>
+        )}
       </div>
     </div>
   )
