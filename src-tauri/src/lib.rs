@@ -208,13 +208,19 @@ fn stop_session(state: &AudioState) {
 fn toggle_main_window(app: &tauri::AppHandle) {
     use tauri::Manager;
     if let Some(win) = app.get_webview_window("main") {
-        // is_visible can fail on some platforms; treat an error as "assume hidden"
-        // so the shortcut still reveals the window rather than doing nothing.
+        // A minimized window still reports is_visible()==true on Windows, so the old
+        // "visible → hide" branch would hide an already-minimized window instead of
+        // restoring it — and with skipTaskbar there's no taskbar button to click,
+        // leaving it unrecoverable. Treat minimized as "needs restore": unminimize +
+        // focus. is_visible/is_minimized can fail on some platforms; on error assume
+        // hidden and reveal, so the shortcut always errs toward showing the window.
+        let minimized = win.is_minimized().unwrap_or(false);
         match win.is_visible() {
-            Ok(true) => {
+            Ok(true) if !minimized => {
                 let _ = win.hide();
             }
             _ => {
+                let _ = win.unminimize();
                 let _ = win.show();
                 let _ = win.set_focus();
             }

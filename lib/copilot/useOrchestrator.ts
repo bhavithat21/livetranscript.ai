@@ -76,8 +76,18 @@ export function useOrchestrator(ask: AskFn) {
         .map(c => `- ${c.label}: ${c.error}`)
         .join('\n')
 
+      // Self-contained retry: askFn derives history from a stale `turns` snapshot,
+      // so the retry can't rely on the chat thread carrying the problem/solution.
+      // Restate the problem, the failing code, and the failing cases inline.
       const retryContent = await askFn(
-        `Fix: ${result.failed}/${result.total} tests failed.\n\nFailures:\n${failures}\n\nFix the solution. Keep the same function name \`${prob.functionName}\`. Use ${lang}.`,
+        [
+          `The previous solution failed ${result.failed}/${result.total} tests.`,
+          `PROBLEM:\n${prob.question}`,
+          `FUNCTION: ${prob.functionName}(${prob.params}) -> ${prob.returnType}`,
+          `FAILING SOLUTION (${lang}):\n\`\`\`${lang}\n${codeBlock.code}\n\`\`\``,
+          `FAILING CASES:\n${failures}`,
+          `Fix the solution. Keep the same function name \`${prob.functionName}\`. Use ${lang}. Return the corrected solution and a \`\`\`${lang}:tests block.`,
+        ].join('\n\n'),
         'coding',
         null,
         null,

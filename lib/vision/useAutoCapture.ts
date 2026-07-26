@@ -7,12 +7,15 @@ import { useEffect, useRef, useCallback, useState } from 'react'
 // onChange callback with the new frame so the coding tab can auto-submit the
 // problem to the AI.
 //
-// Frequency management: default 10s interval. The caller can adjust or pause.
+// Frequency management: default 4s interval — fast enough to catch a problem
+// appearing on screen, slow enough not to bill a vision call on every keystroke.
 // Each grab is cheap (~2ms canvas draw + JPEG encode); the expensive part is the
 // AI call which only fires when the frame actually changed (grabFrame returns null
-// for unchanged screens).
+// for unchanged screens). After a frame fires we hold off for a cooldown so a
+// screen that keeps changing (typing, scrolling) can't stack up rapid calls.
 
-const DEFAULT_INTERVAL_MS = 500
+const DEFAULT_INTERVAL_MS = 4_000
+const COOLDOWN_MS = 15_000
 
 export function useAutoCapture(
   enabled: boolean,
@@ -24,12 +27,17 @@ export function useAutoCapture(
   onChangeRef.current = onChange
   const grabRef = useRef(grabFrame)
   grabRef.current = grabFrame
+  const cooldownUntilRef = useRef(0)
 
   useEffect(() => {
     if (!enabled) return
     const id = setInterval(() => {
+      if (Date.now() < cooldownUntilRef.current) return
       const frame = grabRef.current()
-      if (frame) onChangeRef.current(frame)
+      if (frame) {
+        cooldownUntilRef.current = Date.now() + COOLDOWN_MS
+        onChangeRef.current(frame)
+      }
     }, intervalMs)
     return () => clearInterval(id)
   }, [enabled, intervalMs])

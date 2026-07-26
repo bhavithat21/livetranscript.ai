@@ -278,14 +278,23 @@ function Meeting({ roomId }: { roomId: string }) {
     setStartError(null)
     try {
       let provider: TranscriptionProvider | null = null
-      const onPcm = (pcm: ArrayBuffer) => provider?.sendAudio(pcm)
+      // Capture starts before the provider WS opens; buffer those early chunks and
+      // flush on connect so the first ~seconds of speech aren't dropped. Bounded to
+      // ~3s (chunks are ~50ms) so a slow fallback connect can't grow it unbounded.
+      const MAX_PENDING = 60
+      const pending: ArrayBuffer[] = []
+      const onPcm = (pcm: ArrayBuffer) => {
+        if (provider) return provider.sendAudio(pcm)
+        pending.push(pcm)
+        if (pending.length > MAX_PENDING) pending.shift() // drop oldest
+      }
       // Desktop + System source: native OS tap first. 0 = not native; a real
       // native failure REJECTS — catch it so we fall back to the browser path
       // instead of hard-failing onStart.
       let nativeRate = 0
       if (source === 'system') {
         try {
-          nativeRate = await native.start(onPcm, setLevel)
+          nativeRate = await native.start(onPcm, setLevel, { isMuted: () => mutedRef.current })
         } catch (err) {
           logError('room/native.start', err) // native tap failed — fall back to browser
         }
@@ -296,6 +305,8 @@ function Meeting({ roomId }: { roomId: string }) {
       const res = await connectWithFallback({ keyterms, sampleRate: rate, maxSpeakers: 1 })
       provider = res.provider
       providerRef.current = provider
+      for (const chunk of pending) provider.sendAudio(chunk) // flush pre-connect audio
+      pending.length = 0
       const relay = (e: Parameters<typeof publish>[0]) => {
         setSegments((s) =>
           mergeRoomSegments(s, { ...e, speaker: mySlot, sender: myClientId, name: displayName }),
@@ -304,9 +315,19 @@ function Meeting({ roomId }: { roomId: string }) {
       }
       provider.onPartial(relay)
       provider.onFinal(relay)
+      // Socket dropped after connect: surface it and stop the "live" illusion
+      // (kill the meter, flip live off) — no silent dead session.
+      provider.onStatus?.(({ error }) => {
+        stop()
+        void native.stop()
+        setLive(false)
+        setLevel(0)
+        setStartError(error)
+      })
       setLive(true)
     } catch (e) {
       stop()
+      void native.stop() // native tap may have started before connect threw — don't leak it
       setStartError(e instanceof Error ? e.message : 'Failed to start')
     }
   }, [start, stop, native, publish, mySlot, myClientId, displayName, source, keyterms])

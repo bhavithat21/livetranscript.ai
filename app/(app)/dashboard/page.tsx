@@ -1,6 +1,8 @@
 import Link from 'next/link'
 import { listSessions, type SessionSummaryRow } from '../session-actions'
 import { LibraryView } from '@/components/session/LibraryView'
+import { NoSessionContextError } from '@/lib/db/errors'
+import { logError } from '@/lib/log'
 
 export const dynamic = 'force-dynamic'
 
@@ -8,8 +10,14 @@ export default async function DashboardPage() {
   let sessions: SessionSummaryRow[]
   try {
     sessions = await listSessions()
-  } catch {
-    // Not signed in or no DB — middleware normally guards this, so treat as empty.
+  } catch (err) {
+    // Only the "no signed-in user / no DB configured" case is an empty library.
+    // A genuine query failure (outage) must NOT masquerade as "no transcripts" —
+    // let it surface as an error boundary so we don't hide data loss.
+    if (!(err instanceof NoSessionContextError)) {
+      logError('dashboard/listSessions', err)
+      throw err
+    }
     sessions = []
   }
 

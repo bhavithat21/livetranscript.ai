@@ -1,5 +1,6 @@
 'use client'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { usePathname } from 'next/navigation'
 import { useUser } from '@clerk/nextjs'
 
 // A lightweight, dependency-free feature tour: dims the page, spotlights one
@@ -75,6 +76,14 @@ interface Rect {
   height: number
 }
 
+// An anchor that exists but is display:none (e.g. AppNav's md:flex link row on a
+// phone) reports a zero-size rect and getBoundingClientRect() pins the spotlight
+// to the top-left corner. Treat such anchors as absent so the tour skips them.
+function isVisible(el: Element): boolean {
+  const r = el.getBoundingClientRect()
+  return r.width > 0 && r.height > 0
+}
+
 // Entry point. Branches on the build-time Clerk flag so useUser() is only ever
 // called where a ClerkProvider is guaranteed to be mounted — no try/catch, no
 // conditional hook. clerkConfigured is constant per session, so the branch (and
@@ -109,6 +118,7 @@ interface TourViewProps {
 }
 
 function TourView({ ready, seenRemote, onSeen }: TourViewProps) {
+  const pathname = usePathname()
   const [active, setActive] = useState(false)
   const [step, setStep] = useState(0)
   const [rect, setRect] = useState<Rect | null>(null)
@@ -125,7 +135,7 @@ function TourView({ ready, seenRemote, onSeen }: TourViewProps) {
   const resolve = useCallback((from: number, dir: 1 | -1): { index: number; el: Element } | null => {
     for (let i = from; i >= 0 && i < STEPS.length; i += dir) {
       const el = document.querySelector(`[data-tour="${STEPS[i].target}"]`)
-      if (el) return { index: i, el }
+      if (el && isVisible(el)) return { index: i, el }
     }
     return null
   }, [])
@@ -150,10 +160,10 @@ function TourView({ ready, seenRemote, onSeen }: TourViewProps) {
   // per-user flag nor the local flag is set — and only if an anchor is on this page.
   useEffect(() => {
     if (!ready) return
-    if (!seenRemote && !hasSeenLocal() && document.querySelector('[data-tour]')) {
+    if (!seenRemote && !hasSeenLocal() && resolve(0, 1)) {
       setActive(true)
     }
-  }, [ready, seenRemote])
+  }, [ready, seenRemote, resolve])
 
   // Allow anything to (re)launch the tour on demand.
   useEffect(() => {
@@ -167,13 +177,17 @@ function TourView({ ready, seenRemote, onSeen }: TourViewProps) {
 
   // Position on the current step and keep the spotlight glued to the element as
   // the layout shifts (resize/scroll). goTo is in deps so a fresh closure (e.g.
-  // after sign-in changes `stop`) re-registers correctly.
+  // after sign-in changes `stop`) re-registers correctly. pathname is in deps so a
+  // SPA navigation re-resolves: goTo(step, 1) advances to the next visible anchor,
+  // or ends the tour when the new route has none (e.g. /record, where AppNav and
+  // all its anchors unmount) — otherwise a stale spotlight and the capture-phase
+  // key handler would linger over a page the tour can't point at.
   useEffect(() => {
     if (!active) return
     goTo(step, 1)
     const reposition = () => {
       const el = document.querySelector(`[data-tour="${STEPS[step].target}"]`)
-      if (!el) return
+      if (!el || !isVisible(el)) return
       const r = el.getBoundingClientRect()
       setRect({ top: r.top, left: r.left, width: r.width, height: r.height })
     }
@@ -183,7 +197,7 @@ function TourView({ ready, seenRemote, onSeen }: TourViewProps) {
       window.removeEventListener('resize', reposition)
       window.removeEventListener('scroll', reposition, true)
     }
-  }, [active, step, goTo])
+  }, [active, step, goTo, pathname])
 
   const next = useCallback(() => goTo(step + 1, 1), [goTo, step])
   const prev = useCallback(() => goTo(step - 1, -1), [goTo, step])
@@ -207,6 +221,10 @@ function TourView({ ready, seenRemote, onSeen }: TourViewProps) {
       if (e.key === 'Escape') {
         e.preventDefault()
         stop()
+      } else if (e.key === 'Enter' && dialogRef.current?.contains(document.activeElement)) {
+        // Focus is on one of the tour's own buttons (Skip/Back/Next) — let it
+        // activate normally instead of forcing "advance". ArrowRight still advances.
+        return
       } else if (e.key === 'ArrowRight' || e.key === 'Enter') {
         e.preventDefault()
         next()

@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useMemo, useRef } from 'react'
+import { memo, useEffect, useMemo, useRef } from 'react'
 import { speakerColor } from '@/lib/speakers/palette'
 import { colorMap, segmentSlot } from '@/lib/room/roomStore'
 import { cn } from '@/lib/utils'
@@ -107,7 +107,6 @@ export function TranscriptView({
           // Override color slot wins, else the receiver-derived consistent slot.
           const slot = ov?.colorSlot ?? segmentSlot(s, colors)
           const speaker = speakerColor(slot, theme)
-          const color = speaker.color
           // Name priority: your local override → the speaker's login name → "Speaker N".
           const name = ov?.name?.trim() || s.name?.trim() || speaker.name
           // A new turn = the speaker changed from the previous segment. Only then do
@@ -115,84 +114,119 @@ export function TranscriptView({
           // group into a turn instead of every line re-labelling and running on.
           // Group turns by SENDER (stable identity) — with a colorSlot override two
           // people could share a color, so sender is the correct turn boundary.
-          const prev = segments[i - 1]
-          const prevSender = prev?.sender
-          const newTurn = i === 0 || prevSender !== s.sender
-
-          if (shadow) {
-            const emphasized = slot === emphasizeSpeaker
-            return (
-              <div key={s.id} className={cn(newTurn ? 'mt-5' : 'mt-1')}>
-                {newTurn && s.speaker != null && (
-                  <span
-                    className="mb-0.5 block font-[family-name:var(--font-serif)] text-sm font-semibold"
-                    style={{ color }}
-                  >
-                    {name}
-                  </span>
-                )}
-                {/* One statement per line so the person repeating reads a clean
-                    sentence at a time rather than chasing a run-on block. */}
-                {sentencesOf(s).map((line, li) => (
-                  <p
-                    key={li}
-                    className={cn(
-                      inkBody,
-                      'break-words',
-                      emphasized ? 'font-medium leading-snug transition-all' : 'leading-relaxed transition-all',
-                    )}
-                    // Emphasized shadow line ~2rem base; non-emphasized 1rem — both × scale.
-                    style={{
-                      opacity: emphasized ? (s.isFinal ? 1 : 0.6) : 0.4,
-                      fontSize: `${(emphasized ? 2 : 1) * scale}rem`,
-                    }}
-                  >
-                    {line}
-                  </p>
-                ))}
-              </div>
-            )
-          }
-
+          const newTurn = i === 0 || segments[i - 1]?.sender !== s.sender
+          // Only the trailing interim changes on each ASR tick; a memoized row with
+          // primitive props lets React skip re-rendering (and re-splitting) every
+          // other line — the difference between smooth and janky in long sessions.
           return (
-            <div key={s.id} className={cn(newTurn ? 'mt-6 first:mt-0' : 'mt-1')}>
-              {newTurn && s.speaker != null && (
-                // Turn header: speaker identity carried by COLOR on the label; a thin
-                // colored rule anchors the whole turn to that speaker.
-                <div className="mb-1 flex items-center gap-2">
-                  <span
-                    className="min-w-0 break-words font-[family-name:var(--font-serif)] text-sm font-semibold"
-                    style={{ color }}
-                  >
-                    {name}
-                  </span>
-                  <span className="h-px flex-1 shrink-0" style={{ background: `${color}22` }} aria-hidden />
-                </div>
-              )}
-              {/* One statement per line — split the turn into sentences so it
-                  reads (and repeats) cleanly instead of one run-on block. */}
-              <div
-                className="flex min-w-0 flex-col gap-1"
-                style={{
-                  borderLeft: s.speaker != null ? `2px solid ${color}33` : undefined,
-                  paddingLeft: s.speaker != null ? '0.75rem' : undefined,
-                }}
-              >
-                {sentencesOf(s).map((line, li) => (
-                  <p
-                    key={li}
-                    // text-lg (1.125rem) base × the reader's scale multiplier.
-                    className={cn('break-words leading-relaxed transition-opacity', inkBody)}
-                    style={{ opacity: s.isFinal ? 1 : 0.55, fontSize: `${1.125 * scale}rem` }}
-                  >
-                    {line}
-                  </p>
-                ))}
-              </div>
-            </div>
+            <TranscriptRow
+              key={s.id}
+              segment={s}
+              color={speaker.color}
+              name={name}
+              newTurn={newTurn}
+              inkBody={inkBody}
+              scale={scale}
+              shadow={shadow}
+              emphasized={shadow && slot === emphasizeSpeaker}
+            />
           )
         })}
       </div>
     </div>
   )
 }
+
+// One transcript turn/line. Memoized on primitive props so the ~10 ASR ticks/sec
+// only re-render (and re-split) the trailing interim segment, not the whole list.
+const TranscriptRow = memo(function TranscriptRow({
+  segment: s,
+  color,
+  name,
+  newTurn,
+  inkBody,
+  scale,
+  shadow,
+  emphasized,
+}: {
+  segment: Segment
+  color: string
+  name: string
+  newTurn: boolean
+  inkBody: string
+  scale: number
+  shadow: boolean
+  emphasized: boolean
+}) {
+  if (shadow) {
+    return (
+      <div className={cn(newTurn ? 'mt-5' : 'mt-1')}>
+        {newTurn && s.speaker != null && (
+          <span
+            className="mb-0.5 block font-[family-name:var(--font-serif)] text-sm font-semibold"
+            style={{ color }}
+          >
+            {name}
+          </span>
+        )}
+        {/* One statement per line so the person repeating reads a clean
+            sentence at a time rather than chasing a run-on block. */}
+        {sentencesOf(s).map((line, li) => (
+          <p
+            key={li}
+            className={cn(
+              inkBody,
+              'break-words',
+              emphasized ? 'font-medium leading-snug transition-all' : 'leading-relaxed transition-all',
+            )}
+            // Emphasized shadow line ~2rem base; non-emphasized 1rem — both × scale.
+            style={{
+              opacity: emphasized ? (s.isFinal ? 1 : 0.6) : 0.4,
+              fontSize: `${(emphasized ? 2 : 1) * scale}rem`,
+            }}
+          >
+            {line}
+          </p>
+        ))}
+      </div>
+    )
+  }
+
+  return (
+    <div className={cn(newTurn ? 'mt-6 first:mt-0' : 'mt-1')}>
+      {newTurn && s.speaker != null && (
+        // Turn header: speaker identity carried by COLOR on the label; a thin
+        // colored rule anchors the whole turn to that speaker.
+        <div className="mb-1 flex items-center gap-2">
+          <span
+            className="min-w-0 break-words font-[family-name:var(--font-serif)] text-sm font-semibold"
+            style={{ color }}
+          >
+            {name}
+          </span>
+          <span className="h-px flex-1 shrink-0" style={{ background: `${color}22` }} aria-hidden />
+        </div>
+      )}
+      {/* One statement per line — split the turn into sentences so it
+          reads (and repeats) cleanly instead of one run-on block. */}
+      <div
+        className="flex min-w-0 flex-col gap-1"
+        style={{
+          borderLeft: s.speaker != null ? `2px solid ${color}33` : undefined,
+          paddingLeft: s.speaker != null ? '0.75rem' : undefined,
+        }}
+      >
+        {sentencesOf(s).map((line, li) => (
+          <p
+            key={li}
+            // text-lg (1.125rem) base × the reader's scale multiplier.
+            className={cn('break-words leading-relaxed transition-opacity', inkBody)}
+            style={{ opacity: s.isFinal ? 1 : 0.55, fontSize: `${1.125 * scale}rem` }}
+          >
+            {line}
+          </p>
+        ))}
+      </div>
+    </div>
+  )
+})

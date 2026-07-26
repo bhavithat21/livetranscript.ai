@@ -40,6 +40,7 @@ export function Select<T extends string>({
   const [activeIndex, setActiveIndex] = useState(0)
   const rootRef = useRef<HTMLDivElement>(null)
   const listboxId = useId()
+  const optionId = (i: number) => `${listboxId}-${i}`
   const selectedIndex = Math.max(0, options.findIndex((o) => o.value === value))
   const selected = options[selectedIndex] ?? options[0]
 
@@ -96,6 +97,12 @@ export function Select<T extends string>({
           e.preventDefault()
           setOpen(false)
           break
+        case 'Tab':
+          // Focus stays on the button (ARIA combobox pattern), so let Tab move it
+          // naturally — but close the popup first so it doesn't linger with
+          // aria-expanded stuck true after focus leaves.
+          setOpen(false)
+          break
       }
     },
     [disabled, open, openMenu, options.length, commit, activeIndex],
@@ -109,6 +116,7 @@ export function Select<T extends string>({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={listboxId}
+        aria-activedescendant={open ? optionId(activeIndex) : undefined}
         aria-label={ariaLabel}
         title={title}
         disabled={disabled}
@@ -124,7 +132,6 @@ export function Select<T extends string>({
           id={listboxId}
           role="listbox"
           aria-label={ariaLabel}
-          aria-activedescendant={`${listboxId}-${activeIndex}`}
           className="glass absolute right-0 z-50 mt-1 min-w-full overflow-hidden rounded-2xl p-1 shadow-lg"
         >
           {options.map((opt, i) => {
@@ -132,7 +139,7 @@ export function Select<T extends string>({
             return (
               <li
                 key={opt.value}
-                id={`${listboxId}-${i}`}
+                id={optionId(i)}
                 role="option"
                 aria-selected={isSelected}
                 onMouseEnter={() => setActiveIndex(i)}

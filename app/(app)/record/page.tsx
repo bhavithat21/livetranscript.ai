@@ -99,7 +99,16 @@ export default function RecordPage() {
     try {
       // Open the source first so we know the REAL sample rate, then tell the provider.
       let provider: TranscriptionProvider | null = null
-      const onPcm = (pcm: ArrayBuffer) => provider?.sendAudio(pcm)
+      // Capture starts before the provider WS opens; buffer those early chunks and
+      // flush on connect so the first ~seconds of speech aren't dropped. Bounded to
+      // ~3s (chunks are ~50ms) so a slow fallback connect can't grow it unbounded.
+      const MAX_PENDING = 60
+      const pending: ArrayBuffer[] = []
+      const onPcm = (pcm: ArrayBuffer) => {
+        if (provider) return provider.sendAudio(pcm)
+        pending.push(pcm)
+        if (pending.length > MAX_PENDING) pending.shift() // drop oldest
+      }
       // Desktop + System source: try the native OS tap first (full-system audio,
       // no screen-share picker). Returns 0 in the browser / when not native; a
       // real native failure (permission denied, no device) REJECTS — catch it so
@@ -107,7 +116,7 @@ export default function RecordPage() {
       let nativeRate = 0
       if (source === 'system') {
         try {
-          nativeRate = await native.start(onPcm, setLevel)
+          nativeRate = await native.start(onPcm, setLevel, { isMuted: () => mutedRef.current })
         } catch (err) {
           logError('record/native.start', err) // native tap failed — fall back to browser
         }
@@ -122,6 +131,8 @@ export default function RecordPage() {
       )
       provider = res.provider
       providerRef.current = provider
+      for (const chunk of pending) provider.sendAudio(chunk) // flush pre-connect audio
+      pending.length = 0
       setEngine(res.name)
       provider.onPartial((e) => setSegments((s) => mergeSegments(s, e)))
       provider.onFinal((e) => {
@@ -133,9 +144,19 @@ export default function RecordPage() {
           return merged
         })
       })
+      // Socket dropped after connect: surface it and stop the "recording" illusion
+      // (kill the meter, flip recording off) — no silent dead session.
+      provider.onStatus?.(({ error }) => {
+        stop()
+        void native.stop()
+        setRecording(false)
+        setLevel(0)
+        setStartError(error)
+      })
       setRecording(true)
     } catch (e) {
       stop()
+      void native.stop() // native tap may have started before connect threw — don't leak it
       // Inline error (not alert) — a modal mid-async can wedge AudioContext on iOS Safari.
       setStartError(e instanceof Error ? e.message : 'Failed to start')
     } finally {

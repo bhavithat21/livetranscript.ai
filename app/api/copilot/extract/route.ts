@@ -43,6 +43,41 @@ export type ExtractedProblem = {
 
 export type ExtractResult = ExtractedProblem | { noProblem: true }
 
+// Coerce the raw parsed LLM JSON into a well-typed ExtractResult. The model can
+// omit or mistype any field; downstream (ExtractedProblemBar render, orchestrator
+// process) assumes arrays/strings, so normalize here — the single source both the
+// client and orchestrator consume.
+function str(v: unknown, fallback = ''): string {
+  return typeof v === 'string' ? v : fallback
+}
+
+function strArray(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
+}
+
+function normalizeExtract(parsed: unknown): ExtractResult {
+  const obj = (parsed && typeof parsed === 'object' ? parsed : {}) as Record<string, unknown>
+  if (obj.noProblem === true) return { noProblem: true }
+
+  const examples = Array.isArray(obj.examples)
+    ? obj.examples
+        .filter((e): e is Record<string, unknown> => !!e && typeof e === 'object')
+        .map((e) => ({ input: str(e.input), output: str(e.output) }))
+    : []
+
+  return {
+    question: str(obj.question),
+    functionName: str(obj.functionName, 'solve'),
+    params: str(obj.params),
+    returnType: str(obj.returnType),
+    constraints: strArray(obj.constraints),
+    examples,
+    edgeCases: strArray(obj.edgeCases),
+    language: str(obj.language, 'python'),
+    testAsserts: str(obj.testAsserts),
+  }
+}
+
 export async function POST(req: NextRequest) {
   const userId = await currentUserId()
   if (!userId) return Response.json({ error: 'Unauthorized' }, { status: 401 })
@@ -108,8 +143,8 @@ export async function POST(req: NextRequest) {
 
     const jsonMatch = raw.match(/\{[\s\S]*\}/)
     if (!jsonMatch) return Response.json({ error: 'No JSON in response' }, { status: 502 })
-    const parsed = JSON.parse(jsonMatch[0]) as ExtractResult
-    return Response.json(parsed)
+    const parsed = JSON.parse(jsonMatch[0]) as unknown
+    return Response.json(normalizeExtract(parsed))
   } catch (e) {
     logError('api/copilot/extract', e)
     return Response.json({ error: 'Extraction failed' }, { status: 502 })

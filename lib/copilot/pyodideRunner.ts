@@ -1,93 +1,115 @@
 'use client'
-// Execution-verified coding: run a Python solution IN THE BROWSER (Pyodide/WASM)
+// Execution-verified coding: run a Python solution IN A WEB WORKER (Pyodide/WASM)
 // so a coding answer is proven, not just plausible — the core "beats Cluely" edge.
 // Zero API key, zero server cost, no bundle bloat: Pyodide (~6MB) loads lazily
 // from the CDN the first time the user runs code, then is cached.
 //
-// Security: WASM runs sandboxed in the page — no filesystem, no host network.
-// We still cap wall-clock time so an accidental infinite loop can't hang the tab.
+// Security / robustness: Python runs in a Worker, not the page. A worker global
+// scope has no DOM — no document, cookies, or localStorage — so executed Python
+// (e.g. `import js`) can't read the user's session. And because it's off the main
+// thread, a CPU-bound loop (`while True: pass`) can't freeze the tab: the
+// wall-clock timeout really fires by terminating the worker. Network is NOT
+// blocked at this layer (a worker still has fetch); that's handled by CSP.
 
-const PYODIDE_VERSION = '0.26.4'
-const CDN = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/`
+const DEFAULT_TIMEOUT = 8_000
 
-type Pyodide = {
-  runPythonAsync: (code: string) => Promise<unknown>
-  setStdout: (opts: { batched: (s: string) => void }) => void
-  setStderr: (opts: { batched: (s: string) => void }) => void
-}
+type RawResult = { ok: boolean; output: string; raw: string | null; error?: string }
+type WorkerHandle = { worker: Worker; ready: Promise<void> }
 
-declare global {
-  interface Window {
-    loadPyodide?: (opts: { indexURL: string }) => Promise<Pyodide>
-  }
-}
+let handle: WorkerHandle | null = null
+let runId = 0
+// Serialize runs: one shared worker captures stdout in a global, so overlapping
+// runs would interleave output. The app runs one solution at a time anyway.
+let runQueue: Promise<unknown> = Promise.resolve()
 
-let pyodidePromise: Promise<Pyodide> | null = null
-
-function injectScript(src: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (document.querySelector(`script[src="${src}"]`)) return resolve()
-    const s = document.createElement('script')
-    s.src = src
-    s.onload = () => resolve()
-    s.onerror = () => reject(new Error('Failed to load the Python sandbox'))
-    document.head.appendChild(s)
+function createWorker(): WorkerHandle {
+  const worker = new Worker('/pyodide-worker.js')
+  const ready = new Promise<void>((resolve, reject) => {
+    const onMsg = (e: MessageEvent) => {
+      const d = e.data
+      if (d?.type === 'loaded') {
+        worker.removeEventListener('message', onMsg)
+        resolve()
+      } else if (d?.type === 'loadError') {
+        worker.removeEventListener('message', onMsg)
+        reject(new Error(d.error || 'Python sandbox unavailable'))
+      }
+    }
+    worker.addEventListener('message', onMsg)
+    worker.addEventListener('error', () => reject(new Error('Failed to load the Python sandbox')), { once: true })
   })
+  worker.postMessage({ type: 'load' })
+  return { worker, ready }
 }
 
-// Load once, cache the instance. Concurrent callers share the same promise.
-function getPyodide(): Promise<Pyodide> {
-  if (pyodidePromise) return pyodidePromise
-  pyodidePromise = (async () => {
-    await injectScript(`${CDN}pyodide.js`)
-    if (!window.loadPyodide) throw new Error('Python sandbox unavailable')
-    return window.loadPyodide({ indexURL: CDN })
-  })()
-  // If loading fails, allow a later retry.
-  pyodidePromise.catch(() => {
-    pyodidePromise = null
+// Load once, cache the worker. Concurrent callers share it. On load failure the
+// handle is cleared so a later call can retry.
+function getWorker(): WorkerHandle {
+  if (handle) return handle
+  handle = createWorker()
+  handle.ready.catch(() => {
+    handle = null
   })
-  return pyodidePromise
+  return handle
+}
+
+function enqueue<T>(task: () => Promise<T>): Promise<T> {
+  const run = runQueue.then(task, task)
+  runQueue = run.then(
+    () => {},
+    () => {},
+  )
+  return run
+}
+
+// Run one snippet in the worker with a real wall-clock timeout. On timeout the
+// worker is terminated (killing any runaway loop) and dropped so the next call
+// rebuilds it. Never throws — resolves {ok:false, error} instead.
+function execInWorker(code: string, timeoutMs: number): Promise<RawResult> {
+  const h = getWorker()
+  return h.ready.then(
+    () =>
+      new Promise<RawResult>((resolve) => {
+        const id = ++runId
+        const timer = setTimeout(() => {
+          h.worker.removeEventListener('message', onMsg)
+          h.worker.terminate()
+          if (handle === h) handle = null
+          resolve({ ok: false, output: '', raw: null, error: `Timed out after ${timeoutMs / 1000}s` })
+        }, timeoutMs)
+        const onMsg = (e: MessageEvent) => {
+          const d = e.data
+          if (d?.type !== 'result' || d.id !== id) return
+          clearTimeout(timer)
+          h.worker.removeEventListener('message', onMsg)
+          resolve({ ok: d.ok, output: d.output || '', raw: d.raw ?? null, error: d.error })
+        }
+        h.worker.addEventListener('message', onMsg)
+        h.worker.postMessage({ type: 'run', id, code })
+      }),
+    (e: unknown) => ({ ok: false, output: '', raw: null, error: e instanceof Error ? e.message : 'Sandbox load failed' }),
+  )
 }
 
 // Trigger Pyodide download early (coding mode selected) so the first test run
 // doesn't stall on the ~6MB WASM fetch. No-op if already loaded.
 export function preloadPyodide(): void {
   if (typeof window === 'undefined') return
-  getPyodide().catch(() => {})
+  getWorker().ready.catch(() => {})
 }
 
 export type RunResult = { ok: boolean; output: string; error?: string }
 
-const DEFAULT_TIMEOUT = 8_000
-
 // Run Python, capturing stdout/stderr. Resolves {ok:false, error} on exception or
 // timeout — never throws, so the UI just shows the failure.
 export async function runPython(code: string, timeoutMs = DEFAULT_TIMEOUT): Promise<RunResult> {
-  let py: Pyodide
-  try {
-    py = await getPyodide()
-  } catch (e) {
-    return { ok: false, output: '', error: e instanceof Error ? e.message : 'Sandbox load failed' }
+  const r = await enqueue(() => execInWorker(code, timeoutMs))
+  if (r.ok) return { ok: true, output: r.output.trim() }
+  return {
+    ok: false,
+    output: r.output.trim(),
+    error: (r.error ?? 'Error').split('\n').slice(-4).join('\n'),
   }
-
-  let out = ''
-  py.setStdout({ batched: (s) => (out += s) })
-  py.setStderr({ batched: (s) => (out += s) })
-
-  const timeout = new Promise<RunResult>((resolve) =>
-    setTimeout(() => resolve({ ok: false, output: out, error: `Timed out after ${timeoutMs / 1000}s` }), timeoutMs),
-  )
-  const exec = py
-    .runPythonAsync(code)
-    .then<RunResult>(() => ({ ok: true, output: out.trim() }))
-    .catch<RunResult>((e: unknown) => ({
-      ok: false,
-      output: out.trim(),
-      error: (e instanceof Error ? e.message : String(e)).split('\n').slice(-4).join('\n'),
-    }))
-
-  return Promise.race([exec, timeout])
 }
 
 // Pull the first Python fenced block out of a markdown answer, for the Run button.
@@ -152,26 +174,13 @@ export async function runTests(
     '__json__.dumps(__results__)',
   ].join('\n')
 
-  let py: Pyodide
-  try {
-    py = await getPyodide()
-  } catch (e) {
-    return failAll(labels, e instanceof Error ? e.message : 'Sandbox load failed')
+  const r = await enqueue(() => execInWorker(code, timeoutMs))
+  if (!r.ok) {
+    return failAll(labels, (r.error ?? 'Sandbox load failed').split('\n').slice(-4).join('\n'))
   }
 
-  let out = ''
-  py.setStdout({ batched: (s) => (out += s) })
-  py.setStderr({ batched: (s) => (out += s) })
-
-  const timeout = new Promise<'timeout'>((resolve) =>
-    setTimeout(() => resolve('timeout'), timeoutMs),
-  )
-
   try {
-    const raw = await Promise.race([py.runPythonAsync(code), timeout])
-    if (raw === 'timeout') return failAll(labels, `Timed out after ${timeoutMs / 1000}s`)
-
-    const parsed = JSON.parse(String(raw)) as Array<[string, boolean, string | null]>
+    const parsed = JSON.parse(String(r.raw)) as Array<[string, boolean, string | null]>
     const cases: TestCase[] = []
     let passed = 0
     let failed = 0

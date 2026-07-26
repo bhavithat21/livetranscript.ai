@@ -1,6 +1,8 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { getSession } from '../../session-actions'
+import { NoSessionContextError } from '@/lib/db/errors'
+import { logError } from '@/lib/log'
 import { SessionActions } from '@/components/session/SessionActions'
 import { HomeMenu } from '@/components/nav/HomeMenu'
 import { TranscriptView } from '@/components/transcript/TranscriptView'
@@ -13,7 +15,16 @@ type Summary = { summary: string; keyPoints?: string[]; actionItems?: string[] }
 
 export default async function SessionDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const row = await getSession(id).catch(() => null)
+  // Not-signed-in / no-DB and a missing row are both a 404; a real query failure
+  // (outage) must surface as an error, not a misleading "not found".
+  let row: Awaited<ReturnType<typeof getSession>>
+  try {
+    row = await getSession(id)
+  } catch (err) {
+    if (err instanceof NoSessionContextError) notFound()
+    logError('session/getSession', err)
+    throw err
+  }
   if (!row) notFound()
 
   const segments = (row.segments as Segment[]) ?? []
