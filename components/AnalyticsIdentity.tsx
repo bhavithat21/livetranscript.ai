@@ -5,23 +5,19 @@ import posthog from 'posthog-js'
 
 // Ties PostHog events to the signed-in user so metrics are per-user, not just
 // per-browser: identify() on sign-in, reset() on sign-out. Without this every
-// session is an anonymous stranger and you can't see patterns across a user's
-// visits. Degrades quietly when Clerk isn't configured (preview/browser build) —
-// useUser throws with no ClerkProvider, so we guard it. Renders nothing.
-function useClerkUserSafe() {
-  try {
-    return useUser()
-  } catch {
-    // No ClerkProvider mounted — analytics stays anonymous, app unaffected.
-    return { isLoaded: false, isSignedIn: false, user: null } as const
-  }
-}
-
-export function AnalyticsIdentity() {
-  const { isLoaded, isSignedIn, user } = useClerkUserSafe()
+// session is an anonymous stranger and you can't see patterns across visits.
+//
+// Rendered ONLY when Clerk is configured (see Providers), so useUser() always has
+// a mounted ClerkProvider — no try/catch, no conditional hook (Rules of Hooks).
+// `ready` is the parent's reactive "PostHog initialized" flag: because child
+// effects run before parent effects, identify() would otherwise fire before
+// posthog.init() and silently no-op. Gating on reactive state (not the
+// non-reactive posthog.__loaded) guarantees the effect re-runs once init lands.
+export function AnalyticsIdentity({ ready }: { ready: boolean }) {
+  const { isLoaded, isSignedIn, user } = useUser()
 
   useEffect(() => {
-    if (!isLoaded || !posthog.__loaded) return
+    if (!ready || !isLoaded) return
     if (isSignedIn && user) {
       // distinctId = Clerk user id, matching the server-side capture() calls
       // (record/actions.ts, session-actions.ts) so client + server events merge.
@@ -34,7 +30,7 @@ export function AnalyticsIdentity() {
       // Signed out: drop the identity so the next user isn't merged into this one.
       posthog.reset()
     }
-  }, [isLoaded, isSignedIn, user])
+  }, [ready, isLoaded, isSignedIn, user])
 
   return null
 }

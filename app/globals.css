@@ -173,8 +173,11 @@ html.lt-desktop [data-active='true'][class*='bg-ink'] {
   color: #ffffff !important;
 }
 /* Nav top bar: more see-through (leans on the blur for legibility) so it feels
-   like a floating overlay, not a solid bar. */
+   like a floating overlay, not a solid bar. It's position:sticky top:0, so on the
+   desktop shell push it below the frameless title bar (z-200) — otherwise the bar
+   overlaps the top of the nav when scrolled. */
 html.lt-desktop nav[aria-label="Main"] {
+  top: var(--titlebar-h) !important;
   background: rgba(18, 18, 26, 0.55) !important;
   -webkit-backdrop-filter: blur(24px) saturate(150%) !important;
   backdrop-filter: blur(24px) saturate(150%) !important;

@@ -41,7 +41,7 @@ export default function RootLayout({
       <TitleBar />
       <AppNav clerkConfigured={clerkConfigured} />
       <Providers>{children}</Providers>
-      <FeatureTour />
+      <FeatureTour clerkConfigured={clerkConfigured} />
     </body>
   )
 

@@ -28,6 +28,15 @@ mod windows_capture;
 // session — the old one is fully torn down before a new one is stored.
 type Stopper = Box<dyn FnOnce() + Send>;
 
+// Poison-tolerant lock. A panic while holding one of our mutexes would otherwise
+// poison it, and every later `.lock().unwrap()` would then panic too — cascading
+// one failure across all IPC calls that touch the same state. Our guarded data
+// (a stopper handle, a bool, a tray handle) is always safe to keep using after a
+// panic, so we recover the inner value instead of propagating the poison.
+fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 #[derive(Default)]
 pub struct AudioState {
     session: Mutex<Option<Stopper>>,
@@ -69,6 +78,10 @@ fn request_screen_capture_access() -> bool {
         fn CGPreflightScreenCaptureAccess() -> bool;
         fn CGRequestScreenCaptureAccess() -> bool;
     }
+    // SAFETY: Both symbols are stable CoreGraphics C functions present on macOS
+    // 10.15+ (this app targets far newer). They take no arguments, return a plain
+    // BOOL, have no preconditions, and are safe to call from any thread. We only
+    // reach here on macOS (cfg above), so the framework is always linked.
     unsafe {
         // Already granted? Don't re-prompt.
         if CGPreflightScreenCaptureAccess() {
@@ -105,15 +118,33 @@ fn set_content_protection(app: tauri::AppHandle, enabled: bool) -> Result<(), St
 #[cfg(desktop)]
 fn apply_protection(app: &tauri::AppHandle, enabled: bool) -> Result<(), String> {
     use tauri::Manager;
+    // Hold the flag lock across the whole read-modify-write so a concurrent
+    // toggle (tray vs. webview IPC) can't interleave and leave window state, the
+    // stored flag, and the tray checkmark disagreeing (TOCTOU).
+    let state = app.state::<ProtectionState>();
+    let mut guard = lock(&state.hidden_from_capture);
     if let Some(win) = app.get_webview_window("main") {
         win.set_content_protected(enabled).map_err(|e| e.to_string())?;
     }
-    let state = app.state::<ProtectionState>();
-    *state.hidden_from_capture.lock().unwrap() = enabled;
-    if let Some(item) = app.state::<TrayHandles>().protection_item.lock().unwrap().as_ref() {
+    *guard = enabled;
+    if let Some(item) = lock(&app.state::<TrayHandles>().protection_item).as_ref() {
         let _ = item.set_checked(enabled);
     }
     Ok(())
+}
+
+// Flip the screen-share-hide flag atomically: reads the current value and writes
+// its inverse under a single lock hold, so two rapid toggles can't both read the
+// same "before" value. Used by the tray menu item.
+#[cfg(desktop)]
+fn toggle_protection(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    let next = {
+        let state = app.state::<ProtectionState>();
+        let guard = lock(&state.hidden_from_capture);
+        !*guard
+    };
+    let _ = apply_protection(app, next);
 }
 
 #[cfg(not(desktop))]
@@ -150,7 +181,7 @@ fn start_native_audio(
     };
 
     let (rate, stopper) = result?;
-    *state.session.lock().unwrap() = Some(stopper);
+    *lock(&state.session) = Some(stopper);
     Ok(rate)
 }
 
@@ -163,7 +194,7 @@ fn stop_native_audio(state: tauri::State<'_, AudioState>) {
 
 // Retire the active session, if any, by invoking its teardown handle.
 fn stop_session(state: &AudioState) {
-    let stopper = state.session.lock().unwrap().take();
+    let stopper = lock(&state.session).take();
     if let Some(stop) = stopper {
         stop();
     }
@@ -203,7 +234,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     use tauri::Manager;
 
     let show = MenuItem::with_id(app, "show_hide", "Show / Hide Window", true, None::<&str>)?;
-    let protect_on = *app.state::<ProtectionState>().hidden_from_capture.lock().unwrap();
+    let protect_on = *lock(&app.state::<ProtectionState>().hidden_from_capture);
     let protect = CheckMenuItem::with_id(
         app,
         "toggle_protection",
@@ -216,10 +247,19 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let menu = Menu::with_items(app, &[&show, &protect, &quit])?;
 
     // Stash the checkbox so apply_protection can keep it in sync with the flag.
-    *app.state::<TrayHandles>().protection_item.lock().unwrap() = Some(protect.clone());
+    *lock(&app.state::<TrayHandles>().protection_item) = Some(protect.clone());
+
+    // The window icon is the tray icon. If it's somehow absent (bad bundle), fall
+    // back to a build error rather than unwrap-panicking inside setup() — a panic
+    // here, after Accessory policy could have hidden the Dock, would leave a
+    // headless app with no way to quit.
+    let icon = app
+        .default_window_icon()
+        .cloned()
+        .ok_or_else(|| tauri::Error::AssetNotFound("default window icon".into()))?;
 
     TrayIconBuilder::with_id("main-tray")
-        .icon(app.default_window_icon().unwrap().clone())
+        .icon(icon)
         .tooltip("LiveTranscript")
         .menu(&menu)
         // Only the menu should open on left-click behavior differences across OSes;
@@ -227,10 +267,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "show_hide" => toggle_main_window(app),
-            "toggle_protection" => {
-                let current = *app.state::<ProtectionState>().hidden_from_capture.lock().unwrap();
-                let _ = apply_protection(app, !current);
-            }
+            "toggle_protection" => toggle_protection(app),
             "quit" => app.exit(0),
             _ => {}
         })
@@ -303,14 +340,21 @@ pub fn run() {
                     // still runs — the in-app "?" sheet documents the shortcut anyway.
                     .ok();
 
-                // Tray-only mode: no Dock icon on macOS (Accessory policy), no
-                // taskbar button on Windows (skipTaskbar in tauri.conf.json). The
-                // app lives entirely in the menu bar / system tray.
-                #[cfg(target_os = "macos")]
-                app.set_activation_policy(tauri::ActivationPolicy::Accessory);
-
-                if let Err(e) = build_tray(app.handle()) {
-                    eprintln!("[tray] failed to build tray icon: {e}");
+                // Tray-only mode: build the tray FIRST, then hide the Dock icon
+                // (macOS Accessory policy; Windows uses skipTaskbar in the config).
+                // Order matters: if the tray fails to build, we must NOT demote to
+                // Accessory — otherwise the app would have neither a Dock icon nor a
+                // tray, leaving it headless with no way to show or quit it.
+                match build_tray(app.handle()) {
+                    Ok(()) => {
+                        #[cfg(target_os = "macos")]
+                        app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+                    }
+                    Err(e) => {
+                        // Keep the Dock icon (default Regular policy) so the app is
+                        // still reachable and quittable despite the missing tray.
+                        eprintln!("[tray] failed to build tray icon, keeping Dock icon: {e}");
+                    }
                 }
 
                 // Windows 11: real desktop blur behind the transparent window.

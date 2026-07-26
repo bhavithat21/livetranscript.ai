@@ -1,16 +1,22 @@
 'use client'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useUser } from '@clerk/nextjs'
 
 // A lightweight, dependency-free feature tour: dims the page, spotlights one
 // element at a time (by its data-tour attribute), and shows a tooltip explaining
-// it. Auto-runs once for a new user (localStorage flag) and can be relaunched any
-// time by dispatching `window.dispatchEvent(new Event('lt:start-tour'))` — the
-// Help "?" sheet / a menu item can fire that.
+// it. Auto-runs once per user and can be relaunched any time by dispatching
+// `window.dispatchEvent(new Event('lt:start-tour'))` (the nav "Tour" button does).
 //
 // Steps whose target isn't on the current page are skipped, so the same tour
-// definition works across routes without breaking. No library: the cutout is one
-// absolutely-positioned box with a huge box-shadow, the tooltip is one div.
+// definition works across routes. No library: the cutout is one absolutely-
+// positioned box with a huge box-shadow; the tooltip is one div.
+//
+// "Seen" is tracked per USER via Clerk unsafeMetadata when signed in (survives a
+// new device/browser), with localStorage as the fallback + fast path. To keep
+// useUser() out of a try/catch (which would violate the Rules of Hooks if the
+// ClerkProvider's presence ever changed), the component splits on the build-time
+// `clerkConfigured` flag: ClerkTour calls useUser unconditionally (provider is
+// guaranteed present), the standalone branch never touches Clerk.
 
 interface TourStep {
   target: string // data-tour value
@@ -46,13 +52,19 @@ const STEPS: readonly TourStep[] = [
 const SEEN_KEY = 'lt.tourSeen'
 const PADDING = 8 // px of breathing room around the spotlighted element
 
-// Clerk without a mounted provider (preview/browser build) throws from useUser;
-// degrade to "no user" so the tour falls back to localStorage-only tracking.
-function useUserSafe() {
+function hasSeenLocal(): boolean {
   try {
-    return useUser()
+    return localStorage.getItem(SEEN_KEY) === '1'
   } catch {
-    return { isLoaded: false, isSignedIn: false, user: null } as const
+    return false
+  }
+}
+
+function markSeenLocal(): void {
+  try {
+    localStorage.setItem(SEEN_KEY, '1')
+  } catch {
+    /* private mode — tour may re-run next visit, harmless */
   }
 }
 
@@ -63,34 +75,55 @@ interface Rect {
   height: number
 }
 
-export function FeatureTour() {
-  const [active, setActive] = useState(false)
-  const [step, setStep] = useState(0)
-  const [rect, setRect] = useState<Rect | null>(null)
-  const { isLoaded, isSignedIn, user } = useUserSafe()
+// Entry point. Branches on the build-time Clerk flag so useUser() is only ever
+// called where a ClerkProvider is guaranteed to be mounted — no try/catch, no
+// conditional hook. clerkConfigured is constant per session, so the branch (and
+// thus the hook tree) never changes across renders.
+export function FeatureTour({ clerkConfigured }: { clerkConfigured: boolean }) {
+  if (clerkConfigured) return <ClerkTour />
+  return <TourView ready seenRemote={false} onSeen={markSeenLocal} />
+}
 
-  const stop = useCallback(() => {
-    setActive(false)
-    // Per-USER when signed in: persist to Clerk so the tour never re-shows on a
-    // new device/browser. Also mirror to localStorage for instant checks + the
-    // signed-out/preview case. Fire-and-forget; a failed write just risks one
-    // extra tour next visit.
-    try {
-      localStorage.setItem(SEEN_KEY, '1')
-    } catch {
-      /* private mode — falls back to Clerk metadata or re-runs, harmless */
-    }
+// Signed-in aware: reads/writes the per-user "seen" flag from Clerk metadata.
+function ClerkTour() {
+  const { isLoaded, isSignedIn, user } = useUser()
+
+  const onSeen = useCallback(() => {
+    markSeenLocal()
     if (isSignedIn && user && user.unsafeMetadata?.tourSeen !== true) {
-      user
-        .update({ unsafeMetadata: { ...user.unsafeMetadata, tourSeen: true } })
-        .catch(() => {})
+      // Fire-and-forget; a failed write just risks one extra tour next visit.
+      user.update({ unsafeMetadata: { ...user.unsafeMetadata, tourSeen: true } }).catch(() => {})
     }
   }, [isSignedIn, user])
 
-  // Find the target for a step; skip forward over any that aren't on this page.
-  // Returns the resolved element or null if none of the remaining steps exist.
-  const resolveFrom = useCallback((from: number): { index: number; el: Element } | null => {
-    for (let i = from; i < STEPS.length; i++) {
+  const seenRemote = Boolean(isSignedIn) && user?.unsafeMetadata?.tourSeen === true
+  // ready waits for Clerk to resolve so we don't flash the tour before we know
+  // whether this user already saw it on another device.
+  return <TourView ready={isLoaded} seenRemote={seenRemote} onSeen={onSeen} />
+}
+
+interface TourViewProps {
+  ready: boolean // ok to evaluate auto-start (Clerk resolved, or standalone)
+  seenRemote: boolean // per-user seen flag (always false without Clerk)
+  onSeen: () => void // persist "seen" (localStorage + Clerk when available)
+}
+
+function TourView({ ready, seenRemote, onSeen }: TourViewProps) {
+  const [active, setActive] = useState(false)
+  const [step, setStep] = useState(0)
+  const [rect, setRect] = useState<Rect | null>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const primaryRef = useRef<HTMLButtonElement>(null)
+
+  const stop = useCallback(() => {
+    setActive(false)
+    onSeen()
+  }, [onSeen])
+
+  // Resolve the target for a step, scanning in `dir` over steps whose element
+  // isn't on the current page. Returns null if none remain in that direction.
+  const resolve = useCallback((from: number, dir: 1 | -1): { index: number; el: Element } | null => {
+    for (let i = from; i >= 0 && i < STEPS.length; i += dir) {
       const el = document.querySelector(`[data-tour="${STEPS[i].target}"]`)
       if (el) return { index: i, el }
     }
@@ -98,38 +131,29 @@ export function FeatureTour() {
   }, [])
 
   const goTo = useCallback(
-    (from: number) => {
-      const found = resolveFrom(from)
+    (from: number, dir: 1 | -1) => {
+      const found = resolve(from, dir)
       if (!found) {
-        stop()
+        // Ran off the end going forward → tour is done. Off the start going back
+        // → nothing earlier is on this page, so just stay put.
+        if (dir === 1) stop()
         return
       }
       const r = found.el.getBoundingClientRect()
       setStep(found.index)
       setRect({ top: r.top, left: r.left, width: r.width, height: r.height })
     },
-    [resolveFrom, stop],
+    [resolve, stop],
   )
 
-  // Auto-start once per user. Wait for Clerk to resolve (so we don't flash the
-  // tour before we know they've already seen it on another device), then start
-  // only if neither the per-user flag nor the local flag is set — and only if an
-  // anchor is actually on this page.
+  // Auto-start once per user. Hold until `ready`, then start only if neither the
+  // per-user flag nor the local flag is set — and only if an anchor is on this page.
   useEffect(() => {
-    // If Clerk is present but still loading, hold — the metadata check needs it.
-    if (isSignedIn && !isLoaded) return
-
-    const seenForUser = isSignedIn && user?.unsafeMetadata?.tourSeen === true
-    let seenLocal = false
-    try {
-      seenLocal = localStorage.getItem(SEEN_KEY) === '1'
-    } catch {
-      /* ignore */
-    }
-    if (!seenForUser && !seenLocal && document.querySelector('[data-tour]')) {
+    if (!ready) return
+    if (!seenRemote && !hasSeenLocal() && document.querySelector('[data-tour]')) {
       setActive(true)
     }
-  }, [isLoaded, isSignedIn, user])
+  }, [ready, seenRemote])
 
   // Allow anything to (re)launch the tour on demand.
   useEffect(() => {
@@ -141,11 +165,12 @@ export function FeatureTour() {
     return () => window.removeEventListener('lt:start-tour', onStart)
   }, [])
 
-  // When active, position on the current step and keep the spotlight glued to the
-  // element as the layout shifts (resize/scroll).
+  // Position on the current step and keep the spotlight glued to the element as
+  // the layout shifts (resize/scroll). goTo is in deps so a fresh closure (e.g.
+  // after sign-in changes `stop`) re-registers correctly.
   useEffect(() => {
     if (!active) return
-    goTo(step)
+    goTo(step, 1)
     const reposition = () => {
       const el = document.querySelector(`[data-tour="${STEPS[step].target}"]`)
       if (!el) return
@@ -158,14 +183,24 @@ export function FeatureTour() {
       window.removeEventListener('resize', reposition)
       window.removeEventListener('scroll', reposition, true)
     }
-    // step is intentionally in deps so re-positioning tracks the active step.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, step])
+  }, [active, step, goTo])
 
-  const next = useCallback(() => goTo(step + 1), [goTo, step])
-  const prev = useCallback(() => goTo(Math.max(0, step - 1)), [goTo, step])
+  const next = useCallback(() => goTo(step + 1, 1), [goTo, step])
+  const prev = useCallback(() => goTo(step - 1, -1), [goTo, step])
 
-  // Keyboard: Esc closes, →/Enter advances, ← goes back.
+  const visible = active && rect !== null
+
+  // Focus management: move focus into the dialog when it appears, trap Tab within
+  // it, and restore focus to the previously-focused element on close. Gated on
+  // `visible` (not just `active`) because the dialog DOM only exists once rect is set.
+  useEffect(() => {
+    if (!visible) return
+    const previouslyFocused = document.activeElement as HTMLElement | null
+    primaryRef.current?.focus()
+    return () => previouslyFocused?.focus?.()
+  }, [visible])
+
+  // Keyboard: Esc closes, →/Enter advances, ← goes back, Tab is trapped inside.
   useEffect(() => {
     if (!active) return
     const onKey = (e: KeyboardEvent) => {
@@ -178,13 +213,27 @@ export function FeatureTour() {
       } else if (e.key === 'ArrowLeft') {
         e.preventDefault()
         prev()
+      } else if (e.key === 'Tab') {
+        const focusables = dialogRef.current?.querySelectorAll<HTMLElement>(
+          'button, [href], [tabindex]:not([tabindex="-1"])',
+        )
+        if (!focusables || focusables.length === 0) return
+        const first = focusables[0]
+        const last = focusables[focusables.length - 1]
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault()
+          last.focus()
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault()
+          first.focus()
+        }
       }
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
   }, [active, next, prev, stop])
 
-  if (!active || !rect) return null
+  if (!visible || !rect) return null
 
   const current = STEPS[step]
   const isLast = step === STEPS.length - 1
@@ -220,7 +269,7 @@ export function FeatureTour() {
   }
 
   return (
-    <div role="dialog" aria-modal="true" aria-label="Feature tour">
+    <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Feature tour">
       <div style={cutout} aria-hidden />
       <div style={tip} className="glass rounded-2xl p-4 text-[#16151a] shadow-xl">
         <p className="text-xs font-semibold uppercase tracking-wide text-black/40">
@@ -238,7 +287,7 @@ export function FeatureTour() {
                 Back
               </button>
             )}
-            <button onClick={isLast ? stop : next} className="btn-signal px-4 text-sm">
+            <button ref={primaryRef} onClick={isLast ? stop : next} className="btn-signal px-4 text-sm">
               {isLast ? 'Done' : 'Next'}
             </button>
           </div>
