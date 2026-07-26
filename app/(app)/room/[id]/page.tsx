@@ -1,7 +1,7 @@
 'use client'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
-import { BookOpen, Check, Copy, Mic, MicOff, Sparkles, Users } from 'lucide-react'
+import { ArrowLeft, BookOpen, Check, Copy, Mic, MicOff, Sparkles, Users } from 'lucide-react'
 import { useMicStream, type AudioSource } from '@/lib/audio/useMicStream'
 import { useNativeCapture } from '@/lib/audio/useNativeCapture'
 import { logError } from '@/lib/log'
@@ -105,6 +105,14 @@ function Lobby({ roomId, onJoin }: { roomId: string; onJoin: () => void }) {
 
   return (
     <main className="mx-auto max-w-lg px-6 py-20">
+      {/* Back out of the lobby without joining — otherwise the join screen is a
+          dead end (no nav chrome here). Prefer real history back; fall to dashboard. */}
+      <button
+        onClick={() => (window.history.length > 1 ? router.back() : router.push('/dashboard'))}
+        className="mb-6 flex items-center gap-1.5 text-sm text-black/50 transition-colors hover:text-ink"
+      >
+        <ArrowLeft size={16} /> Back
+      </button>
       <p className="text-sm font-medium uppercase tracking-widest text-emerald-700">Live meeting</p>
       <h1 className="mt-2 font-[family-name:var(--font-serif)] text-3xl leading-tight sm:text-4xl">
         You&rsquo;re about to join
