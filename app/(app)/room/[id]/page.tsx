@@ -237,6 +237,11 @@ function Meeting({ roomId }: { roomId: string }) {
   const [segments, setSegments] = useState<Segment[]>([])
   const [level, setLevel] = useState(0)
   const [live, setLive] = useState(false)
+  // In-flight guard: `live` only flips true AFTER the ~1-2s connect, so without
+  // `starting` a double-click / double-tap-S re-enters onStart and opens a second
+  // capture whose stream ref is orphaned (mic stays hot, can't be stopped). The
+  // Start button is disabled and the S-key gated on it too.
+  const [starting, setStarting] = useState(false)
   const [muted, setMuted] = useState(false)
   // Default to System sound (getDisplayMedia loopback) — no echo, no device
   // contention with Zoom/Meet. Mic is opt-in for the physical room only.
@@ -283,6 +288,8 @@ function Meeting({ roomId }: { roomId: string }) {
   const full = mySlot < 0 // past the 5-speaker cap → listen-only
 
   const onStart = useCallback(async () => {
+    if (starting || live) return // ignore re-entry during the connect window
+    setStarting(true)
     setStartError(null)
     try {
       let provider: TranscriptionProvider | null = null
@@ -337,8 +344,10 @@ function Meeting({ roomId }: { roomId: string }) {
       stop()
       void native.stop() // native tap may have started before connect threw — don't leak it
       setStartError(e instanceof Error ? e.message : 'Failed to start')
+    } finally {
+      setStarting(false)
     }
-  }, [start, stop, native, publish, mySlot, myClientId, displayName, source, keyterms])
+  }, [start, stop, native, publish, mySlot, myClientId, displayName, source, keyterms, starting, live])
 
   const onStop = useCallback(async () => {
     stop()
@@ -393,15 +402,18 @@ function Meeting({ roomId }: { roomId: string }) {
       const mod = e.metaKey || e.ctrlKey
       const k = e.key.toLowerCase()
 
-      if (mod && !typing && k === 'c') {
-        if ((window.getSelection()?.toString() ?? '') === '') {
+      // Handle mod-combos here, then RETURN — so Cmd/Ctrl+S (save), Cmd+M
+      // (minimize), etc. never fall through to the plain-key S/M branches below
+      // and silently start/stop the mic or toggle mute.
+      if (mod) {
+        if (!typing && k === 'c' && (window.getSelection()?.toString() ?? '') === '') {
           e.preventDefault()
           void onCopyTranscript()
         }
         return
       }
       if (typing) return
-      if (k === 's') {
+      if (k === 's' && !starting) {
         e.preventDefault()
         void (live ? onStop() : onStart())
       }
@@ -412,7 +424,7 @@ function Meeting({ roomId }: { roomId: string }) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [live, onStart, onStop, onCopyTranscript])
+  }, [live, starting, onStart, onStop, onCopyTranscript])
 
   const me = speakerColor(mySlot < 0 ? 0 : mySlot, 'light')
 
@@ -572,8 +584,8 @@ function Meeting({ roomId }: { roomId: string }) {
               )}
               <Waveform level={level} active={live && !muted} />
               {!live ? (
-                <button onClick={onStart} className="btn-signal" title="Start (S)">
-                  Start speaking
+                <button onClick={onStart} disabled={starting} className="btn-signal disabled:opacity-50" title="Start (S)">
+                  {starting ? 'Starting…' : 'Start speaking'}
                 </button>
               ) : (
                 <button onClick={onStop} className="btn-stop flex items-center gap-2" title="Stop (S)">

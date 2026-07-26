@@ -32,6 +32,7 @@ export function FollowAlong({
   const { start, stop, error } = useMicStream()
   const [spoken, setSpoken] = useState('')
   const [listening, setListening] = useState(false)
+  const [starting, setStarting] = useState(false)
   const [startError, setStartError] = useState<string | null>(null)
   const providerRef = useRef<TranscriptionProvider | null>(null)
   // Freshest source for keyterm bias at begin() time, without re-creating begin
@@ -43,6 +44,10 @@ export function FollowAlong({
   const activeIndex = alignIndex(words, spoken)
 
   const begin = useCallback(async () => {
+    // In-flight guard: `listening`/`starting` flip via state and the Start button
+    // is disabled while `starting`, so a double-click can't open a second mic
+    // stream (the only trigger for begin() is that button — no keyboard path).
+    setStarting(true)
     setStartError(null)
     setSpoken('')
     try {
@@ -64,6 +69,8 @@ export function FollowAlong({
     } catch (e) {
       stop()
       setStartError(e instanceof Error ? e.message : 'Could not start follow-along')
+    } finally {
+      setStarting(false)
     }
   }, [start, stop, keyterms])
 
@@ -115,7 +122,7 @@ export function FollowAlong({
       <div className="pointer-events-none fixed inset-x-0 bottom-8 flex justify-center px-4">
         <div className="glass pointer-events-auto flex items-center gap-3 rounded-full px-4 py-2.5">
           {!listening ? (
-            <button onClick={begin} className="btn-signal">Start reading</button>
+            <button onClick={begin} disabled={starting} className="btn-signal disabled:opacity-50">{starting ? 'Starting…' : 'Start reading'}</button>
           ) : (
             <button onClick={end} className="btn-stop flex items-center gap-2">
               <span className="live-dot" aria-hidden /> Stop
