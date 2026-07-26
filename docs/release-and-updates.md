@@ -93,6 +93,44 @@ installers (or point the env vars at the release/Blob URLs) and redeploy, so new
 beta users don't download a stale version. `scripts/publish-installer.sh` uploads
 to Vercel Blob and prints the public URL for the env override.
 
+## Private-repo-safe update channel (livetranscript.ai/updates)
+
+The app's updater endpoint is `https://livetranscript.ai/updates/latest.json`
+(baked into every binary, permanent). That path is a stable front door
+(`app/updates/[...path]/route.ts`, public via `proxy.ts`) that **redirects** to a
+public Blob store — so auto-update keeps working even after the repo goes private
+(unlike GitHub release assets, which need auth on a private repo).
+
+**The redirect chain:**
+1. App fetches `livetranscript.ai/updates/latest.json`
+2. Route 307-redirects to `${UPDATES_BASE_URL}/latest.json`
+3. Blob serves the manifest; its installer URLs are `livetranscript.ai/updates/<file>`
+4. App fetches those; route redirects to `${UPDATES_BASE_URL}/<file>`; Blob serves the binary.
+
+**One-time setup (all human-gated — needs the Vercel/Blob account):**
+
+1. Create a public Blob store on the Vercel project and get a RW token:
+   ```bash
+   npx vercel blob store add livetranscript-updates
+   ```
+   Note the store's public base URL, e.g. `https://<hash>.public.blob.vercel-storage.com`.
+
+2. **GitHub Actions secret** (CI publishes here):
+   - `BLOB_READ_WRITE_TOKEN` = the Blob RW token.
+
+3. **Vercel env (Production)** — the web app's redirect target. The publish script
+   uploads to Blob keys `updates/<file>`, so this MUST include the `/updates` suffix:
+   ```bash
+   # value = <blob store public base>/updates
+   npx vercel env add UPDATES_BASE_URL production
+   ```
+   Then redeploy so `/updates/*` resolves. Until this is set, `/updates/*`
+   returns 503 and auto-update is simply inactive (fail-soft, no crash).
+
+With those in place, tagging `v*` builds installers, and the
+`Publish updates to public store` CI step (desktop-release.yml) uploads them +
+the rewritten `latest.json` to Blob. Nothing shipped ever points at GitHub.
+
 ## Summary — to turn on updates for beta users right now
 
 1. Confirm/set `TAURI_SIGNING_PRIVATE_KEY` (+ password) in GitHub secrets (Step 1).
