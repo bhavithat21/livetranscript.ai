@@ -32,16 +32,29 @@ export function AppNav({ clerkConfigured }: { clerkConfigured: boolean }) {
           <div className="hidden items-center gap-1 md:flex">
             {clerkConfigured && (
               <Show when="signed-in">
-                <NavLink href="/dashboard" active={pathname === '/dashboard'}>
-                  Library
-                </NavLink>
+                <span data-tour="library">
+                  <NavLink href="/dashboard" active={pathname === '/dashboard'}>
+                    Library
+                  </NavLink>
+                </span>
               </Show>
             )}
             <NavLink href="/pricing" active={pathname === '/pricing'}>Pricing</NavLink>
-            <NavLink href="/download" active={pathname === '/download'}>Download</NavLink>
-            <NavLink href="/room/new">New room</NavLink>
+            <span data-tour="download">
+              <NavLink href="/download" active={pathname === '/download'}>Download</NavLink>
+            </span>
+            <span data-tour="room">
+              <NavLink href="/room/new">New room</NavLink>
+            </span>
+            <button
+              type="button"
+              onClick={() => window.dispatchEvent(new Event('lt:start-tour'))}
+              className="inline-flex min-h-11 items-center rounded-full px-3 text-black/60 transition-colors hover:bg-black/5 hover:text-ink"
+            >
+              Tour
+            </button>
           </div>
-          <Link href="/record" className="btn-signal ml-1 px-4 text-sm">
+          <Link href="/record" data-tour="record" className="btn-signal ml-1 px-4 text-sm">
             New transcript
           </Link>
           {clerkConfigured && (

@@ -57,6 +57,16 @@ html.lt-desktop body {
   background: transparent !important;
   color: #f0f0f0 !important;
 }
+/* Frameless title bar (TitleBar.tsx): the native window runs decorations:false,
+   so a custom drag bar sits at the very top. Reserve its height and push the app
+   content down so the bar never overlaps the sticky nav / page headers. Only in
+   the desktop shell — the web app has no title bar. */
+html.lt-desktop {
+  --titlebar-h: 32px;
+}
+html.lt-desktop body {
+  padding-top: var(--titlebar-h);
+}
 /* Main content containers: dark frosted surface (readable over any wallpaper) */
 html.lt-desktop main,
 html.lt-desktop .bg-\[\#faf9f7\] {
@@ -118,6 +128,19 @@ html.lt-desktop select {
   color: #f0f0f0 !important;
   border-color: rgba(255, 255, 255, 0.15) !important;
 }
+/* Dropdown option list: the closed <select> box is dark (above), but the popup
+   <option>s default to a bright white menu that clashes with the overlay. Paint
+   them dark too. NOTE: on macOS the option popup is drawn by the OS OUTSIDE the
+   webview, so styling reaches WebView2 (Windows) reliably but macOS honors only
+   background/color, not full layout — and that native popup also escapes
+   contentProtected on screen shares. A custom in-DOM dropdown is the only full
+   fix; ponytail: options-styling covers 90%, swap to a headless listbox if the
+   macOS native popup must be captured-hidden. */
+html.lt-desktop option,
+html.lt-desktop optgroup {
+  background: #14141c !important;
+  color: #f0f0f0 !important;
+}
 /* Buttons: signal stays emerald, ghost gets light border */
 html.lt-desktop .btn-ghost {
   border-color: rgba(255, 255, 255, 0.20) !important;
@@ -135,11 +158,57 @@ html.lt-desktop .hairline,
 html.lt-desktop .bg-black\/10 {
   background: rgba(255, 255, 255, 0.08) !important;
 }
-/* Nav top bar: always visible, slightly more opaque for clarity */
+/* Selected/active surfaces + user chat bubbles use `bg-ink`. In dark mode --ink
+   is near-white, which made the selected tab a stark WHITE pill. Repaint these
+   with the emerald signal so "active" reads as a clear accent, not glare. Their
+   text-white stays legible on emerald (AA contrast). */
+html.lt-desktop .bg-ink,
+/* Tab/mode toggles use `data-[active=true]:bg-ink` (Chat/Answers, mode pills, the
+   room transcript toggles). That compiles to a class literally named
+   `data-[active=true]:bg-ink`, which the `.bg-ink` selector above does NOT match —
+   so the active pill fell through to --ink (near-white in dark mode) and glared.
+   Repaint any active element carrying a bg-ink utility with the emerald signal. */
+html.lt-desktop [data-active='true'][class*='bg-ink'] {
+  background-color: #0f766e !important;
+  color: #ffffff !important;
+}
+/* Nav top bar: more see-through (leans on the blur for legibility) so it feels
+   like a floating overlay, not a solid bar. */
 html.lt-desktop nav[aria-label="Main"] {
-  background: rgba(20, 20, 28, 0.88) !important;
-  -webkit-backdrop-filter: blur(20px) saturate(140%) !important;
-  backdrop-filter: blur(20px) saturate(140%) !important;
+  background: rgba(18, 18, 26, 0.55) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(150%) !important;
+  backdrop-filter: blur(24px) saturate(150%) !important;
+}
+
+/* Steady cursor in the desktop overlay. In a floating always-on-top panel the
+   default web cursors feel jittery: an I-beam over every heading/label, resize
+   arrows at the undecorated window edges, text-select drag across the UI. Scope
+   this to lt-desktop ONLY so the web app at livetranscript.ai keeps normal
+   browser behavior.
+   - Default arrow everywhere, and kill accidental text selection of chrome.
+   - Interactive elements keep the pointer (hand) so affordance is preserved.
+   - Real text surfaces (transcript reader, inputs) stay selectable with the
+     I-beam — copying transcripts is a core action, don't break it. */
+html.lt-desktop,
+html.lt-desktop * {
+  cursor: default;
+  -webkit-user-select: none;
+  user-select: none;
+}
+html.lt-desktop a,
+html.lt-desktop button,
+html.lt-desktop summary,
+html.lt-desktop [role="button"],
+html.lt-desktop label {
+  cursor: pointer;
+}
+html.lt-desktop .reader-surface,
+html.lt-desktop .reader-surface *,
+html.lt-desktop input,
+html.lt-desktop textarea {
+  cursor: text;
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 /* Liquid Glass — translucent, blurs content behind, soft light edge.

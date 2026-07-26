@@ -11,6 +11,8 @@ import { useTextScale } from '@/lib/transcript/useTextScale'
 import { CopilotPanel } from '@/components/copilot/CopilotPanel'
 import { Waveform } from '@/components/transcript/Waveform'
 import { HomeMenu } from '@/components/nav/HomeMenu'
+import { Select } from '@/components/ui/Select'
+import { ShortcutHelp, MOD } from '@/components/ui/ShortcutHelp'
 import { saveSession } from './actions'
 import { createShare } from '../session-actions'
 import { logError } from '@/lib/log'
@@ -194,12 +196,64 @@ export default function RecordPage() {
     [savedId],
   )
 
-  // Keyboard shortcuts: S start/stop, M or Space mute (while live), R Reader Mode, Esc exit Reader.
+  // Copy the whole transcript to the clipboard (Mod+C when not selecting text).
+  const onCopyTranscript = useCallback(async () => {
+    const text = transcriptText(segmentsRef.current)
+    if (!text) return
+    try {
+      await navigator.clipboard.writeText(text)
+      setShareMsg('Transcript copied')
+    } catch (err) {
+      logError('record/copyTranscript', err)
+    }
+  }, [])
+
+  // Reset to a fresh capture (Mod+N) — mirrors the "New recording" button.
+  const onNew = useCallback(() => {
+    setSegments([])
+    setSummary(null)
+    setSavedId(null)
+    setShareMsg(null)
+    setReader(false)
+  }, [])
+
+  // Keyboard shortcuts. Plain keys: S start/stop, M/Space mute (live), R Reader,
+  // Esc exit Reader. Mod combos: Mod+C copy transcript, Mod+S save (via Stop),
+  // Mod+N new. "?" opens the help sheet (handled in ShortcutHelp).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null
-      if (el && (el.tagName === 'INPUT' || el.tagName === 'SELECT' || el.tagName === 'TEXTAREA')) return
+      const typing =
+        el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
+      const mod = e.metaKey || e.ctrlKey
       const k = e.key.toLowerCase()
+
+      // Mod combos work even in text fields would be surprising, so still skip typing.
+      if (mod && !typing) {
+        if (k === 'c') {
+          // Only hijack Copy when there's no active text selection — otherwise let
+          // the native copy of the highlighted text through.
+          if ((window.getSelection()?.toString() ?? '') === '') {
+            e.preventDefault()
+            void onCopyTranscript()
+          }
+          return
+        }
+        if (k === 's') {
+          // Save = stop (which persists). No-op if already stopped/busy.
+          e.preventDefault()
+          if (recording && !busy) void onStop()
+          return
+        }
+        if (k === 'n') {
+          e.preventDefault()
+          if (!recording) onNew()
+          return
+        }
+        return
+      }
+
+      if (typing) return
       if (e.key === 'Escape' && reader) return setReader(false)
       if (k === 'r') return setReader((v) => !v)
       if (k === 's' && !busy) {
@@ -213,7 +267,7 @@ export default function RecordPage() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [recording, busy, reader, onStart, onStop])
+  }, [recording, busy, reader, onStart, onStop, onCopyTranscript, onNew])
 
   const idle = !recording && segments.length === 0
   const elapsed = useElapsed(recording, startedAtRef.current)
@@ -227,6 +281,18 @@ export default function RecordPage() {
 
   return (
     <main className="relative min-h-dvh bg-[#faf9f7] pb-32 text-[#16151a]">
+      <ShortcutHelp
+        shortcuts={[
+          { keys: 'S', label: recording ? 'Stop recording' : 'Start recording' },
+          { keys: 'Space / M', label: 'Mute / unmute (while live)' },
+          { keys: 'R', label: 'Toggle Reader Mode' },
+          { keys: `${MOD}C`, label: 'Copy transcript' },
+          { keys: `${MOD}S`, label: 'Save (stop & persist)' },
+          { keys: `${MOD}N`, label: 'New transcript' },
+          { keys: 'Esc', label: 'Exit Reader Mode' },
+          { keys: `${MOD}⇧H`, label: 'Hide / show window (desktop)' },
+        ]}
+      />
       {/* Idle has no header — pin nav top-left so the launch screen isn't a dead end. */}
       {idle && (
         <div className="fixed left-4 top-4 z-50">
@@ -461,16 +527,16 @@ function LaunchConsole({
         >
           <label className="flex items-center justify-between gap-3 text-sm">
             <span className="text-black/50">Source</span>
-            <select
-              aria-label="Audio source"
+            <Select
+              ariaLabel="Audio source"
               value={source}
-              onChange={(e) => setSource(e.target.value as AudioSource)}
+              onChange={(v) => setSource(v)}
               disabled={busy}
-              className="rounded-full border border-black/15 bg-white/70 px-3 py-1.5 text-sm outline-none focus:border-emerald-700"
-            >
-              <option value="system">System sound (recommended)</option>
-              <option value="mic">Microphone</option>
-            </select>
+              options={[
+                { value: 'system', label: 'System sound (recommended)' },
+                { value: 'mic', label: 'Microphone' },
+              ]}
+            />
           </label>
           {/* Echo/contention guidance: System sound is a digital loopback — it
               never grabs the mic/speaker device Zoom is using, so no echo and no
@@ -482,19 +548,19 @@ function LaunchConsole({
           </p>
           <label className="flex items-center justify-between gap-3 text-sm">
             <span className="text-black/50">Engine</span>
-            <select
-              aria-label="Transcription engine"
+            {/* Capability labels — never expose which vendor/model powers each. */}
+            <Select
+              ariaLabel="Transcription engine"
               value={providerChoice}
-              onChange={(e) => setProviderChoice(e.target.value as ProviderChoice)}
+              onChange={(v) => setProviderChoice(v)}
               disabled={busy}
               title="How we transcribe — Auto picks the best engine for you"
-              className="rounded-full border border-black/15 bg-white/70 px-3 py-1.5 text-sm outline-none focus:border-emerald-700"
-            >
-              {/* Capability labels — never expose which vendor/model powers each. */}
-              <option value="auto">Auto — best available</option>
-              <option value="AssemblyAI">Highest accuracy</option>
-              <option value="Deepgram">Fastest / lowest latency</option>
-            </select>
+              options={[
+                { value: 'auto', label: 'Auto — best available' },
+                { value: 'AssemblyAI', label: 'Highest accuracy' },
+                { value: 'Deepgram', label: 'Fastest / lowest latency' },
+              ]}
+            />
           </label>
           <button
             onClick={onStart}

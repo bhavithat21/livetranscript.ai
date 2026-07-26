@@ -3,6 +3,7 @@ import posthog from 'posthog-js'
 import { PostHogProvider } from 'posthog-js/react'
 import { useEffect } from 'react'
 import { logError } from '@/lib/log'
+import { AnalyticsIdentity } from '@/components/AnalyticsIdentity'
 
 export function Providers({ children }: { children: React.ReactNode }) {
   useEffect(() => {
@@ -11,7 +12,14 @@ export function Providers({ children }: { children: React.ReactNode }) {
       posthog.init(key, {
         api_host: process.env.NEXT_PUBLIC_POSTHOG_HOST ?? 'https://us.i.posthog.com',
         capture_pageview: true,
-        autocapture: false, // explicit events only; autocapture is noise for this app
+        // Autocapture ON: record clicks/inputs/pageviews automatically so we can
+        // see behavioral patterns without hand-instrumenting every control.
+        // ponytail: broad-strokes coverage; add targeted posthog.capture() calls
+        // for funnel steps that autocapture can't infer (e.g. "recording_started").
+        autocapture: true,
+        // Don't send PII into element text/values captured from the DOM.
+        mask_all_text: false,
+        mask_all_element_attributes: false,
       })
     }
   }, [])
@@ -30,5 +38,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
-  return <PostHogProvider client={posthog}>{children}</PostHogProvider>
+  return (
+    <PostHogProvider client={posthog}>
+      <AnalyticsIdentity />
+      {children}
+    </PostHogProvider>
+  )
 }

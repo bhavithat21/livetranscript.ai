@@ -19,6 +19,8 @@ import { ChatView } from '@/components/transcript/ChatView'
 import { TextSizeControl } from '@/components/transcript/TextSizeControl'
 import { useTextScale } from '@/lib/transcript/useTextScale'
 import { Waveform } from '@/components/transcript/Waveform'
+import { Select } from '@/components/ui/Select'
+import { ShortcutHelp, MOD } from '@/components/ui/ShortcutHelp'
 import { RosterPanel } from '@/components/room/RosterPanel'
 import { FollowAlong } from '@/components/room/FollowAlong'
 import { CopilotPanel } from '@/components/copilot/CopilotPanel'
@@ -338,24 +340,50 @@ function Meeting({ roomId }: { roomId: string }) {
     })
   }, [onRoomEnd, onStop, router])
 
-  // Keyboard shortcuts: Space/M = mute toggle while live, S = start/stop, Esc = end.
+  // Copy the whole meeting transcript to the clipboard (Mod+C, no active selection).
+  const onCopyTranscript = useCallback(async () => {
+    const text = transcriptText(segments)
+    if (!text) return
+    try {
+      await navigator.clipboard.writeText(text)
+    } catch (err) {
+      logError('room/copyTranscript', err)
+    }
+  }, [segments])
+
+  // Keyboard shortcuts. S start/stop, Space/M mute (live), Mod+C copy transcript.
+  // NOTE: Esc no longer ends the meeting — ending is destructive (kicks all peers),
+  // so a stray Esc shouldn't kill a live room. Ending stays on the explicit button
+  // + S. This also matches /record, where Esc only closes overlays. "?" help sheet
+  // owns Esc when open (ShortcutHelp, capture phase).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null
-      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return
-      if (e.key === 'Escape') return void onEnd()
-      if (e.key.toLowerCase() === 's') {
+      const typing =
+        el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
+      const mod = e.metaKey || e.ctrlKey
+      const k = e.key.toLowerCase()
+
+      if (mod && !typing && k === 'c') {
+        if ((window.getSelection()?.toString() ?? '') === '') {
+          e.preventDefault()
+          void onCopyTranscript()
+        }
+        return
+      }
+      if (typing) return
+      if (k === 's') {
         e.preventDefault()
         void (live ? onStop() : onStart())
       }
-      if (live && (e.key === ' ' || e.key.toLowerCase() === 'm')) {
+      if (live && (e.key === ' ' || k === 'm')) {
         e.preventDefault()
         setMuted((m) => !m)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [live, onStart, onStop, onEnd])
+  }, [live, onStart, onStop, onCopyTranscript])
 
   const me = speakerColor(mySlot < 0 ? 0 : mySlot, 'light')
 
@@ -363,6 +391,14 @@ function Meeting({ roomId }: { roomId: string }) {
     // Lock the meeting to ONE viewport: header fixed, transcript is the only
     // scroll region — otherwise the page AND the transcript both scroll ("two scrolls").
     <main className="relative flex h-dvh flex-col overflow-hidden bg-[#faf9f7] text-[#16151a]">
+      <ShortcutHelp
+        shortcuts={[
+          { keys: 'S', label: live ? 'Stop' : 'Start' },
+          { keys: 'Space / M', label: 'Mute / unmute (while live)' },
+          { keys: `${MOD}C`, label: 'Copy transcript' },
+          { keys: `${MOD}⇧H`, label: 'Hide / show window (desktop)' },
+        ]}
+      />
       {/* Top bar: home nav + identity + copyable meeting id + status, End on the right. */}
       <header className="flex flex-wrap items-center gap-2 px-4 py-3 sm:gap-3 sm:px-6 sm:py-4">
         <HomeMenu />
@@ -483,15 +519,16 @@ function Meeting({ roomId }: { roomId: string }) {
           ) : (
             <>
               {!live && (
-                <select
+                <Select
+                  ariaLabel="Audio source"
                   value={source}
-                  onChange={(e) => setSource(e.target.value as AudioSource)}
-                  className="rounded-full border border-black/15 bg-white/60 px-3 py-1.5 text-sm outline-none focus:border-emerald-700"
+                  onChange={(v) => setSource(v)}
                   title="System sound is a digital loopback — no echo, no conflict with Zoom/Meet. Microphone is for the physical room only."
-                >
-                  <option value="system">System sound (recommended)</option>
-                  <option value="mic">Microphone</option>
-                </select>
+                  options={[
+                    { value: 'system', label: 'System sound (recommended)' },
+                    { value: 'mic', label: 'Microphone' },
+                  ]}
+                />
               )}
               {live && (
                 <button
