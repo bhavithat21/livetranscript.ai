@@ -41,6 +41,7 @@ export function useCopilot(getTranscript: () => string) {
       setTurns((t) => [...t, { role: 'user', content: q, mode }, { role: 'assistant', content: '', mode }])
       setStreaming(true)
 
+      let finalContent = ''
       try {
         const res = await fetch('/api/copilot/answer', {
           method: 'POST',
@@ -65,6 +66,7 @@ export function useCopilot(getTranscript: () => string) {
           const { done, value } = await reader.read()
           if (done) break
           const text = decoder.decode(value, { stream: true })
+          finalContent += text
           setTurns((t) => {
             const next = t.slice()
             const last = next[next.length - 1]
@@ -82,6 +84,7 @@ export function useCopilot(getTranscript: () => string) {
       } finally {
         if (abortRef.current === ctrl) setStreaming(false)
       }
+      return finalContent || undefined
     },
     [turns],
   )

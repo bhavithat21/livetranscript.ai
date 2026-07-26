@@ -9,7 +9,18 @@ import { useAnswerFeed } from '@/lib/copilot/useAnswerFeed'
 import { useMeContext } from '@/lib/copilot/useMeContext'
 import { ChevronLeft, ChevronRight, Mic, MicOff } from 'lucide-react'
 import { MODE_ORDER, MODE_PROFILES, type CopilotMode } from '@/lib/copilot/modes'
-import { extractPython, runPython, type RunResult } from '@/lib/copilot/pyodideRunner'
+import {
+  extractCode,
+  extractTests,
+  executeCode,
+  executeTests,
+  canExecute,
+  preloadRuntime,
+  type TestRunResult,
+} from '@/lib/copilot/codeExecutor'
+import { type RunResult } from '@/lib/copilot/pyodideRunner'
+import { useAutoCapture } from '@/lib/vision/useAutoCapture'
+import { useOrchestrator, type OrchestratorStage, type ExtractedProblem } from '@/lib/copilot/useOrchestrator'
 
 // Ask-your-transcript side panel. Grounded, streaming answers from the live
 // transcript. Matches the app's editorial-glass language: glass surface, emerald
@@ -38,9 +49,15 @@ export function CopilotPanel({
   const feed = useAnswerFeed()
   const me = useMeContext() // opt-in mic stream: "what I said" as AI context, never in transcript
   const [showContextEditor, setShowContextEditor] = useState(false)
+  const orchestrator = useOrchestrator(ask)
   const [auto, setAuto] = useState(false)
   const [view, setView] = useState<'chat' | 'answers'>('chat')
   const scrollRef = useRef<HTMLDivElement>(null)
+
+  // Pre-load execution runtime when coding mode is selected so test execution is instant.
+  useEffect(() => {
+    if (mode === 'coding') preloadRuntime('python')
+  }, [mode])
 
   // Proactive: while auto is on, questions heard in the transcript are answered
   // automatically into the SEPARATE navigable answer feed (not the chat thread).
@@ -58,6 +75,18 @@ export function CopilotPanel({
       feed.answer(q, mode, ctx, image, context.instructions || null)
     })()
   })
+
+  // Coding mode + screen sharing: auto-capture the screen every 5s. When the
+  // screen changes (new problem detected), the orchestrator pipeline kicks in:
+  // extract problem → solve with Claude → auto-run tests → retry on failure.
+  useAutoCapture(
+    mode === 'coding' && screen.sharing && orchestrator.stage === 'idle',
+    screen.grabFrame,
+    (frame) => {
+      if (streaming) return
+      orchestrator.process(frame, context.instructions || null)
+    },
+  )
 
   // Tear the screen stream down when the panel closes.
   useEffect(() => () => { screen.stop(); me.stopListening() }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -201,6 +230,17 @@ export function CopilotPanel({
       )}
       {screen.error && <p className="border-b border-black/10 px-4 py-1.5 text-xs text-[color:var(--stop)]">{screen.error}</p>}
 
+      {/* Orchestrator pipeline status (coding mode only) */}
+      {mode === 'coding' && orchestrator.stage !== 'idle' && orchestrator.stage !== 'done' && (
+        <OrchestratorStatus stage={orchestrator.stage} />
+      )}
+      {mode === 'coding' && orchestrator.problem && (
+        <ExtractedProblemBar problem={orchestrator.problem} onDismiss={orchestrator.reset} />
+      )}
+      {mode === 'coding' && orchestrator.error && (
+        <p className="border-b border-black/10 px-4 py-1.5 text-xs text-[color:var(--stop)]">{orchestrator.error}</p>
+      )}
+
       {view === 'answers' ? (
         <AnswersView feed={feed} auto={auto} />
       ) : (
@@ -236,6 +276,11 @@ export function CopilotPanel({
               key={i}
               content={t.content}
               streaming={streaming && i === turns.length - 1}
+              autoTestResult={
+                mode === 'coding' && i === turns.length - 1 && orchestrator.testResult
+                  ? orchestrator.testResult
+                  : undefined
+              }
             />
           ),
         )}
@@ -413,40 +458,56 @@ function AnswersView({
   )
 }
 
-// One assistant answer. If it contains a Python block, offer to RUN it in the
-// browser sandbox (Pyodide) — execution-verified correctness, the coding edge.
-function AssistantTurn({ content, streaming }: { content: string; streaming: boolean }) {
+function AssistantTurn({
+  content,
+  streaming,
+  autoTestResult,
+}: {
+  content: string
+  streaming: boolean
+  autoTestResult?: TestRunResult
+}) {
   const [result, setResult] = useState<RunResult | null>(null)
+  const [testResult, setTestResult] = useState<TestRunResult | null>(null)
   const [running, setRunning] = useState(false)
-  // Only offer Run once the answer has finished streaming (code is complete).
-  const code = streaming ? null : extractPython(content)
+  const codeBlock = streaming ? null : extractCode(content)
+  const testsBlock = streaming ? null : extractTests(content)
+
+  const displayTestResult = testResult ?? autoTestResult ?? null
 
   const run = async () => {
-    if (!code) return
+    if (!codeBlock) return
     setRunning(true)
     setResult(null)
-    setResult(await runPython(code))
+    setTestResult(null)
+    if (testsBlock && canExecute(testsBlock.language)) {
+      setTestResult(await executeTests(codeBlock.code, testsBlock.tests, testsBlock.language))
+    } else if (canExecute(codeBlock.language)) {
+      setResult(await executeCode(codeBlock.code, codeBlock.language))
+    }
     setRunning(false)
   }
 
+  const executable = codeBlock && canExecute(codeBlock.language)
+
   return (
     <div className="flex flex-col items-start gap-2">
-      <div className="max-w-[92%] whitespace-pre-wrap break-words text-sm leading-relaxed text-ink">
-        {content}
-        {streaming && (
-          <span className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse bg-[color:var(--signal)] align-middle" aria-hidden />
-        )}
-      </div>
-      {code && (
+      <RichContent content={content} streaming={streaming} />
+      {codeBlock && executable && (
         <div className="w-full">
-          <button
-            onClick={run}
-            disabled={running}
-            className="btn-ghost flex items-center gap-1.5 text-xs disabled:opacity-50"
-            title="Run the Python in a sandbox to verify it"
-          >
-            <Play size={12} /> {running ? 'Running…' : 'Run code'}
-          </button>
+          {!autoTestResult && (
+            <button
+              onClick={run}
+              disabled={running}
+              className="btn-ghost flex items-center gap-1.5 text-xs disabled:opacity-50"
+              title={testsBlock ? `Run ${codeBlock.language} tests in sandbox` : `Run ${codeBlock.language} in sandbox`}
+            >
+              <Play size={12} /> {running ? 'Running…' : testsBlock ? 'Run tests' : 'Run code'}
+            </button>
+          )}
+
+          {displayTestResult && <TestResultsPanel result={displayTestResult} />}
+
           {result && (
             <div
               className={`mt-1.5 rounded-lg border px-3 py-2 font-mono text-xs ${
@@ -464,6 +525,198 @@ function AssistantTurn({ content, streaming }: { content: string; streaming: boo
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+// Renders assistant content with inline Mermaid diagrams.
+function RichContent({ content, streaming }: { content: string; streaming: boolean }) {
+  const parts = content.split(/(```mermaid\n[\s\S]*?```)/g)
+
+  return (
+    <div className="max-w-[92%] whitespace-pre-wrap break-words text-sm leading-relaxed text-ink">
+      {parts.map((part, i) => {
+        const mermaidMatch = part.match(/```mermaid\n([\s\S]*?)```/)
+        if (mermaidMatch) {
+          return <MermaidDiagram key={i} code={mermaidMatch[1].trim()} />
+        }
+        return <span key={i}>{part}</span>
+      })}
+      {streaming && (
+        <span className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse bg-[color:var(--signal)] align-middle" aria-hidden />
+      )}
+    </div>
+  )
+}
+
+const MERMAID_CDN = 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js'
+
+let mermaidReady: Promise<void> | null = null
+
+function loadMermaid(): Promise<void> {
+  if (mermaidReady) return mermaidReady
+  mermaidReady = new Promise<void>((resolve, reject) => {
+    if ((window as unknown as Record<string, unknown>).mermaid) return resolve()
+    const s = document.createElement('script')
+    s.src = MERMAID_CDN
+    s.onload = () => {
+      const m = (window as unknown as Record<string, { initialize: (o: object) => void }>).mermaid
+      m.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'strict' })
+      resolve()
+    }
+    s.onerror = () => {
+      mermaidReady = null
+      reject(new Error('Failed to load diagram renderer'))
+    }
+    document.head.appendChild(s)
+  })
+  return mermaidReady
+}
+
+function MermaidDiagram({ code }: { code: string }) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        await loadMermaid()
+        if (cancelled || !containerRef.current) return
+        const m = (window as unknown as Record<string, { render: (id: string, code: string) => Promise<{ svg: string }> }>).mermaid
+        const { svg } = await m.render(`mermaid-${Date.now()}-${Math.random().toString(36).slice(2)}`, code)
+        if (!cancelled && containerRef.current) containerRef.current.innerHTML = svg
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : 'Diagram render failed')
+      }
+    })()
+    return () => { cancelled = true }
+  }, [code])
+
+  if (error) {
+    return <pre className="my-2 rounded-lg border border-black/10 bg-black/[0.03] p-3 text-xs text-black/50">{code}</pre>
+  }
+
+  return (
+    <div ref={containerRef} className="my-2 overflow-x-auto rounded-lg border border-black/10 bg-white p-3" />
+  )
+}
+
+const STAGE_LABELS: Record<OrchestratorStage, string> = {
+  idle: '',
+  extracting: 'Extracting problem from screen…',
+  solving: 'Generating solution with Claude…',
+  executing: 'Running tests…',
+  retrying: 'Tests failed — fixing solution…',
+  done: '',
+}
+
+function OrchestratorStatus({ stage }: { stage: OrchestratorStage }) {
+  const label = STAGE_LABELS[stage]
+  if (!label) return null
+  return (
+    <div className="flex items-center gap-2 border-b border-emerald-700/15 bg-emerald-700/5 px-4 py-2 text-xs text-emerald-800">
+      <span className="live-dot" aria-hidden />
+      {label}
+    </div>
+  )
+}
+
+function ExtractedProblemBar({
+  problem,
+  onDismiss,
+}: {
+  problem: ExtractedProblem
+  onDismiss: () => void
+}) {
+  const [expanded, setExpanded] = useState(false)
+  return (
+    <div className="border-b border-black/10 bg-black/[0.02] px-4 py-2 text-xs">
+      <div className="flex items-center gap-2">
+        <span className="font-medium text-ink">Problem detected</span>
+        {problem.language && (
+          <span className="rounded bg-black/5 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-black/50">
+            {problem.language}
+          </span>
+        )}
+        <button
+          onClick={() => setExpanded(v => !v)}
+          className="text-emerald-800 hover:underline"
+        >
+          {expanded ? 'Hide' : 'Show'}
+        </button>
+        <button
+          onClick={onDismiss}
+          className="ml-auto text-black/40 hover:text-[color:var(--stop)]"
+        >
+          <X size={12} />
+        </button>
+      </div>
+      {expanded && (
+        <div className="mt-2 space-y-1.5 text-black/70">
+          <p className="font-medium text-ink">{problem.question}</p>
+          {problem.constraints.length > 0 && (
+            <p><span className="text-black/40">Constraints:</span> {problem.constraints.join(', ')}</p>
+          )}
+          {problem.examples.length > 0 && (
+            <div>
+              <span className="text-black/40">Examples:</span>
+              {problem.examples.map((e, i) => (
+                <p key={i} className="ml-2 font-mono">{e.input} → {e.output}</p>
+              ))}
+            </div>
+          )}
+          {problem.edgeCases.length > 0 && (
+            <p><span className="text-black/40">Edge cases:</span> {problem.edgeCases.join(', ')}</p>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function TestResultsPanel({ result }: { result: TestRunResult }) {
+  const allPassed = result.failed === 0
+  return (
+    <div className="mt-1.5 w-full rounded-lg border border-black/10 bg-black/[0.02] text-xs">
+      {/* Summary bar */}
+      <div
+        className={`flex items-center gap-2 rounded-t-lg px-3 py-2 font-sans font-medium ${
+          allPassed
+            ? 'bg-emerald-700/10 text-emerald-800'
+            : 'bg-[color:var(--stop)]/10 text-[color:var(--stop)]'
+        }`}
+      >
+        {allPassed ? <Check size={14} /> : <X size={14} />}
+        <span>
+          {allPassed
+            ? `All ${result.total} tests passed`
+            : `${result.passed}/${result.total} passed`}
+        </span>
+      </div>
+
+      {/* Per-case results */}
+      <ul className="divide-y divide-black/5">
+        {result.cases.map((c, i) => (
+          <li key={i} className="flex items-start gap-2 px-3 py-1.5">
+            <span className="mt-0.5 shrink-0">
+              {c.passed ? (
+                <Check size={12} className="text-emerald-700" />
+              ) : (
+                <X size={12} className="text-[color:var(--stop)]" />
+              )}
+            </span>
+            <span className="flex-1 font-mono">
+              <span className={c.passed ? 'text-emerald-800' : 'text-[color:var(--stop)]'}>
+                {c.label}
+              </span>
+              {c.error && (
+                <span className="mt-0.5 block text-[color:var(--stop)]/70">{c.error}</span>
+              )}
+            </span>
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }
