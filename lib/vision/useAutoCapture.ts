@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useRef, useCallback, useState } from 'react'
+import { useEffect, useRef } from 'react'
 
 // Periodic screen capture for the coding copilot. While enabled, grabs a frame
 // from the screen stream at a configurable interval, skipping unchanged frames
