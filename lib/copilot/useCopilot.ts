@@ -11,6 +11,12 @@ import { useCallback, useRef, useState } from 'react'
 // doesn't leak one mode's Q&A into another.
 export type CopilotTurn = { role: 'user' | 'assistant'; content: string; mode: string }
 
+// Stall failsafe: abort if no FIRST token arrives in this window, or if a gap
+// between tokens exceeds TOKEN_GAP_MS — so a stuck stream surfaces an error +
+// retry instead of hanging the chat forever.
+const STALL_TIMEOUT_MS = 20_000
+const TOKEN_GAP_MS = 15_000
+
 export function useCopilot(getTranscript: () => string) {
   const [turns, setTurns] = useState<CopilotTurn[]>([])
   const [streaming, setStreaming] = useState(false)
@@ -36,10 +42,24 @@ export function useCopilot(getTranscript: () => string) {
       abortRef.current = ctrl
       setError(null)
 
+      // Failsafe: abort if the assistant stalls (no first token / a long token
+      // gap) so a stuck request can't hang the chat forever. `stalled` lets the
+      // catch tell a timeout apart from a user-superseded request.
+      let stalled = false
+      let watchdog: ReturnType<typeof setTimeout> | undefined
+      const arm = (ms: number) => {
+        clearTimeout(watchdog)
+        watchdog = setTimeout(() => {
+          stalled = true
+          ctrl.abort()
+        }, ms)
+      }
+
       // History = prior turns in the SAME mode (each tab is its own thread).
       const history = turns.filter((t) => t.mode === mode).slice(-8).map(({ role, content }) => ({ role, content }))
       setTurns((t) => [...t, { role: 'user', content: q, mode }, { role: 'assistant', content: '', mode }])
       setStreaming(true)
+      arm(STALL_TIMEOUT_MS)
 
       let finalContent = ''
       try {
@@ -66,6 +86,7 @@ export function useCopilot(getTranscript: () => string) {
           const { done, value } = await reader.read()
           if (done) break
           const text = decoder.decode(value, { stream: true })
+          if (text) arm(TOKEN_GAP_MS) // reset the stall timer on every token
           finalContent += text
           setTurns((t) => {
             const next = t.slice()
@@ -74,9 +95,12 @@ export function useCopilot(getTranscript: () => string) {
             return next
           })
         }
+        clearTimeout(watchdog)
       } catch (e) {
-        if ((e as Error).name === 'AbortError') return // superseded by a newer question
-        setError(e instanceof Error ? e.message : 'Assistant failed')
+        clearTimeout(watchdog)
+        // A user-superseded abort returns silently; a STALL abort surfaces an error.
+        if ((e as Error).name === 'AbortError' && !stalled) return
+        setError(stalled ? 'The assistant timed out — please retry.' : e instanceof Error ? e.message : 'Assistant failed')
         // Drop the empty assistant placeholder so a failed turn doesn't linger.
         setTurns((t) =>
           t[t.length - 1]?.role === 'assistant' && !t[t.length - 1].content ? t.slice(0, -1) : t,

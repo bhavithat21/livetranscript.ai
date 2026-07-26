@@ -492,6 +492,59 @@ function ContextEditor({ context }: { context: ReturnType<typeof useModeContext>
   )
 }
 
+// Slow, hands-free auto-scroll of a finished answer so the user can read without
+// touching anything. Kicks in once the answer STOPS streaming (scrolling a still-
+// growing answer would fight the token flow); creeps ~24px/sec. Any manual scroll,
+// wheel, or touch cancels it, and switching answers restarts it. Respects
+// prefers-reduced-motion (skips the animation entirely).
+function useSlowAutoScroll(
+  ref: React.RefObject<HTMLDivElement | null>,
+  entryId: number | undefined,
+  streaming: boolean,
+  enabled: boolean,
+) {
+  useEffect(() => {
+    const el = ref.current
+    if (!el || !enabled || streaming || entryId === undefined) return
+    if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return
+    if (el.scrollHeight <= el.clientHeight) return // nothing to scroll
+
+    let cancelled = false
+    let last = 0
+    const SPEED = 24 // px per second — unhurried reading pace
+    let raf = 0
+    const step = (t: number) => {
+      if (cancelled) return
+      if (last) {
+        const next = el.scrollTop + (SPEED * (t - last)) / 1000
+        el.scrollTop = next
+        if (el.scrollTop + el.clientHeight >= el.scrollHeight - 1) return // reached the end
+      }
+      last = t
+      raf = requestAnimationFrame(step)
+    }
+    // A user gesture cancels the auto-scroll so we never fight the reader.
+    const cancel = () => {
+      cancelled = true
+      cancelAnimationFrame(raf)
+    }
+    el.addEventListener('wheel', cancel, { passive: true })
+    el.addEventListener('touchstart', cancel, { passive: true })
+    el.addEventListener('pointerdown', cancel, { passive: true })
+    // Small delay so the finished answer is on screen a beat before it starts.
+    const startTimer = setTimeout(() => { raf = requestAnimationFrame(step) }, 600)
+
+    return () => {
+      cancelled = true
+      clearTimeout(startTimer)
+      cancelAnimationFrame(raf)
+      el.removeEventListener('wheel', cancel)
+      el.removeEventListener('touchstart', cancel)
+      el.removeEventListener('pointerdown', cancel)
+    }
+  }, [ref, entryId, streaming, enabled])
+}
+
 // The navigable auto-answer feed: one Q&A card at a time, paged prev/next.
 function AnswersView({
   feed,
@@ -500,6 +553,16 @@ function AnswersView({
   feed: ReturnType<typeof useAnswerFeed>
   auto: boolean
 }) {
+  const bodyRef = useRef<HTMLDivElement>(null)
+  const e = feed.current
+  // Hands-free reading: gently scroll a finished answer top→bottom (see hook).
+  useSlowAutoScroll(bodyRef, e?.id, e?.streaming ?? false, feed.count > 0)
+  // Reset scroll to the top whenever the shown answer changes, so auto-scroll
+  // starts from the beginning of the new answer.
+  useEffect(() => {
+    if (bodyRef.current) bodyRef.current.scrollTop = 0
+  }, [e?.id])
+
   if (feed.count === 0) {
     return (
       <div className="flex-1 overflow-y-auto px-4 py-8 text-center">
@@ -509,7 +572,6 @@ function AnswersView({
       </div>
     )
   }
-  const e = feed.current
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
       <div className="flex items-center gap-2 border-b border-black/10 px-4 py-2 text-xs text-black/50">
@@ -520,9 +582,14 @@ function AnswersView({
         <button onClick={feed.next} disabled={feed.cursor >= feed.count - 1} className="rounded-full p-1 hover:bg-black/5 disabled:opacity-30" aria-label="Next">
           <ChevronRight size={16} />
         </button>
+        {e?.failed && (
+          <button onClick={() => feed.retry(e.id)} className="rounded-full px-2 py-1 text-emerald-800 hover:bg-emerald-700/10" title="Retry this answer">
+            Retry
+          </button>
+        )}
         <button onClick={feed.clear} className="ml-auto rounded-full px-2 py-1 text-black/45 hover:bg-black/5 hover:text-ink">Clear</button>
       </div>
-      <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
+      <div ref={bodyRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
         <div className="text-xs font-medium uppercase tracking-wide text-[color:var(--signal)]">Question</div>
         <p className="text-sm font-medium text-ink">{e?.question}</p>
         <div className="text-xs font-medium uppercase tracking-wide text-black/40">Answer</div>
@@ -530,6 +597,9 @@ function AnswersView({
           {e?.answer}
           {e?.streaming && <span className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse bg-[color:var(--signal)] align-middle" aria-hidden />}
         </div>
+        {e?.failed && !e.streaming && (
+          <p className="text-xs text-[color:var(--stop)]">The assistant didn&rsquo;t respond. Tap Retry above.</p>
+        )}
       </div>
     </div>
   )
