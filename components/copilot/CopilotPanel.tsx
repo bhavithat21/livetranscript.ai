@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
-import { Check, Monitor, MonitorOff, Play, Send, Sparkles, X } from 'lucide-react'
+import { Check, Lock, Monitor, MonitorOff, Play, Send, Sparkles, X } from 'lucide-react'
+import { useLockMode } from '@/lib/desktop/useLockMode'
 import { useCopilot } from '@/lib/copilot/useCopilot'
 import { useScreenStream } from '@/lib/vision/useScreenStream'
 import { useModeContext } from '@/lib/copilot/useModeContext'
@@ -58,6 +59,7 @@ export function CopilotPanel({
   const orchestrator = useOrchestrator(ask)
   const [auto, setAuto] = useState(false)
   const [view, setView] = useState<'chat' | 'answers'>('chat')
+  const lockMode = useLockMode() // desktop: click-through overlay (unlock via hotkey/tray)
   // The turn index the orchestrator's auto test result belongs to. Pinned when
   // the result is produced so a later coding-mode chat answer (a new last turn)
   // doesn't inherit the stale panel. Derived during render (React's store-prev
@@ -185,6 +187,20 @@ export function CopilotPanel({
             {screen.sharing ? <Monitor size={13} /> : <MonitorOff size={13} />}
             <span className="hidden sm:inline">{screen.sharing ? 'Seeing screen' : 'See screen'}</span>
           </button>
+          {/* Lock (click-through) mode — desktop only. Turning it ON makes the
+              overlay pass clicks through to other apps; it can only be UNLOCKED via
+              the global hotkey (⌘/Ctrl+Shift+L) or the tray, since a locked window
+              can't be clicked. Button is view-only ON here. */}
+          {lockMode.available && !lockMode.locked && (
+            <button
+              onClick={lockMode.enable}
+              title="Lock (click-through): float on top and work in other apps. Unlock with ⌘/Ctrl+Shift+L or the tray."
+              className="flex items-center gap-1 rounded-full px-2 py-1 text-xs text-black/55 transition-colors hover:bg-black/5"
+            >
+              <Lock size={13} />
+              <span className="hidden sm:inline">Lock</span>
+            </button>
+          )}
           {turns.length > 0 && (
             <button onClick={clear} className="rounded-full px-2 py-1 text-xs text-black/45 hover:bg-black/5 hover:text-ink">
               Clear

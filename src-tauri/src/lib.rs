@@ -54,13 +54,29 @@ impl Default for ProtectionState {
     }
 }
 
-// Holds the tray's checkable "Hidden from screen share" item so apply_protection
-// can tick/untick it when the flag changes from anywhere. Empty until setup builds
-// the tray; empty on non-desktop targets (no tray there).
+// Lock (click-through) mode: the window stays visible + always-on-top but ignores
+// all cursor events, so the user works in the apps BEHIND it while the transcript/
+// AI floats on top, view-only. CRITICAL: while locked the window can't be clicked,
+// so the ONLY ways out are the global hotkey (works unfocused) and the tray item —
+// never an in-window control. This flag mirrors the window state so the tray
+// checkmark and the hotkey toggle agree. Starts unlocked.
+pub struct LockState {
+    click_through: Mutex<bool>,
+}
+impl Default for LockState {
+    fn default() -> Self {
+        Self { click_through: Mutex::new(false) }
+    }
+}
+
+// Holds the tray's checkable items so their state can be synced when the
+// underlying flag changes from anywhere (webview IPC, tray click, hotkey). Empty
+// until setup builds the tray; empty on non-desktop targets (no tray there).
 #[cfg(desktop)]
 #[derive(Default)]
 pub struct TrayHandles {
     protection_item: Mutex<Option<tauri::menu::CheckMenuItem<tauri::Wry>>>,
+    lock_item: Mutex<Option<tauri::menu::CheckMenuItem<tauri::Wry>>>,
 }
 
 // Trigger every OS permission the app needs UP FRONT (called once at launch by
@@ -149,6 +165,64 @@ fn toggle_protection(app: &tauri::AppHandle) {
 
 #[cfg(not(desktop))]
 fn apply_protection(_app: &tauri::AppHandle, _enabled: bool) -> Result<(), String> {
+    Ok(())
+}
+
+// Lock (click-through) mode, callable from the web UI's in-app button. Turning it
+// ON makes the overlay pass all mouse/keyboard through to whatever is behind it
+// AND pins it always-on-top, so the user keeps working in other apps with the
+// transcript floating above. Turning it OFF restores normal interaction.
+#[tauri::command]
+fn set_lock_mode(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    apply_lock(&app, enabled)
+}
+
+// Read the current lock state so the web UI can reflect it (e.g. show the right
+// button label) and stay in sync after a hotkey/tray toggle.
+#[tauri::command]
+fn get_lock_mode(app: tauri::AppHandle) -> bool {
+    use tauri::Manager;
+    *lock(&app.state::<LockState>().click_through)
+}
+
+// Single source of truth for lock mode: sets ignore-cursor-events + always-on-top
+// on the window, records the flag, and syncs the tray checkmark — so the webview
+// button, tray item, and hotkey never drift. Always-on-top is only ADDED with
+// lock (so the view-only overlay stays visible over other apps) and removed on
+// unlock, restoring normal stacking.
+#[cfg(desktop)]
+fn apply_lock(app: &tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    use tauri::Manager;
+    let state = app.state::<LockState>();
+    // Hold the flag lock across the whole read-modify-write so a concurrent toggle
+    // (tray vs hotkey vs webview IPC) can't leave window state and flag disagreeing.
+    let mut guard = lock(&state.click_through);
+    if let Some(win) = app.get_webview_window("main") {
+        win.set_ignore_cursor_events(enabled).map_err(|e| e.to_string())?;
+        win.set_always_on_top(enabled).map_err(|e| e.to_string())?;
+    }
+    *guard = enabled;
+    if let Some(item) = lock(&app.state::<TrayHandles>().lock_item).as_ref() {
+        let _ = item.set_checked(enabled);
+    }
+    Ok(())
+}
+
+// Flip lock mode atomically (reads current, writes inverse under one lock hold).
+// Used by the tray item and the global unlock hotkey.
+#[cfg(desktop)]
+fn toggle_lock(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    let next = {
+        let state = app.state::<LockState>();
+        let guard = lock(&state.click_through);
+        !*guard
+    };
+    let _ = apply_lock(app, next);
+}
+
+#[cfg(not(desktop))]
+fn apply_lock(_app: &tauri::AppHandle, _enabled: bool) -> Result<(), String> {
     Ok(())
 }
 
@@ -251,12 +325,25 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     )?;
     // Manual update: tray-only apps have no window chrome for a button, so the
     // "Check for Updates" control lives here — always reachable, even when hidden.
+    // Lock (click-through) mode: toggle here or via the global hotkey. This is the
+    // primary UNLOCK path — a locked window can't be clicked, so the tray + hotkey
+    // are the only ways back to interactive.
+    let lock_on = *lock(&app.state::<LockState>().click_through);
+    let lock_item = CheckMenuItem::with_id(
+        app,
+        "toggle_lock",
+        "Lock (click-through) mode",
+        true,
+        lock_on,
+        None::<&str>,
+    )?;
     let update = MenuItem::with_id(app, "check_update", "Check for Updates…", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit LiveTranscript", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show, &protect, &update, &quit])?;
+    let menu = Menu::with_items(app, &[&show, &protect, &lock_item, &update, &quit])?;
 
-    // Stash the checkbox so apply_protection can keep it in sync with the flag.
+    // Stash the checkboxes so apply_protection / apply_lock keep them in sync.
     *lock(&app.state::<TrayHandles>().protection_item) = Some(protect.clone());
+    *lock(&app.state::<TrayHandles>().lock_item) = Some(lock_item.clone());
 
     // The window icon is the tray icon. If it's somehow absent (bad bundle), fall
     // back to a build error rather than unwrap-panicking inside setup() — a panic
@@ -277,6 +364,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         .on_menu_event(|app, event| match event.id().as_ref() {
             "show_hide" => toggle_main_window(app),
             "toggle_protection" => toggle_protection(app),
+            "toggle_lock" => toggle_lock(app),
             "check_update" => {
                 // Manual update check from the tray. Runs off the UI thread; shows
                 // the window so the user sees progress / any error, then installs.
@@ -313,13 +401,16 @@ pub fn run() {
 
     let builder = builder
         .manage(AudioState::default())
-        .manage(ProtectionState::default());
+        .manage(ProtectionState::default())
+        .manage(LockState::default());
     #[cfg(desktop)]
     let builder = builder.manage(TrayHandles::default());
 
     builder
         .invoke_handler(tauri::generate_handler![
             set_content_protection,
+            set_lock_mode,
+            get_lock_mode,
             request_screen_capture_access,
             start_native_audio,
             stop_native_audio
@@ -355,6 +446,19 @@ pub fn run() {
                     })
                     // Fail-soft: if the OS refuses the hotkey (already taken), the app
                     // still runs — the in-app "?" sheet documents the shortcut anyway.
+                    .ok();
+
+                // Lock toggle: CmdOrCtrl+Shift+L. This is the ESCAPE HATCH — a
+                // click-through locked window can't be clicked, so a GLOBAL hotkey
+                // (fires even when the window is ignoring the cursor / unfocused) is
+                // the guaranteed way back to interactive. Also togglable from the tray.
+                let lock_toggle = Shortcut::new(Some(Modifiers::SHIFT | primary), Code::KeyL);
+                app.global_shortcut()
+                    .on_shortcut(lock_toggle, move |app, shortcut, event| {
+                        if event.state == ShortcutState::Pressed && shortcut == &lock_toggle {
+                            toggle_lock(app);
+                        }
+                    })
                     .ok();
 
                 // Tray-only mode: build the tray FIRST, then hide the Dock icon
