@@ -613,8 +613,13 @@ function AnswersView({
           {e?.answer}
           {e?.streaming && <span className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse bg-[color:var(--signal)] align-middle" aria-hidden />}
         </div>
+        {e?.retrying && (
+          <p className="flex items-center gap-1.5 text-xs text-black/50">
+            <span className="live-dot" aria-hidden /> Retrying…
+          </p>
+        )}
         {e?.failed && !e.streaming && (
-          <p className="text-xs text-[color:var(--stop)]">The assistant didn&rsquo;t respond. Tap Retry above.</p>
+          <p className="text-xs text-[color:var(--stop)]">Couldn&rsquo;t reach the assistant after several tries. Tap Retry above.</p>
         )}
       </div>
     </div>

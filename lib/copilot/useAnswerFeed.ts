@@ -10,17 +10,25 @@ export type AnswerEntry = {
   question: string
   answer: string
   streaming: boolean
-  // Failsafe: set when the request errored OR stalled (no tokens in time). The UI
-  // shows a Retry affordance so a stuck answer never leaves a dead card.
+  // True between auto-retry attempts, so the UI can say "Retrying…" instead of
+  // looking stuck or prematurely failed.
+  retrying: boolean
+  // Set only after ALL auto-retries are exhausted. The UI then shows a manual
+  // Retry button as the last resort — the orchestrator has already tried itself.
   failed: boolean
 }
 
 // If no first token arrives within this window, treat the request as stuck and
-// fail it (with retry) rather than spinning forever. Generous enough for a cold
-// model + long prompt, short enough that the user isn't left hanging.
+// (auto-)retry rather than spinning forever. Generous enough for a cold model +
+// long prompt, short enough that the user isn't left hanging.
 const STALL_TIMEOUT_MS = 20_000
 // Once streaming, a gap this long between tokens means the stream stalled.
 const TOKEN_GAP_MS = 15_000
+// Auto-retry: the orchestrator retries a failed/stalled answer itself before ever
+// surfacing the manual button. Backoff between attempts so we don't hammer a
+// briefly-down provider.
+const MAX_AUTO_RETRIES = 2
+const RETRY_BACKOFF_MS = [800, 2500]
 
 export function useAnswerFeed() {
   const [entries, setEntries] = useState<AnswerEntry[]>([])
@@ -31,7 +39,10 @@ export function useAnswerFeed() {
     new Map(),
   )
 
-  const run = useCallback(
+  // One streaming attempt. Returns true if it produced any tokens, false on
+  // error/stall/empty — the caller decides whether to auto-retry. Resets the
+  // entry's answer text at the start so a retry doesn't append to a partial.
+  const attempt = useCallback(
     async (
       id: number,
       question: string,
@@ -39,8 +50,7 @@ export function useAnswerFeed() {
       meContext: string | null,
       image: string | null,
       instructions?: string | null,
-    ) => {
-      // Abort the request if it stalls, so the reader never waits on a dead stream.
+    ): Promise<boolean> => {
       const ctrl = new AbortController()
       let watchdog: ReturnType<typeof setTimeout> | undefined
       const arm = (ms: number) => {
@@ -49,6 +59,7 @@ export function useAnswerFeed() {
       }
       arm(STALL_TIMEOUT_MS)
       let gotAny = false
+      setEntries((e) => e.map((x) => (x.id === id ? { ...x, answer: '' } : x)))
       try {
         const res = await fetch('/api/copilot/answer', {
           method: 'POST',
@@ -77,22 +88,42 @@ export function useAnswerFeed() {
           }
         }
         clearTimeout(watchdog)
-        // Empty-but-successful response is still a non-answer — mark it retryable.
-        setEntries((e) =>
-          e.map((x) =>
-            x.id === id ? { ...x, streaming: false, failed: !gotAny && !x.answer } : x,
-          ),
-        )
+        return gotAny // empty-but-OK stream counts as a non-answer → retryable
       } catch {
         clearTimeout(watchdog)
-        // Network error, abort (stall), or non-OK: keep any partial text, flag it
-        // failed so the UI offers Retry.
-        setEntries((e) =>
-          e.map((x) => (x.id === id ? { ...x, streaming: false, failed: true } : x)),
-        )
+        return false
       }
     },
     [],
+  )
+
+  // Run an answer with automatic retries: the orchestrator retries a failed/
+  // stalled attempt itself (with backoff) before ever showing the manual button.
+  const run = useCallback(
+    async (
+      id: number,
+      question: string,
+      mode: string,
+      meContext: string | null,
+      image: string | null,
+      instructions?: string | null,
+    ) => {
+      for (let i = 0; i <= MAX_AUTO_RETRIES; i++) {
+        if (i > 0) {
+          // Show a "Retrying…" state and wait out the backoff before re-attempting.
+          setEntries((e) => e.map((x) => (x.id === id ? { ...x, retrying: true, streaming: true } : x)))
+          await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS[i - 1] ?? 2500))
+        }
+        const ok = await attempt(id, question, mode, meContext, image, instructions)
+        if (ok) {
+          setEntries((e) => e.map((x) => (x.id === id ? { ...x, streaming: false, retrying: false, failed: false } : x)))
+          return
+        }
+      }
+      // All auto-retries exhausted → surface the manual Retry button as last resort.
+      setEntries((e) => e.map((x) => (x.id === id ? { ...x, streaming: false, retrying: false, failed: true } : x)))
+    },
+    [attempt],
   )
 
   // Generate an answer for a heard question, streaming into a new entry.
@@ -107,7 +138,7 @@ export function useAnswerFeed() {
       const id = ++idRef.current
       argsRef.current.set(id, { mode, meContext, image, instructions })
       setEntries((e) => {
-        const next = [...e, { id, question, answer: '', streaming: true, failed: false }]
+        const next = [...e, { id, question, answer: '', streaming: true, retrying: false, failed: false }]
         setCursor(next.length - 1) // jump the view to the newest (array index, not id)
         return next
       })
@@ -122,7 +153,7 @@ export function useAnswerFeed() {
       const entry = entries.find((x) => x.id === id)
       const args = argsRef.current.get(id)
       if (!entry || !args) return
-      setEntries((e) => e.map((x) => (x.id === id ? { ...x, answer: '', streaming: true, failed: false } : x)))
+      setEntries((e) => e.map((x) => (x.id === id ? { ...x, answer: '', streaming: true, retrying: false, failed: false } : x)))
       void run(id, entry.question, args.mode, args.meContext, args.image, args.instructions)
     },
     [entries, run],
