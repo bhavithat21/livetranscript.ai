@@ -46,13 +46,28 @@ export function latestQuestion(transcript: string): string | null {
 
 const DEBOUNCE_MS = 1500
 
+// Normalize for dedupe: lowercase, collapse whitespace, drop trailing punctuation
+// so "reverse a linked list" and "Reverse a linked list?" are one question.
+function normalizeKey(q: string): string {
+  return q.toLowerCase().replace(/\s+/g, ' ').replace(/[.?!,\s]+$/, '').trim()
+}
+
+// The tail of a spoken question keeps growing as ASR revises finals, so a new
+// candidate that's a prefix/extension of one already asked is the SAME question.
+function isSameOrExtension(a: string, b: string): boolean {
+  return a === b || a.startsWith(b) || b.startsWith(a)
+}
+
 export function useProactive(
   enabled: boolean,
   getTranscript: () => string,
-  onQuestion: (q: string) => void,
+  // May return a promise that resolves when the answer finishes — the in-flight
+  // guard holds until then so ASR tail-revisions don't stack duplicate answers.
+  onQuestion: (q: string) => void | Promise<void>,
 ) {
   const [lastAsked, setLastAsked] = useState<string | null>(null)
-  const askedRef = useRef<Set<string>>(new Set())
+  const askedRef = useRef<string[]>([])
+  const inFlightRef = useRef(false)
   const onQuestionRef = useRef(onQuestion)
   onQuestionRef.current = onQuestion
   const getRef = useRef(getTranscript)
@@ -62,13 +77,18 @@ export function useProactive(
     if (!enabled) return
     // Poll the transcript on a debounce; fire when a fresh question appears.
     const id = setInterval(() => {
+      if (inFlightRef.current) return // don't stack answers while one is generating
       const q = latestQuestion(getRef.current())
       if (!q) return
-      const key = q.toLowerCase()
-      if (askedRef.current.has(key)) return // already answered this one
-      askedRef.current.add(key)
+      const key = normalizeKey(q)
+      // Skip if it matches (or merely extends the tail of) one already asked.
+      if (askedRef.current.some((k) => isSameOrExtension(k, key))) return
+      askedRef.current.push(key)
+      inFlightRef.current = true
       setLastAsked(q)
-      onQuestionRef.current(q)
+      Promise.resolve(onQuestionRef.current(q)).finally(() => {
+        inFlightRef.current = false
+      })
     }, DEBOUNCE_MS)
     return () => clearInterval(id)
   }, [enabled])

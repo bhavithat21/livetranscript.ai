@@ -1,5 +1,5 @@
 'use client'
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useUser } from '@clerk/nextjs'
 import posthog from 'posthog-js'
 
@@ -15,6 +15,10 @@ import posthog from 'posthog-js'
 // non-reactive posthog.__loaded) guarantees the effect re-runs once init lands.
 export function AnalyticsIdentity({ ready }: { ready: boolean }) {
   const { isLoaded, isSignedIn, user } = useUser()
+  // Tracks whether the previous render was signed-in, so reset() fires ONLY on a
+  // real signed-in → signed-out transition. Resetting on every anonymous load
+  // would mint a fresh distinct_id each visit and fragment the anonymous funnel.
+  const wasSignedIn = useRef(false)
 
   useEffect(() => {
     if (!ready || !isLoaded) return
@@ -26,9 +30,12 @@ export function AnalyticsIdentity({ ready }: { ready: boolean }) {
         name: user.fullName ?? undefined,
         created_at: user.createdAt ?? undefined,
       })
-    } else {
-      // Signed out: drop the identity so the next user isn't merged into this one.
+      wasSignedIn.current = true
+    } else if (wasSignedIn.current) {
+      // Just signed out: drop the identity so the next user isn't merged into this
+      // one. A never-signed-in visitor keeps their stable anonymous id.
       posthog.reset()
+      wasSignedIn.current = false
     }
   }, [ready, isLoaded, isSignedIn, user])
 

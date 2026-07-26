@@ -52,6 +52,17 @@ export function CopilotPanel({
   const orchestrator = useOrchestrator(ask)
   const [auto, setAuto] = useState(false)
   const [view, setView] = useState<'chat' | 'answers'>('chat')
+  // The turn index the orchestrator's auto test result belongs to. Pinned when
+  // the result is produced so a later coding-mode chat answer (a new last turn)
+  // doesn't inherit the stale panel. Derived during render (React's store-prev
+  // pattern) rather than in an effect, so it updates in the same commit as the
+  // result appears — no flash of the panel on the wrong turn.
+  const [autoTestTurn, setAutoTestTurn] = useState<number | null>(null)
+  const [prevTestResult, setPrevTestResult] = useState(orchestrator.testResult)
+  if (prevTestResult !== orchestrator.testResult) {
+    setPrevTestResult(orchestrator.testResult)
+    setAutoTestTurn(orchestrator.testResult ? turns.length - 1 : null)
+  }
   const scrollRef = useRef<HTMLDivElement>(null)
 
   // Pre-load execution runtime when coding mode is selected so test execution is instant.
@@ -65,22 +76,30 @@ export function CopilotPanel({
   // sharing is on.
   useProactive(auto, getTranscript, (q) => {
     setView('answers') // surface the feed as answers arrive
-    void (async () => {
+    // Return the promise so useProactive's in-flight guard holds until this
+    // answer finishes streaming (no duplicate answers as the ASR tail revises).
+    return (async () => {
       const retrieved = context.count > 0 ? await context.retrieve(q) : null
       // Combine what YOU said (mic context, if listening) with any matched context
       // document chunk — grounds the answer without either appearing in the transcript.
       const parts = [me.getMeContext() && `What I said: ${me.getMeContext()}`, retrieved].filter(Boolean)
       const ctx = parts.length ? parts.join('\n\n') : null
       const image = screen.sharing ? screen.grabFrame() : null
-      feed.answer(q, mode, ctx, image, context.instructions || null)
+      await feed.answer(q, mode, ctx, image, context.instructions || null)
     })()
   })
 
-  // Coding mode + screen sharing: auto-capture the screen every 5s. When the
+  // Coding mode + screen sharing: auto-capture the screen periodically. When the
   // screen changes (new problem detected), the orchestrator pipeline kicks in:
   // extract problem → solve with Claude → auto-run tests → retry on failure.
+  // Paused while the user is composing a manual question so it doesn't consume
+  // the shared grabFrame diff-gate out from under submit().
+  // ponytail: residual — grabFrame in useScreenStream (not owned here) diffs
+  // against the last grab by ANY caller, so a manual ask on a screen that hasn't
+  // changed since the last auto grab can still get image=null. Full fix needs a
+  // force/ignore-gate option on grabFrame.
   useAutoCapture(
-    mode === 'coding' && screen.sharing && orchestrator.stage === 'idle',
+    mode === 'coding' && screen.sharing && orchestrator.stage === 'idle' && !input.trim(),
     screen.grabFrame,
     (frame) => {
       if (streaming) return
@@ -277,7 +296,7 @@ export function CopilotPanel({
               content={t.content}
               streaming={streaming && i === turns.length - 1}
               autoTestResult={
-                mode === 'coding' && i === turns.length - 1 && orchestrator.testResult
+                mode === 'coding' && i === autoTestTurn && orchestrator.testResult
                   ? orchestrator.testResult
                   : undefined
               }
@@ -549,19 +568,31 @@ function RichContent({ content, streaming }: { content: string; streaming: boole
   )
 }
 
-const MERMAID_CDN = 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js'
+// Pinned exact version + SRI so a compromised/altered CDN file can't execute.
+// integrity hash is sha384 of this exact file (verified against the CDN); bump
+// both together if the version changes.
+const MERMAID_VERSION = '11.9.0'
+const MERMAID_CDN = `https://cdn.jsdelivr.net/npm/mermaid@${MERMAID_VERSION}/dist/mermaid.min.js`
+const MERMAID_SRI = 'sha384-UzWEhMP22MxNnr2bzqAdmtf1FDy5iKDUq6hLXJFLqC7dfGkc6W/hshbx9m71zyt5'
+const MERMAID_INIT = { startOnLoad: false, theme: 'neutral', securityLevel: 'strict' } as const
 
 let mermaidReady: Promise<void> | null = null
 
 function loadMermaid(): Promise<void> {
   if (mermaidReady) return mermaidReady
   mermaidReady = new Promise<void>((resolve, reject) => {
-    if ((window as unknown as Record<string, unknown>).mermaid) return resolve()
+    const existing = (window as unknown as Record<string, { initialize: (o: object) => void } | undefined>).mermaid
+    if (existing) {
+      existing.initialize(MERMAID_INIT) // strict mode before first render, even on the early path
+      return resolve()
+    }
     const s = document.createElement('script')
     s.src = MERMAID_CDN
+    s.integrity = MERMAID_SRI
+    s.crossOrigin = 'anonymous'
     s.onload = () => {
       const m = (window as unknown as Record<string, { initialize: (o: object) => void }>).mermaid
-      m.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'strict' })
+      m.initialize(MERMAID_INIT)
       resolve()
     }
     s.onerror = () => {

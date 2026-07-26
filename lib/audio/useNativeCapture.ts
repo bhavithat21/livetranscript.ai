@@ -1,4 +1,5 @@
 import { useCallback, useRef } from 'react'
+import type { MicStreamOptions } from './useMicStream'
 
 // Native system-audio capture bridge for the Tauri desktop build. Mirrors
 // useMicStream's start()/stop() so callers can try native first and fall back
@@ -26,6 +27,7 @@ export function useNativeCapture() {
     async (
       onPcm: (pcm: ArrayBuffer) => void,
       onLevel: (rms: number) => void,
+      opts: MicStreamOptions = {},
     ): Promise<number> => {
       if (!isTauri()) return 0
 
@@ -36,6 +38,10 @@ export function useNativeCapture() {
         // InvokeResponseBody::Raw arrives as an ArrayBuffer (16-bit LE mono PCM).
         // Guard defensively in case a non-Raw body ever slips through.
         if (!(message instanceof ArrayBuffer)) return
+        if (opts.isMuted?.()) {
+          onLevel(0)
+          return // muted: keep the tap alive but send nothing (same as useMicStream)
+        }
         onPcm(message)
         onLevel(rms16(message))
       }

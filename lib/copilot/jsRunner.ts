@@ -1,4 +1,10 @@
 'use client'
+// Run untrusted JS in a Web Worker so it's off the main thread: a runaway loop
+// can't freeze the tab and the wall-clock timeout really fires via terminate().
+// Isolation boundary: a worker global scope has no DOM — no document, cookies,
+// or localStorage — so page session data isn't reachable. Note this does NOT
+// block network: a worker still has fetch/XHR/WebSocket egress. Blocking that
+// needs CSP (defense-in-depth, handled at the app level), not this layer.
 
 export type JsRunResult = { ok: boolean; output: string; error?: string }
 

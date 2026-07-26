@@ -3,6 +3,16 @@ import { and, desc, eq } from 'drizzle-orm'
 import { getDb, sessions, newShareToken, type SessionRow } from '@/lib/db'
 import { currentUserId } from '@/lib/auth'
 import { posthogServer } from '@/lib/analytics'
+import { SHARE_TTL_HOURS } from '@/lib/share'
+import { NoSessionContextError } from '@/lib/db/errors'
+
+// Dashboard shows newest-first; cap the payload so a heavy account doesn't ship
+// its entire library (incl. summary jsonb) in one Server Component response.
+const LIST_LIMIT = 200
+
+// The only share lifetimes the UI offers. A client can send any number, so we
+// only honor these — anything else (NaN, 0, 100000) is rejected.
+const ALLOWED_TTL_HOURS: readonly number[] = Object.values(SHARE_TTL_HOURS)
 
 // Every post-save session operation lives here so the dashboard, the owner
 // detail view, and the record screen all share one owner-scoped surface.
@@ -10,9 +20,9 @@ import { posthogServer } from '@/lib/analytics'
 
 async function requireUserDb() {
   const userId = await currentUserId()
-  if (!userId) throw new Error('Not authenticated')
+  if (!userId) throw new NoSessionContextError('Not authenticated')
   const db = getDb()
-  if (!db) throw new Error('Database not configured')
+  if (!db) throw new NoSessionContextError('Database not configured')
   return { userId, db }
 }
 
@@ -37,6 +47,7 @@ export async function listSessions(): Promise<SessionSummaryRow[]> {
     .from(sessions)
     .where(eq(sessions.userId, userId))
     .orderBy(desc(sessions.createdAt))
+    .limit(LIST_LIMIT)
 }
 
 // Full row (incl. segments) for the owner detail view. Null if not theirs.
@@ -67,6 +78,9 @@ export async function deleteSession(id: string): Promise<void> {
 
 export async function createShare(sessionId: string, ttlHours: number): Promise<{ url: string }> {
   const { userId, db } = await requireUserDb()
+  // Never trust the client ttl — only mint links for the lifetimes the UI offers,
+  // so a crafted request can't create a never-expiring or 0/NaN-expiry share.
+  if (!ALLOWED_TTL_HOURS.includes(ttlHours)) throw new Error('Invalid share duration')
   const token = newShareToken()
   const expires = new Date(Date.now() + ttlHours * 3_600_000)
   const updated = await db

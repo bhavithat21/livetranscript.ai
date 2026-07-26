@@ -12,7 +12,13 @@ export function useKeytermPrefs() {
   useEffect(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY)
-      if (saved) setEnabledIds(JSON.parse(saved))
+      if (!saved) return
+      const parsed: unknown = JSON.parse(saved)
+      // Must be a string[] — resolveKeyterms calls .includes on it, which throws
+      // on a non-array. A tampered/legacy value falls back to defaults.
+      if (Array.isArray(parsed) && parsed.every((x) => typeof x === 'string')) {
+        setEnabledIds(parsed)
+      }
     } catch {
       /* corrupt/absent — keep defaults */
     }

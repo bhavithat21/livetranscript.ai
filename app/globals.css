@@ -67,6 +67,14 @@ html.lt-desktop {
 html.lt-desktop body {
   padding-top: var(--titlebar-h);
 }
+/* Fixed top-4 controls (record page HomeMenu, Exit Reader) sit at top:1rem, under
+   the top ~16px of the 32px drag bar (TitleBar.tsx, z-200) — clicks there start a
+   window drag instead of activating the control. body's padding-top doesn't move
+   position:fixed elements, so push these specific controls below the bar. Scoped
+   to the desktop shell; the web app has no title bar. */
+html.lt-desktop .fixed.top-4 {
+  top: calc(var(--titlebar-h) + 0.5rem) !important;
+}
 /* Main content containers: dark frosted surface (readable over any wallpaper) */
 html.lt-desktop main,
 html.lt-desktop .bg-\[\#faf9f7\] {
@@ -173,11 +181,14 @@ html.lt-desktop [data-active='true'][class*='bg-ink'] {
   color: #ffffff !important;
 }
 /* Nav top bar: more see-through (leans on the blur for legibility) so it feels
-   like a floating overlay, not a solid bar. It's position:sticky top:0, so on the
-   desktop shell push it below the frameless title bar (z-200) — otherwise the bar
-   overlaps the top of the nav when scrolled. */
-html.lt-desktop nav[aria-label="Main"] {
+   like a floating overlay, not a solid bar. The STICKY element is AppNav's
+   <header className="sticky top-0">, NOT the inner <nav> (which is static) — so the
+   offset that pushes the bar below the frameless title bar (z-200) must land on the
+   header, or it's a no-op and the title bar overlaps the nav when scrolled. */
+html.lt-desktop header:has(> nav[aria-label="Main"]) {
   top: var(--titlebar-h) !important;
+}
+html.lt-desktop nav[aria-label="Main"] {
   background: rgba(18, 18, 26, 0.55) !important;
   -webkit-backdrop-filter: blur(24px) saturate(150%) !important;
   backdrop-filter: blur(24px) saturate(150%) !important;
@@ -208,7 +219,15 @@ html.lt-desktop label {
 html.lt-desktop .reader-surface,
 html.lt-desktop .reader-surface *,
 html.lt-desktop input,
-html.lt-desktop textarea {
+html.lt-desktop textarea,
+/* The LIVE/finished transcript (TranscriptView, ChatView) and the copilot answers
+   render their scrollable payload with `overscroll-contain` and have NO
+   .reader-surface wrapper on /record and /room — without this they'd inherit the
+   blanket `user-select: none` above, breaking partial copy of the transcript, the
+   product's core action. `overscroll-contain` marks exactly those scroll regions;
+   no chrome (nav, headers, buttons) uses it, so selection stays off elsewhere. */
+html.lt-desktop .overscroll-contain,
+html.lt-desktop .overscroll-contain * {
   cursor: text;
   -webkit-user-select: text;
   user-select: text;

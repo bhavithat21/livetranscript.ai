@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 
 // Shortcut cheat-sheet overlay. Press "?" anywhere (outside a text field) to open,
@@ -18,6 +18,7 @@ export const MOD = isMac ? '⌘' : 'Ctrl'
 
 export function ShortcutHelp({ shortcuts }: { shortcuts: ReadonlyArray<Shortcut> }) {
   const [open, setOpen] = useState(false)
+  const panelRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -34,11 +35,35 @@ export function ShortcutHelp({ shortcuts }: { shortcuts: ReadonlyArray<Shortcut>
         e.preventDefault()
         e.stopPropagation()
         setOpen(false)
+      } else if (e.key === 'Tab' && open) {
+        // Trap Tab inside the sheet so focus can't wander to the (inert) page behind.
+        const focusables = panelRef.current?.querySelectorAll<HTMLElement>(
+          'button, [href], [tabindex]:not([tabindex="-1"])',
+        )
+        if (!focusables || focusables.length === 0) return
+        const first = focusables[0]
+        const last = focusables[focusables.length - 1]
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault()
+          last.focus()
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault()
+          first.focus()
+        }
       }
     }
     // Capture phase so our Esc runs before the page handlers when open.
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
+  }, [open])
+
+  // Move focus into the sheet on open and restore it to the trigger on close, so
+  // keyboard/AT users land inside the dialog and return where they were.
+  useEffect(() => {
+    if (!open) return
+    const previouslyFocused = document.activeElement as HTMLElement | null
+    panelRef.current?.focus()
+    return () => previouslyFocused?.focus?.()
   }, [open])
 
   if (!open) return null
@@ -52,7 +77,9 @@ export function ShortcutHelp({ shortcuts }: { shortcuts: ReadonlyArray<Shortcut>
       aria-label="Keyboard shortcuts"
     >
       <div
-        className="glass w-full max-w-sm rounded-3xl p-5"
+        ref={panelRef}
+        tabIndex={-1}
+        className="glass w-full max-w-sm rounded-3xl p-5 outline-none"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-center justify-between">

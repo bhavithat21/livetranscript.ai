@@ -1,9 +1,20 @@
 import type { TranscriptionProvider, TranscriptionConfig, TranscriptEvent } from './types'
 
+// Deepgram closes the stream after ~10-12s of no audio; a text KeepAlive resets
+// that timer so a muted (silent) session survives. Send well inside the window.
+const KEEPALIVE_MS = 5000
+// Bound on how long disconnect() waits for the trailing final after CloseStream,
+// so Stop never hangs if the server goes quiet.
+const FINAL_FLUSH_MS = 800
+
 export class DeepgramProvider implements TranscriptionProvider {
   private ws: WebSocket | null = null
   private partialCb: (e: TranscriptEvent) => void = () => {}
   private finalCb: (e: TranscriptEvent) => void = () => {}
+  private statusCb: (s: { error: string }) => void = () => {}
+  private keepAlive: ReturnType<typeof setInterval> | null = null
+  // Set while disconnect() is flushing; onmessage calls it when a final arrives.
+  private onFinalFlush: (() => void) | null = null
 
   async connect(config: TranscriptionConfig): Promise<void> {
     const res = await fetch('/api/token', {
@@ -40,17 +51,35 @@ export class DeepgramProvider implements TranscriptionProvider {
     await new Promise<void>((resolve, reject) => {
       const ws = new WebSocket(`${base}?${params}`, ['bearer', token])
       this.ws = ws
+      let opened = false
       const timeout = setTimeout(() => {
         ws.close()
         reject(new Error('Deepgram WS timeout'))
       }, 10_000)
       ws.onopen = () => {
         clearTimeout(timeout)
+        opened = true
+        // Keep the stream alive across mutes/silence, regardless of audio flow.
+        this.keepAlive = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'KeepAlive' }))
+        }, KEEPALIVE_MS)
         resolve()
       }
+      // Before open: reject the connect promise. After open: surface the drop so
+      // the UI stops the "recording" illusion (no double-invoke — opened gates it).
       ws.onerror = () => {
-        clearTimeout(timeout)
-        reject(new Error('Deepgram WS error'))
+        if (!opened) {
+          clearTimeout(timeout)
+          reject(new Error('Deepgram WS error'))
+          return
+        }
+        this.statusCb({ error: 'Transcription connection lost' })
+      }
+      ws.onclose = () => {
+        if (!opened) return // connect-time close already rejected via onerror/timeout
+        this.stopKeepAlive()
+        this.onFinalFlush?.() // unblock a pending disconnect flush
+        this.statusCb({ error: 'Transcription connection closed' })
       }
       ws.onmessage = (msg) => {
         const data = JSON.parse(msg.data)
@@ -68,9 +97,15 @@ export class DeepgramProvider implements TranscriptionProvider {
           ),
         }
         if (!evt.text) return
+        if (evt.isFinal) this.onFinalFlush?.() // let disconnect() resolve on the trailing final
         ;(evt.isFinal ? this.finalCb : this.partialCb)(evt)
       }
     })
+  }
+
+  private stopKeepAlive() {
+    if (this.keepAlive) clearInterval(this.keepAlive)
+    this.keepAlive = null
   }
 
   sendAudio(chunk: ArrayBuffer): void {
@@ -83,9 +118,29 @@ export class DeepgramProvider implements TranscriptionProvider {
   onFinal(cb: (e: TranscriptEvent) => void) {
     this.finalCb = cb
   }
+  onStatus(cb: (s: { error: string }) => void) {
+    this.statusCb = cb
+  }
   async disconnect(): Promise<void> {
-    if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify({ type: 'CloseStream' }))
-    this.ws?.close()
+    this.stopKeepAlive()
+    // Silence the drop signal — this is a graceful close, not a failure.
+    this.statusCb = () => {}
+    const ws = this.ws
+    if (ws?.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'CloseStream' }))
+      // Wait for the server to flush its trailing final so the last utterance is
+      // finalized (interim-only lines are excluded from the saved transcript).
+      await new Promise<void>((resolve) => {
+        const done = () => {
+          this.onFinalFlush = null
+          clearTimeout(t)
+          resolve()
+        }
+        const t = setTimeout(done, FINAL_FLUSH_MS)
+        this.onFinalFlush = done
+      })
+    }
+    ws?.close()
     this.ws = null
   }
 }

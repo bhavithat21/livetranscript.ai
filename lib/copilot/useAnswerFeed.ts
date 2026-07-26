@@ -24,8 +24,11 @@ export function useAnswerFeed() {
       instructions?: string | null,
     ) => {
       const id = ++idRef.current
-      setEntries((e) => [...e, { id, question, answer: '', streaming: true }])
-      setCursor(() => idRef.current - 1) // jump the view to the newest
+      setEntries((e) => {
+        const next = [...e, { id, question, answer: '', streaming: true }]
+        setCursor(next.length - 1) // jump the view to the newest (array index, not id)
+        return next
+      })
       try {
         const res = await fetch('/api/copilot/answer', {
           method: 'POST',
@@ -62,7 +65,9 @@ export function useAnswerFeed() {
     setCursor(0)
   }, [])
   const prev = useCallback(() => setCursor((c) => Math.max(0, c - 1)), [])
-  const next = useCallback(() => setCursor((c) => Math.min(idRef.current - 1, c + 1)), [])
+  // Clamp to the array's last index (entries.length - 1), not the id counter —
+  // ids keep climbing across clears, array length resets.
+  const next = useCallback(() => setCursor((c) => Math.min(entries.length - 1, c + 1)), [entries.length])
 
   const current = entries[Math.min(cursor, entries.length - 1)] ?? null
   return { entries, current, cursor, count: entries.length, answer, clear, prev, next }
