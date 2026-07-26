@@ -2,11 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
 import { currentUserId } from '@/lib/auth'
 import { logError } from '@/lib/log'
-import { rateLimit } from '@/lib/rateLimit'
 
-// Correction fires per finalized line, so allow a high burst; the cap only exists
-// to stop a scripted account looping the paid route unbounded.
-const CORRECTIONS_PER_MINUTE = 120
 const MAX_TEXT = 4_000
 const MAX_TERMS = 40
 const MAX_TERM_LEN = 80
@@ -29,9 +25,6 @@ export async function POST(req: NextRequest) {
   // Require a signed-in user so anonymous callers can't drain OpenAI quota.
   const userId = await currentUserId()
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!rateLimit(`correct:${userId}`, CORRECTIONS_PER_MINUTE, 60_000)) {
-    return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
-  }
 
   let body: { text?: string; context?: string; keyterms?: string[] }
   try {

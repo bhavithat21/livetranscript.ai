@@ -1,13 +1,8 @@
 import { NextRequest } from 'next/server'
 import { currentUserId } from '@/lib/auth'
 import { logError } from '@/lib/log'
-import { rateLimit } from '@/lib/rateLimit'
 import { modeProfile, modelForTier, vendorForModel } from '@/lib/copilot/modes'
 import { streamAnswer } from '@/lib/copilot/providers'
-
-// Proactive mode + manual asks can fire several/min; cap so one account can't
-// loop this (the most expensive route — Claude/GPT streaming + vision).
-const ANSWERS_PER_MINUTE = 30
 
 // On-demand copilot answer. Streams tokens back grounded in the transcript the
 // caller passes. Mirrors the auth-guard + input-cap + fail-soft conventions of
@@ -42,9 +37,6 @@ function clean(s: string, max: number): string {
 export async function POST(req: NextRequest) {
   const userId = await currentUserId()
   if (!userId) return Response.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!rateLimit(`answer:${userId}`, ANSWERS_PER_MINUTE, 60_000)) {
-    return Response.json({ error: 'Too many requests' }, { status: 429 })
-  }
 
   let body: {
     question?: string

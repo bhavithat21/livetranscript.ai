@@ -2,23 +2,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
 import { currentUserId } from '@/lib/auth'
 import { logError } from '@/lib/log'
-import { rateLimit } from '@/lib/rateLimit'
 import { normalizeSummary } from '@/lib/summary'
-
-// ponytail: same per-user in-memory limiter as /api/ably-token. The sibling AI
-// routes (copilot/answer, correct, copilot/embed) still guard only on auth and
-// should get the same limiter — owned by other agents, tracked as follow-up.
-const SUMMARIES_PER_MINUTE = 10
 
 export async function POST(req: NextRequest) {
   // Require a signed-in user so anonymous callers can't drain OpenAI quota.
+  // No per-user rate limit: AI usage is intentionally unlimited for signed-in users.
   const userId = await currentUserId()
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
-  // Bounded per-user rate so one account can't loop the route and drain quota.
-  if (!rateLimit(`summarize:${userId}`, SUMMARIES_PER_MINUTE, 60_000)) {
-    return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
-  }
 
   let body: { transcript?: string }
   try {

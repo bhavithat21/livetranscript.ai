@@ -2,9 +2,6 @@ import { NextRequest } from 'next/server'
 import OpenAI from 'openai'
 import { currentUserId } from '@/lib/auth'
 import { logError } from '@/lib/log'
-import { rateLimit } from '@/lib/rateLimit'
-
-const EMBEDS_PER_MINUTE = 20
 
 // Embeddings for the behavioral story-bank (Phase 3 RAG). The user's resume/STAR
 // stories are chunked client-side and embedded here; vectors are stored in the
@@ -19,9 +16,6 @@ const MAX_CHARS = 8_000
 export async function POST(req: NextRequest) {
   const userId = await currentUserId()
   if (!userId) return Response.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!rateLimit(`embed:${userId}`, EMBEDS_PER_MINUTE, 60_000)) {
-    return Response.json({ error: 'Too many requests' }, { status: 429 })
-  }
 
   let body: { texts?: unknown }
   try {
