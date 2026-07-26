@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { extractPython } from './pyodideRunner'
+import { extractPython, extractTests } from './pyodideRunner'
 
 describe('extractPython', () => {
   it('pulls a python fenced block out of a markdown answer', () => {
@@ -12,5 +12,31 @@ describe('extractPython', () => {
   })
   it('returns null when there is no code block', () => {
     expect(extractPython('just prose, no code')).toBeNull()
+  })
+})
+
+describe('extractTests', () => {
+  it('pulls a python:tests fenced block', () => {
+    const md = [
+      '```python',
+      'def solve(n): return n + 1',
+      '```',
+      '',
+      '```python:tests',
+      'assert solve(1) == 2  # normal',
+      'assert solve(0) == 1  # zero',
+      '```',
+    ].join('\n')
+    const tests = extractTests(md)
+    expect(tests).toContain('assert solve(1) == 2')
+    expect(tests).toContain('assert solve(0) == 1')
+  })
+  it('returns null when there is no tests block', () => {
+    const md = '```python\ndef f(): pass\n```'
+    expect(extractTests(md)).toBeNull()
+  })
+  it('does not match a plain python block as tests', () => {
+    const md = '```python\nassert True\n```'
+    expect(extractTests(md)).toBeNull()
   })
 })
