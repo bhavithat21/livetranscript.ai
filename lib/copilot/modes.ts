@@ -170,6 +170,12 @@ const GROUNDING = `GROUNDING & ACCURACY — follow exactly, these override style
 - RAPID TOPIC SWITCHES: answer the CURRENT question only. When the subject changes,
   drop the previous question's framing, entities, and assumptions completely — do
   not blend the old topic into the new answer.
+- MULTI-PART QUESTIONS: interviewers often ask one question in several pieces ("tell
+  me about a challenge you faced, and how you measured the impact, and what you'd do
+  differently"). When the question contains multiple asks, ANSWER EVERY PART — cover
+  each sub-question explicitly (a short labeled bullet per part if there are 3+), and
+  don't drop the earlier parts once you reach the last one. If a later part refines
+  an earlier one, treat them as one coherent question.
 - PLAIN LANGUAGE: talk like a sharp person actually talks. Avoid buzzwords and
   textbook phrasing; reach for a specialized term only when it is genuinely the
   precise word a normal expert would use. Natural and human, never robotic.

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { latestQuestion } from './useProactive'
+import { latestQuestion, latestQuestionGroup } from './useProactive'
 
 // Regression: auto-answer never fired because the old `^cue` regex missed any
 // question with a leading filler word ("So tell me…", "Okay, walk me…") and
@@ -65,3 +65,25 @@ describe('latestQuestion', () => {
     })
   })
 })
+
+describe('latestQuestionGroup (multi-part questions)', () => {
+  it('joins contiguous question parts into one combined question', () => {
+    const t = 'Tell me about a challenge you faced. And how did you measure the impact? And what would you do differently?'
+    const g = latestQuestionGroup(t)
+    expect(g).toContain('challenge')
+    expect(g).toContain('measure the impact')
+    expect(g).toContain('do differently')
+  })
+  it('returns a single question unchanged when there is only one part', () => {
+    expect(latestQuestionGroup('Reverse a linked list.')).toBe('Reverse a linked list.')
+  })
+  it('does not pull in a preceding non-question statement', () => {
+    const g = latestQuestionGroup('I worked at Google for three years. How would you design a rate limiter?')
+    expect(g).toContain('rate limiter')
+    expect(g).not.toContain('Google')
+  })
+  it('returns null when there is no question', () => {
+    expect(latestQuestionGroup('I shipped it to production last week.')).toBeNull()
+  })
+})
+

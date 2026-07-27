@@ -59,6 +59,37 @@ export function latestQuestion(transcript: string): string | null {
   return null
 }
 
+// A MULTI-PART question is asked in pieces ("Tell me about a challenge. And how did
+// you measure it? And what would you change?"). Each piece may end in punctuation, so
+// the completion gate fires on the first — but they're ONE question. This gathers the
+// TRAILING RUN of consecutive question sentences (a question directly followed by
+// more questions, allowing short connective statements between) so the model can
+// answer ALL parts together instead of the first in isolation. Returns the combined
+// text, or the single latest question if there's only one part.
+export function latestQuestionGroup(transcript: string): string | null {
+  const sentences = transcript
+    .replace(/\s+/g, ' ')
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+  // Find the last question sentence.
+  let end = -1
+  for (let i = sentences.length - 1; i >= 0; i--) {
+    if (looksLikeQuestion(sentences[i]) && sentences[i].length >= 8) { end = i; break }
+  }
+  if (end === -1) return null
+  // Walk backward collecting the contiguous block of question-ish parts. Stop at a
+  // non-question sentence that ISN'T a short connective ("and", "also", "then …").
+  let start = end
+  for (let i = end - 1; i >= 0 && i >= end - 4; i--) {
+    const s = sentences[i]
+    if (looksLikeQuestion(s) && s.length >= 8) { start = i; continue }
+    break
+  }
+  const parts = sentences.slice(start, end + 1).map((s) => stripLabels(s) || s)
+  return parts.length > 1 ? parts.join(' ') : parts[0]
+}
+
 // Poll fast so a heard question turns into an answer with minimal lag. The
 // in-flight guard + prefix-dedupe below keep this from stacking duplicate calls,
 // so a short interval is safe (was 1500ms, which added up to 1.5s of dead wait).
@@ -93,6 +124,10 @@ function isComplete(q: string): boolean {
   return /[.!?]["')\]]?\s*$/.test(q.trim())
 }
 
+// After answering, a new question part arriving within this window is treated as a
+// CONTINUATION of a multi-part question (re-answer the whole group), not a fresh one.
+const MERGE_WINDOW_MS = 8_000
+
 export function useProactive(
   enabled: boolean,
   getTranscript: () => string,
@@ -110,12 +145,31 @@ export function useProactive(
   // The candidate question we're WAITING on, its normalized key, and when it last
   // changed — the basis for "has it stopped growing?".
   const pendingRef = useRef<{ q: string; key: string; since: number } | null>(null)
+  // When we last answered — for the MULTI-PART merge window. A question part arriving
+  // soon after an answer is likely a CONTINUATION of the same multi-part question, so
+  // we re-answer the whole GROUP rather than treating the new part as isolated.
+  const lastAnsweredAtRef = useRef(0)
 
   useEffect(() => {
     if (!enabled) {
       pendingRef.current = null
       return
     }
+    // Fire an answer for the current question GROUP (all contiguous parts, so a
+    // multi-part question is answered completely, not just its first part).
+    const fire = () => {
+      const group = latestQuestionGroup(getRef.current()) ?? latestQuestion(getRef.current())
+      if (!group) return
+      askedRef.current.push(normalizeKey(group))
+      pendingRef.current = null
+      lastAnsweredAtRef.current = Date.now()
+      inFlightRef.current = true
+      setLastAsked(group)
+      Promise.resolve(onQuestionRef.current(group)).finally(() => {
+        inFlightRef.current = false
+      })
+    }
+
     const id = setInterval(() => {
       if (inFlightRef.current) return // don't stack answers while one is generating
       const q = latestQuestion(getRef.current())
@@ -124,43 +178,37 @@ export function useProactive(
         return
       }
       const key = normalizeKey(q)
-      // Already answered (or a tail-extension of one we answered)? Skip.
-      if (askedRef.current.some((k) => isSameOrExtension(k, key))) {
-        pendingRef.current = null
-        return
-      }
       const now = Date.now()
 
-      // FAST PATH: the candidate is COMPLETE (ends in terminal punctuation → ASR
-      // says the speaker finished). Answer NOW — no settle wait, no added latency.
-      if (isComplete(q)) {
-        askedRef.current.push(key)
+      // MULTI-PART MERGE: a NEW question part arriving within the merge window after
+      // the last answer is treated as a continuation — re-answer the full group so
+      // the later parts (and the earlier ones) are all covered. Without this, part 2
+      // of "tell me about X. and how did you measure it?" would be a separate answer.
+      const alreadySeen = askedRef.current.some((k) => isSameOrExtension(k, key))
+      const withinMergeWindow = now - lastAnsweredAtRef.current < MERGE_WINDOW_MS
+      if (alreadySeen && !withinMergeWindow) {
         pendingRef.current = null
-        inFlightRef.current = true
-        setLastAsked(q)
-        Promise.resolve(onQuestionRef.current(q)).finally(() => {
-          inFlightRef.current = false
-        })
+        return // genuinely already answered, not a continuation
+      }
+      if (alreadySeen && withinMergeWindow && !isComplete(q)) {
+        return // a continuation may still be forming — wait for it to complete
+      }
+
+      // FAST PATH: complete (terminal punctuation → speaker finished) → answer NOW.
+      if (isComplete(q)) {
+        fire()
         return
       }
 
-      // SLOW PATH: no terminal punctuation yet — the question may still be forming.
-      // Only here do we wait (a backstop for ASR that doesn't punctuate). Reset the
-      // clock whenever the text grows; fire once it's been stable for SETTLE_MS.
+      // SLOW PATH: still forming → wait the SETTLE_MS backstop (only for un-punctuated
+      // ASR), resetting the clock while the text grows.
       const pending = pendingRef.current
       if (!pending || pending.key !== key) {
         pendingRef.current = { q, key, since: now }
         return
       }
-      if (now - pending.since < SETTLE_MS) return // still forming, keep waiting
-
-      askedRef.current.push(key)
-      pendingRef.current = null
-      inFlightRef.current = true
-      setLastAsked(q)
-      Promise.resolve(onQuestionRef.current(q)).finally(() => {
-        inFlightRef.current = false
-      })
+      if (now - pending.since < SETTLE_MS) return
+      fire()
     }, DEBOUNCE_MS)
     return () => clearInterval(id)
   }, [enabled])
