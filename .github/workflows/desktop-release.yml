@@ -85,20 +85,48 @@ jobs:
           releaseDraft: false
           prerelease: false
           # tauri-action generates latest.json (the updater manifest) and uploads it
-          # to the GitHub release. We ALSO republish it (with rewritten URLs) to a
-          # public Blob store below, since the app's updater endpoint points at
-          # livetranscript.ai/updates (private-repo-safe) rather than GitHub.
+          # to the GitHub release. The separate publish-updates job below republishes
+          # it (with rewritten URLs) to a public Blob store, since the app's updater
+          # endpoint points at livetranscript.ai/updates (private-repo-safe).
           includeUpdaterJson: true
 
-      # Publish the updater artifacts to Vercel Blob and rewrite latest.json so the
-      # app fetches them through livetranscript.ai/updates (survives a private repo).
-      # Runs once, on the macOS job, whose universal build produces the manifest
-      # covering both platforms' bundles present in target/.
-      - name: Publish updates to public store (private-repo-safe)
-        if: matrix.platform == 'macos-latest' && env.BLOB_READ_WRITE_TOKEN != ''
+  # Mirror the release's updater artifacts to a PUBLIC Blob store and rewrite
+  # latest.json so the app fetches everything via livetranscript.ai/updates
+  # (survives the repo going private). Runs AFTER both build jobs so it can pull
+  # the MERGED, both-platform latest.json from the GitHub release — a single build
+  # job's local target/ only has that job's own platform, which would ship a
+  # one-platform manifest and silently break updates for the other OS.
+  publish-updates:
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Pull the merged manifest + updater bundles (+ .sig) from the release.
+      - name: Download release assets
+        if: ${{ env.BLOB_READ_WRITE_TOKEN != '' }}
         env:
-          BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p /tmp/rel
+          gh release download "${{ github.ref_name }}" --dir /tmp/rel --clobber
+
+      # Install the Blob SDK in an ISOLATED dir and run the script FROM there, so
+      # ESM bare-specifier resolution finds @vercel/blob (NODE_PATH doesn't work for
+      # ESM) and npm never touches the pnpm workspace (which broke `npm i` before).
+      - name: Publish updates to public store (private-repo-safe)
+        if: ${{ env.BLOB_READ_WRITE_TOKEN != '' }}
+        env:
           UPDATES_PUBLIC_BASE: https://livetranscript.ai/updates
         run: |
-          npm i --no-save @vercel/blob
-          node scripts/publish-updates.mjs src-tauri/target
+          mkdir -p /tmp/pub
+          cp scripts/publish-updates.mjs /tmp/pub/
+          cd /tmp/pub
+          npm init -y >/dev/null 2>&1
+          npm i @vercel/blob >/dev/null 2>&1
+          node publish-updates.mjs /tmp/rel

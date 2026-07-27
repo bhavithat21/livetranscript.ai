@@ -78,15 +78,36 @@ async function upload(filePath) {
 
 // Each platform entry has { signature, url }. The url points at the installer
 // (GitHub); re-upload that installer to Blob and rewrite the url to the front door.
+// A missing installer would ship a manifest whose download 404s, so treat it as a
+// hard error rather than silently skipping (which would look green but be broken).
 const platforms = manifest.platforms ?? {}
+if (Object.keys(platforms).length === 0) {
+  console.error('latest.json has no platforms — nothing to publish (bad manifest)')
+  process.exit(1)
+}
+const failures = []
 for (const [plat, entry] of Object.entries(platforms)) {
-  const installerName = decodeURIComponent(basename(new URL(entry.url).pathname))
-  const localInstaller = findFile(dir, installerName)
-  if (!localInstaller) {
-    console.error(`Installer ${installerName} for ${plat} not found in artifacts — skipping`)
+  if (!entry || typeof entry.url !== 'string') {
+    failures.push(`${plat}: manifest entry missing a url`)
     continue
   }
-  entry.url = await upload(localInstaller)
+  let installerName
+  try {
+    installerName = decodeURIComponent(basename(new URL(entry.url).pathname))
+  } catch {
+    failures.push(`${plat}: unparseable url ${entry.url}`)
+    continue
+  }
+  const localInstaller = findFile(dir, installerName)
+  if (!localInstaller) {
+    failures.push(`${plat}: installer ${installerName} not found in ${dir}`)
+    continue
+  }
+  entry.url = await upload(localInstaller) // signature field is left untouched
+}
+if (failures.length) {
+  console.error('Publish failed:\n  ' + failures.join('\n  '))
+  process.exit(1)
 }
 
 // Upload the rewritten manifest last, at the stable key the app polls.
