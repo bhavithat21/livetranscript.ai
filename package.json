@@ -9,7 +9,10 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
-    "eval:coding": "vitest run --config evals/vitest.eval.config.ts"
+    "eval:coding": "vitest run --config evals/vitest.eval.config.ts runCoding",
+    "eval:detection": "vitest run --config evals/vitest.eval.config.ts runDetection",
+    "eval:voice": "vitest run --config evals/vitest.eval.config.ts runBehavioralVoice",
+    "eval:all": "vitest run --config evals/vitest.eval.config.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.114.0",

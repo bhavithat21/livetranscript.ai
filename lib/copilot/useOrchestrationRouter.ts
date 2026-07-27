@@ -1,6 +1,7 @@
 'use client'
 import { useCallback, useRef } from 'react'
 import type { CopilotMode } from './modes'
+import { localClassify } from './localClassify'
 
 // The orchestrator's routing brain (client side). For a heard/typed question it
 // asks the classifier route to decide: is this a real question, which MODE it is,
@@ -69,7 +70,15 @@ export function useOrchestrationRouter() {
       if (inFlight.current) return { classification: null, webContext: null }
       inFlight.current = true
       try {
-        const classification = await classify(question)
+        // LOCAL-FIRST: an unambiguous question is classified with zero network latency
+        // (the common case), so the classifier round-trip is OFF the hot path. Only an
+        // AMBIGUOUS question (local returns null) escalates to the LLM classifier.
+        const local = localClassify(question)
+        const classification: Classification | null = local
+          ? { ...local, confidence: 1 }
+          : await classify(question)
+        // Web search still runs when needed — but the freshness signal is cheap to
+        // detect locally, so it usually starts without waiting on the LLM classifier.
         const webContext = classification?.needsWeb ? await webSearch(question) : null
         return { classification, webContext }
       } finally {

@@ -210,6 +210,14 @@ export function useAnswerFeed() {
   // ids keep climbing across clears, array length resets.
   const next = useCallback(() => setCursor((c) => Math.min(entries.length - 1, c + 1)), [entries.length])
 
+  // The questions asked this session with their (auto-routed) mode — for the
+  // post-interview review. Reads mode from the per-entry args recorded at ask time.
+  const questions = useCallback(
+    (): { q: string; mode: string }[] =>
+      entries.map((e) => ({ q: e.question, mode: argsRef.current.get(e.id)?.mode ?? 'general' })),
+    [entries],
+  )
+
   const current = entries[Math.min(cursor, entries.length - 1)] ?? null
-  return { entries, current, cursor, count: entries.length, answer, retry, clear, prev, next }
+  return { entries, current, cursor, count: entries.length, answer, retry, clear, prev, next, questions }
 }

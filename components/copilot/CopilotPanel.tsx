@@ -7,6 +7,7 @@ import { useScreenStream } from '@/lib/vision/useScreenStream'
 import { useModeContext } from '@/lib/copilot/useModeContext'
 import { useCandidateProfile } from '@/lib/copilot/useCandidateProfile'
 import { useOrchestrationRouter } from '@/lib/copilot/useOrchestrationRouter'
+import { latencyStats } from '@/lib/copilot/latency'
 import { useProactive } from '@/lib/copilot/useProactive'
 import { useAnswerFeed } from '@/lib/copilot/useAnswerFeed'
 import { useMeContext } from '@/lib/copilot/useMeContext'
@@ -78,6 +79,8 @@ export function CopilotPanel({
   const [stealth, setStealth] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false) // overflow sheet for secondary controls
   const [view, setView] = useState<'chat' | 'answers'>('chat')
+  // Post-interview review: generated on demand from the session's Q&A + transcript.
+  const [review, setReview] = useState<{ loading: boolean; text: string | null; error: string | null }>({ loading: false, text: null, error: null })
   const lockMode = useLockMode() // desktop: click-through overlay (unlock via hotkey/tray)
   // The turn index the orchestrator's auto test result belongs to. Pinned when
   // the result is produced so a later coding-mode chat answer (a new last turn)
@@ -195,6 +198,25 @@ export function CopilotPanel({
     // so every manual answer is grounded in the candidate's real background.
     const merged = [profile.contextBlock(), retrieved].filter(Boolean).join('\n\n') || null
     ask(q, mode, image, merged, context.instructions || null)
+  }
+
+  // Post-interview review: summarize the session's questions (with auto-routed mode)
+  // + transcript into coverage / LP / gaps. On demand — reuses the whole session.
+  const runReview = async () => {
+    if (review.loading) return
+    setReview({ loading: true, text: null, error: null })
+    try {
+      const res = await fetch('/api/copilot/review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transcript: getTranscript(), questions: feed.questions() }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data.review) throw new Error(data.error || 'Review failed')
+      setReview({ loading: false, text: data.review, error: null })
+    } catch (e) {
+      setReview({ loading: false, text: null, error: e instanceof Error ? e.message : 'Review failed' })
+    }
   }
 
   return (
@@ -401,7 +423,7 @@ export function CopilotPanel({
       )}
 
       {view === 'answers' ? (
-        <AnswersView feed={feed} auto={auto} />
+        <AnswersView feed={feed} auto={auto} review={review} onReview={runReview} />
       ) : (
       <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4">
         {visibleTurns.length === 0 && !error && (
@@ -736,9 +758,13 @@ function SheetItem({
 function AnswersView({
   feed,
   auto,
+  review,
+  onReview,
 }: {
   feed: ReturnType<typeof useAnswerFeed>
   auto: boolean
+  review: { loading: boolean; text: string | null; error: string | null }
+  onReview: () => void
 }) {
   const bodyRef = useRef<HTMLDivElement>(null)
   const e = feed.current
@@ -774,8 +800,40 @@ function AnswersView({
             Retry
           </button>
         )}
-        <button onClick={feed.clear} className="ml-auto rounded-full px-2 py-1 text-black/45 hover:bg-black/5 hover:text-ink">Clear</button>
+        {(() => {
+          // Live p50/p95 time-to-first-token over this session — "fast" measured on
+          // the spot, not asserted. Recomputes as each answer lands (feed re-renders).
+          const s = latencyStats()
+          return s ? (
+            <span
+              className="ml-auto mr-1 tabular-nums text-[11px] text-black/40"
+              title={`Time-to-first-token this session, ${s.count} answer${s.count === 1 ? '' : 's'}`}
+            >
+              TTFT p50 {s.p50}ms · p95 {s.p95}ms
+            </span>
+          ) : null
+        })()}
+        {/* Post-interview review — recap coverage / LPs / gaps from the whole session. */}
+        <button
+          onClick={onReview}
+          disabled={review.loading}
+          className={`${latencyStats() ? '' : 'ml-auto '}rounded-full px-2 py-1 text-emerald-800 hover:bg-emerald-700/10 disabled:opacity-50`}
+          title="Review this session — coverage, Leadership Principles, and what to tighten"
+        >
+          {review.loading ? 'Reviewing…' : 'Review'}
+        </button>
+        <button onClick={feed.clear} className="rounded-full px-2 py-1 text-black/45 hover:bg-black/5 hover:text-ink">Clear</button>
       </div>
+      {(review.text || review.error) && (
+        <div className="max-h-[45%] overflow-y-auto border-b border-emerald-700/15 bg-emerald-700/[0.04] px-4 py-3">
+          <div className="mb-1.5 text-xs font-medium uppercase tracking-wide text-emerald-800">Session review</div>
+          {review.error ? (
+            <p className="text-xs text-[color:var(--stop)]">{review.error}</p>
+          ) : (
+            <RichContent content={review.text ?? ''} streaming={false} />
+          )}
+        </div>
+      )}
       <div ref={bodyRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
         <div className="text-xs font-medium uppercase tracking-wide text-[color:var(--signal)]">Question</div>
         <p className="text-sm font-medium text-ink">{e?.question}</p>
