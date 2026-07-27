@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Hardened-runtime entitlements required for macOS NOTARIZATION. A WKWebView app
+     (Tauri) needs the JIT / unsigned-executable-memory exceptions or the web engine
+     is killed under hardened runtime; the audio sidecar is a separate signed binary
+     that inherits the app's grants. Without this file, notarization commonly fails
+     even with a valid Developer ID cert — so it's wired up front. -->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+  <key>com.apple.security.device.audio-input</key>
+  <true/>
+</dict>
+</plist>
