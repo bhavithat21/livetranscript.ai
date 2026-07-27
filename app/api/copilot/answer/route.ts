@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server'
 import { currentUserId } from '@/lib/auth'
 import { logError } from '@/lib/log'
-import { modeProfile, modelForTier, vendorForModel } from '@/lib/copilot/modes'
+import { modeProfile, modelForTier, vendorForModel, thinkingConfigFor } from '@/lib/copilot/modes'
 import { streamAnswer } from '@/lib/copilot/providers'
 
 // On-demand copilot answer. Streams tokens back grounded in the transcript the
@@ -99,6 +99,11 @@ export async function POST(req: NextRequest) {
     ? `${profile.system}\n\nADDITIONAL INSTRUCTIONS from the user for how to answer in this chat:\n${instructions}`
     : profile.system
 
+  // Per-mode thinking/effort, resolved against the model actually chosen (an image
+  // forces the smart model). Disabled for chat/behavioral latency; summarized
+  // thinking only for system design.
+  const posture = thinkingConfigFor(body.mode, model)
+
   try {
     const readable = streamAnswer({
       model,
@@ -109,6 +114,8 @@ export async function POST(req: NextRequest) {
       question,
       image,
       temperature: profile.temperature,
+      thinking: posture.thinking,
+      effort: posture.effort,
     })
     return new Response(readable, {
       headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' },

@@ -1,6 +1,6 @@
 import OpenAI from 'openai'
 import Anthropic from '@anthropic-ai/sdk'
-import { vendorForModel } from './modes'
+import { vendorForModel, type ThinkingConfig, type Effort } from './modes'
 import { logError } from '@/lib/log'
 
 // Vendor-agnostic streaming for the copilot answer route. Dispatches to OpenAI or
@@ -20,6 +20,10 @@ export type AnswerParams = {
   question: string
   image: string | null // base64 data URL, cost-controlled screen frame
   temperature: number
+  // Per-mode generation posture (Anthropic thinking-capable models only). Omitted
+  // for Haiku/OpenAI, where these params 400.
+  thinking?: ThinkingConfig
+  effort?: Effort
 }
 
 const BACKGROUND_PREFIX = 'YOUR BACKGROUND (ground the answer in this, do not invent beyond it):\n'
@@ -100,15 +104,20 @@ async function* anthropicTokens(p: AnswerParams): AsyncGenerator<string> {
   }
   // Note: Claude Sonnet 5 / Opus 4.8 deprecate `temperature` (they manage their
   // own sampling) — do NOT send it, the API rejects the request if present.
+  // Per-mode posture (from thinkingConfigFor): disabling thinking makes the answer
+  // stream immediately (coding's approach-first prompt is the narratable reasoning);
+  // systemDesign runs adaptive+summarized so the user sees visible progress.
   const stream = client.messages.stream({
     model: p.model,
     max_tokens: 1500,
     system,
+    ...(p.thinking ? { thinking: p.thinking } : {}),
+    ...(p.effort ? { output_config: { effort: p.effort } } : {}),
     messages: [
       ...p.history.map((h) => ({ role: h.role, content: h.content })),
       { role: 'user' as const, content: userBlocks },
     ],
-  })
+  } as Anthropic.MessageStreamParams)
   for await (const event of stream) {
     if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
       yield event.delta.text

@@ -23,11 +23,13 @@ export interface ModeProfile {
   tier: 'fast' | 'smart'
 }
 
-// Best-per-purpose defaults (2026): fast = OpenAI gpt-4o-mini (cheap, low TTFT);
-// smart = Anthropic Claude Sonnet 5 (best coder + dense-code vision). The vendor
-// is inferred from the model id prefix ('claude-' => Anthropic, else OpenAI), so
-// an env override can switch vendor with no code change.
-const TIER_DEFAULTS = { fast: 'gpt-4o-mini', smart: 'claude-sonnet-5' } as const
+// Best-per-purpose defaults (2026): fast = Anthropic Claude Haiku 4.5 (low TTFT,
+// strong for chat/behavioral) — was gpt-4o-mini; moving it onto Anthropic means
+// ONE vendor, so the transcript prompt cache is reused within a tier and there's a
+// single SDK/auth/outage surface. smart = Claude Sonnet 5 (best coder + dense-code
+// vision). Vendor is inferred from the id prefix ('claude-' => Anthropic, else
+// OpenAI), so an env override can still switch vendor with no code change.
+const TIER_DEFAULTS = { fast: 'claude-haiku-4-5', smart: 'claude-sonnet-5' } as const
 
 export type Vendor = 'openai' | 'anthropic'
 
@@ -38,6 +40,38 @@ export function modelForTier(tier: 'fast' | 'smart'): string {
 
 export function vendorForModel(model: string): Vendor {
   return model.startsWith('claude') ? 'anthropic' : 'openai'
+}
+
+export type ThinkingConfig = { type: 'disabled' } | { type: 'adaptive'; display?: 'summarized' | 'omitted' }
+export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+
+// Which models accept the adaptive/disabled `thinking` config and the `effort`
+// control. Sonnet 5, the Opus 4.x family, and Fable do; Haiku 4.5 and OpenAI models
+// do NOT (sending either param there returns a 400), so we omit both for them.
+function isThinkingCapable(model: string): boolean {
+  return model.startsWith('claude') && !model.includes('haiku')
+}
+
+// Per-mode generation posture, resolved against the model ACTUALLY chosen (which can
+// differ from the mode's tier — an attached image forces the smart model). Why per
+// mode: speed and accuracy trade off differently in each.
+//   - systemDesign: least latency-critical (you're discussing, not racing) and
+//     benefits from reasoning → adaptive thinking with a summarized display so the
+//     user sees visible progress instead of a dead spinner, at medium depth.
+//   - every other mode on a thinking-capable model: DISABLE thinking so the answer
+//     streams immediately. Coding's approach-first prompt IS the narratable
+//     reasoning, and the orchestrator's run-tests-and-retry loop is the accuracy net.
+//   - fast chat models (Haiku 4.5): omit both — the params 400 there, and chat/
+//     behavioral don't need reasoning; time-to-first-token is what matters.
+export function thinkingConfigFor(
+  mode: string | undefined,
+  model: string,
+): { thinking?: ThinkingConfig; effort?: Effort } {
+  if (!isThinkingCapable(model)) return {}
+  if (modeProfile(mode).id === 'systemDesign') {
+    return { thinking: { type: 'adaptive', display: 'summarized' }, effort: 'medium' }
+  }
+  return { thinking: { type: 'disabled' } }
 }
 
 const GENERAL = `You are the assistant inside LiveTranscript, shown beside a live transcript.

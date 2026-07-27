@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { modeProfile, modelForTier, vendorForModel, MODE_PROFILES, MODE_ORDER } from './modes'
+import { modeProfile, modelForTier, vendorForModel, thinkingConfigFor, MODE_PROFILES, MODE_ORDER } from './modes'
 
 describe('modeProfile', () => {
   it('returns the requested mode', () => {
@@ -35,12 +35,26 @@ describe('purpose-specific model tiers', () => {
     // smart != fast by default (stronger model for correctness-first modes)
     expect(modelForTier('smart')).not.toBe(modelForTier('fast'))
   })
-  it('routes smart tier to Anthropic (Claude) and fast to OpenAI by default', () => {
+  it('routes BOTH tiers to Anthropic by default (one vendor → shared prompt cache)', () => {
     expect(vendorForModel(modelForTier('smart'))).toBe('anthropic')
-    expect(vendorForModel(modelForTier('fast'))).toBe('openai')
+    expect(vendorForModel(modelForTier('fast'))).toBe('anthropic')
   })
   it('vendorForModel infers vendor from the model id prefix', () => {
     expect(vendorForModel('claude-sonnet-5')).toBe('anthropic')
     expect(vendorForModel('gpt-4o-mini')).toBe('openai')
+  })
+  it('thinkingConfigFor: disables thinking for coding, adaptive+summarized for system design', () => {
+    // Sonnet 5 is thinking-capable: coding streams immediately (thinking off),
+    // system design shows visible progress (adaptive + summarized).
+    expect(thinkingConfigFor('coding', 'claude-sonnet-5')).toEqual({ thinking: { type: 'disabled' } })
+    expect(thinkingConfigFor('systemDesign', 'claude-sonnet-5')).toEqual({
+      thinking: { type: 'adaptive', display: 'summarized' },
+      effort: 'medium',
+    })
+  })
+  it('thinkingConfigFor: omits thinking/effort on models that reject them (Haiku, OpenAI)', () => {
+    // These params 400 on Haiku 4.5 and OpenAI — must send nothing.
+    expect(thinkingConfigFor('systemDesign', 'claude-haiku-4-5')).toEqual({})
+    expect(thinkingConfigFor('coding', 'gpt-4o-mini')).toEqual({})
   })
 })
