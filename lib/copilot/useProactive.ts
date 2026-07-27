@@ -76,15 +76,22 @@ function isSameOrExtension(a: string, b: string): boolean {
   return a === b || a.startsWith(b) || b.startsWith(a)
 }
 
-// SETTLE gate: a spoken question is still being spoken when it first becomes
-// question-shaped ("Tell me about a time you…" appears before "…led a hard
-// migration."). Firing immediately answers a FRAGMENT. So we wait until the latest
-// candidate question STOPS GROWING for this long — the speaker finished the thought —
-// before answering. Balances "don't cut them off" against "answer promptly".
-const SETTLE_MS = 1_200
-// A question that already ends with '?' is complete — fire after a shorter settle so
-// clearly-finished questions still feel instant.
-const SETTLE_MS_TERMINATED = 400
+// Answering a question is a race: too early = a half-spoken FRAGMENT, too late =
+// dead latency (which we do NOT want). The resolution: fire IMMEDIATELY when the
+// candidate looks COMPLETE, and only wait when it genuinely might still be forming.
+// The completion signal is free — streaming ASR (AssemblyAI/Deepgram smart-format)
+// emits TERMINAL PUNCTUATION (. ! ?) exactly when it detects end-of-utterance, i.e.
+// the speaker finished. So:
+//   - ends with . ! ? → the utterance is done → fire on the next poll, NO extra wait
+//     (the common case pays zero latency).
+//   - no terminal punctuation yet → still forming → wait this SETTLE_MS as a backstop
+//     (covers ASR configs that don't punctuate) before answering the fragment.
+const SETTLE_MS = 900
+
+// A candidate whose text ends in terminal punctuation = the speaker finished.
+function isComplete(q: string): boolean {
+  return /[.!?]["')\]]?\s*$/.test(q.trim())
+}
 
 export function useProactive(
   enabled: boolean,
@@ -123,26 +130,30 @@ export function useProactive(
         return
       }
       const now = Date.now()
-      const pending = pendingRef.current
-      // Still growing (this candidate extends the one we were tracking, or it's new)
-      // → (re)start the settle clock and WAIT. This is what stops us answering a
-      // half-spoken question.
-      if (!pending || !isSameOrExtension(pending.key, key)) {
-        pendingRef.current = { q, key, since: now }
-        return
-      }
-      // Same thought as last tick but the text changed (grew) → reset the clock.
-      if (pending.key !== key) {
-        pendingRef.current = { q, key, since: now }
-        return
-      }
-      // Unchanged since last tick — has it been stable long enough to count as
-      // "the speaker finished"? Terminated questions settle faster.
-      const terminated = /\?\s*$/.test(q)
-      const settleMs = terminated ? SETTLE_MS_TERMINATED : SETTLE_MS
-      if (now - pending.since < settleMs) return // keep waiting
 
-      // Settled → answer the COMPLETE question.
+      // FAST PATH: the candidate is COMPLETE (ends in terminal punctuation → ASR
+      // says the speaker finished). Answer NOW — no settle wait, no added latency.
+      if (isComplete(q)) {
+        askedRef.current.push(key)
+        pendingRef.current = null
+        inFlightRef.current = true
+        setLastAsked(q)
+        Promise.resolve(onQuestionRef.current(q)).finally(() => {
+          inFlightRef.current = false
+        })
+        return
+      }
+
+      // SLOW PATH: no terminal punctuation yet — the question may still be forming.
+      // Only here do we wait (a backstop for ASR that doesn't punctuate). Reset the
+      // clock whenever the text grows; fire once it's been stable for SETTLE_MS.
+      const pending = pendingRef.current
+      if (!pending || pending.key !== key) {
+        pendingRef.current = { q, key, since: now }
+        return
+      }
+      if (now - pending.since < SETTLE_MS) return // still forming, keep waiting
+
       askedRef.current.push(key)
       pendingRef.current = null
       inFlightRef.current = true
