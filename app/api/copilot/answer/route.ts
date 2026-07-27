@@ -3,6 +3,7 @@ import { currentUserId } from '@/lib/auth'
 import { logError } from '@/lib/log'
 import { modeProfile, modelForTier, vendorForModel, thinkingConfigFor, fastFallbackModel } from '@/lib/copilot/modes'
 import { streamAnswer } from '@/lib/copilot/providers'
+import { recordUsage } from '@/lib/usage'
 
 // On-demand copilot answer. Streams tokens back grounded in the transcript the
 // caller passes. Mirrors the auth-guard + input-cap + fail-soft conventions of
@@ -112,6 +113,15 @@ export async function POST(req: NextRequest) {
   // forces the smart model). Disabled for chat/behavioral latency; summarized
   // thinking only for system design.
   const posture = thinkingConfigFor(body.mode, model)
+
+  // Usage metric only (no cap): which mode/model each answer used + rough input size.
+  recordUsage('answer', userId, {
+    mode: profile.id,
+    model,
+    vendor: vendorForModel(model),
+    hasImage: !!image,
+    transcriptChars: transcript.length,
+  })
 
   try {
     const readable = streamAnswer({

@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import { currentUserId } from '@/lib/auth'
 import { logError } from '@/lib/log'
+import { recordUsage } from '@/lib/usage'
 
 // Remote code execution for COMPILED / non-browser languages (Java, C++, Go, Rust,
 // C#, Ruby, Swift, Kotlin, Scala). Python/JS/TS run in the browser WASM worker and
@@ -67,6 +68,10 @@ export async function POST(req: NextRequest) {
 
   if (!languageId) return Response.json({ error: `No remote executor for "${language}"` }, { status: 400 })
   if (!source.trim()) return Response.json({ error: 'No source to run' }, { status: 400 })
+
+  // Usage metric only (no cap): a remote code run egresses to Judge0, worth seeing
+  // per-user + per-language. Fire-and-forget, never blocks the run.
+  recordUsage('execute', userId, { language, sourceChars: source.length })
 
   try {
     const res = await fetch(

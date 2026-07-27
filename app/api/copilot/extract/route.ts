@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server'
 import { currentUserId } from '@/lib/auth'
 import { logError } from '@/lib/log'
 import { modelForTier, vendorForModel } from '@/lib/copilot/modes'
+import { recordUsage } from '@/lib/usage'
 import Anthropic from '@anthropic-ai/sdk'
 import OpenAI from 'openai'
 
@@ -134,6 +135,7 @@ export async function POST(req: NextRequest) {
 
   try {
     let raw: string | null = null
+    let visionSource = 'gemini'
 
     // Primary: Gemini Flash (fast/cheap dense-text OCR, native JSON mode). On any
     // failure fall through to the smart-tier Claude/OpenAI path below.
@@ -142,6 +144,7 @@ export async function POST(req: NextRequest) {
     } catch (e) {
       logError('api/copilot/extract/gemini', e)
       raw = null
+      visionSource = 'fallback'
     }
 
     if (raw === null) {
@@ -186,6 +189,7 @@ export async function POST(req: NextRequest) {
     const jsonMatch = raw.match(/\{[\s\S]*\}/)
     if (!jsonMatch) return Response.json({ error: 'No JSON in response' }, { status: 502 })
     const parsed = JSON.parse(jsonMatch[0]) as unknown
+    recordUsage('extract', userId, { visionSource }) // usage metric only, no cap
     return Response.json(normalizeExtract(parsed))
   } catch (e) {
     logError('api/copilot/extract', e)
