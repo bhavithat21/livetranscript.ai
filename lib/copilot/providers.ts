@@ -7,6 +7,12 @@ import { logError } from '@/lib/log'
 // Groq is OpenAI-compatible — same SDK, different base URL + key. Used for the
 // fast tier (Llama 3.3 70B) where its throughput wins TTFT.
 const GROQ_BASE_URL = 'https://api.groq.com/openai/v1'
+// Shared client options for BOTH SDKs. maxRetries: 0 — withFallbackChain already
+// walks vendors, so the SDK must NOT silently retry the SAME failing vendor 2× with
+// backoff first (that adds seconds before failover, defeating fast cross-vendor
+// recovery and leaving a blank panel meanwhile). timeout bounds a stalled request
+// (SDK default is ~10 min) so a hung upstream can't pin the invocation.
+const CLIENT_OPTS = { maxRetries: 0, timeout: 30_000 } as const
 // Two-pass: if the deep (smart-tier) answer hasn't produced a token within this
 // window, show a fast draft to mask the latency, then swap to the deep answer.
 const DRAFT_THRESHOLD_MS = 700
@@ -96,7 +102,7 @@ async function* openaiTokens(p: AnswerParams, client: OpenAI): AsyncGenerator<st
 
 // --- Anthropic ------------------------------------------------------------
 async function* anthropicTokens(p: AnswerParams): AsyncGenerator<string> {
-  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, ...CLIENT_OPTS })
   // System is an array of blocks; mark the LAST stable block cacheable so the
   // whole system+transcript prefix is cached (cache_control caches everything
   // up to and including the marked block).
@@ -149,9 +155,9 @@ function tokensFor(p: AnswerParams): AsyncGenerator<string> {
   const vendor = vendorForModel(p.model)
   if (vendor === 'anthropic') return anthropicTokens(p)
   if (vendor === 'groq') {
-    return openaiTokens(p, new OpenAI({ apiKey: process.env.GROQ_API_KEY, baseURL: GROQ_BASE_URL }))
+    return openaiTokens(p, new OpenAI({ apiKey: process.env.GROQ_API_KEY, baseURL: GROQ_BASE_URL, ...CLIENT_OPTS }))
   }
-  return openaiTokens(p, new OpenAI({ apiKey: process.env.OPENAI_API_KEY }))
+  return openaiTokens(p, new OpenAI({ apiKey: process.env.OPENAI_API_KEY, ...CLIENT_OPTS }))
 }
 
 // Cross-vendor resilience for EVERY role, not just the fast tier. If the primary

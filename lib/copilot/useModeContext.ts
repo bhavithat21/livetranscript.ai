@@ -25,6 +25,9 @@ type Persisted = { instructions: string; docs: ContextDoc[]; stories?: StoryEntr
 
 const MAX_DOCS = 20
 const MAX_INSTRUCTIONS = 4_000
+// Matches the embed route's MAX_TEXTS (100): more stories than that would get
+// fewer vectors than entries and poison retrieval with undefined embeddings.
+const MAX_STORIES = 100
 
 function keyFor(mode: string): string {
   return `lt.context.${mode}`
@@ -74,11 +77,15 @@ function load(mode: string): Persisted {
   }
 }
 
-function persist(mode: string, data: Persisted) {
+// Returns false if the write failed (e.g. localStorage quota — embeddings are
+// large). Caller warns the user their context won't survive a reload, instead of
+// silently dropping it (false confidence in a live interview).
+function persist(mode: string, data: Persisted): boolean {
   try {
     localStorage.setItem(keyFor(mode), JSON.stringify(data))
+    return true
   } catch {
-    /* storage full — kept in memory this session */
+    return false // storage full — kept in memory this session only
   }
 }
 
@@ -125,7 +132,17 @@ export function useModeContext(mode: string) {
       setSaving(true)
       try {
         if (looksLikeStoryBook(raw)) {
-          const parsed = parseStoryBook(raw)
+          // A story book only grounds answers in BEHAVIORAL mode (retrieveStories is
+          // behavioral-only). Uploaded elsewhere it'd be silent dead weight, so warn.
+          if (mode !== 'behavioral') {
+            setError('Story books are used in Behavioral mode — switch to Behavioral, then upload.')
+            return
+          }
+          // Cap to the embed route's MAX_TEXTS: it slices input to 100, so a bigger
+          // book would get FEWER vectors than stories → undefined embeddings →
+          // cosine() throws → the whole bank silently returns nothing. Cap here so
+          // every kept story has a real vector.
+          const parsed = parseStoryBook(raw).slice(0, MAX_STORIES)
           if (!parsed.length) {
             setError(`${name || 'That story book'} had no recognizable stories`)
             return
@@ -133,12 +150,15 @@ export function useModeContext(mode: string) {
           // Embed each story's SELECTOR KEY (not its full prose) so ranking matches
           // the question to the right story, per the book's own "sounds like" table.
           const vectors = await embed(parsed.map((s) => s.retrievalKey))
-          const newStories: StoryEntry[] = parsed.map((s, i) => ({
-            id: s.id,
-            title: s.title,
-            embedding: vectors[i],
-            fullText: s.fullText,
-          }))
+          // Defensive: drop any story that didn't get a valid vector back, so a
+          // short embed response can never poison retrieval with an undefined.
+          const newStories: StoryEntry[] = parsed
+            .map((s, i) => ({ id: s.id, title: s.title, embedding: vectors[i], fullText: s.fullText }))
+            .filter((s) => Array.isArray(s.embedding) && s.embedding.length > 0)
+          if (!newStories.length) {
+            setError('Could not embed the story book — try again')
+            return
+          }
           // A book replaces the prior book (re-upload = refresh), and also drops it in
           // as a doc entry so the UI shows "1 doc" + the count.
           const doc: ContextDoc = { id: crypto.randomUUID(), name: name || 'Story book', chunks: [] }
@@ -146,7 +166,9 @@ export function useModeContext(mode: string) {
           spentRef.current = new Set() // fresh book → nothing spent yet
           setStories(newStories)
           setDocs(nextDocs)
-          persist(mode, { instructions, docs: nextDocs, stories: newStories })
+          if (!persist(mode, { instructions, docs: nextDocs, stories: newStories })) {
+            setError('Story book loaded, but too large to save — it won’t survive a page reload.')
+          }
           return
         }
         const texts = chunkCorpus(raw)
@@ -155,11 +177,13 @@ export function useModeContext(mode: string) {
           return
         }
         const vectors = await embed(texts)
-        const chunks = texts.map((text, i) => ({ text, embedding: vectors[i] }))
+        const chunks = texts.map((text, i) => ({ text, embedding: vectors[i] })).filter((c) => Array.isArray(c.embedding) && c.embedding.length > 0)
         const doc: ContextDoc = { id: crypto.randomUUID(), name: name || 'Untitled', chunks }
         const next = [...docs, doc]
         setDocs(next)
-        persist(mode, { instructions, docs: next, stories })
+        if (!persist(mode, { instructions, docs: next, stories })) {
+          setError('Document loaded, but too large to save — it won’t survive a page reload.')
+        }
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Could not add document')
       } finally {

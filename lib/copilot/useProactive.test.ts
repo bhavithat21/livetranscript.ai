@@ -40,4 +40,28 @@ describe('latestQuestion', () => {
     expect(latestQuestion('')).toBeNull()
     expect(latestQuestion('Who?')).toBeNull() // under the 8-char floor
   })
+
+  // Diarization (on by default) prefixes each line with "Speaker N: ". The label
+  // must not block detection, and must not leak into the returned question.
+  describe('with speaker labels (diarization on)', () => {
+    it('detects a period-ended question behind a Speaker label', () => {
+      // The exact case that silently broke: cue pushed off the front by the label.
+      expect(latestQuestion('Speaker 2: Walk me through your resume.')).toBe('Walk me through your resume.')
+      expect(latestQuestion('Speaker 1: Tell me about a time you failed.')).toBe('Tell me about a time you failed.')
+    })
+    it('detects a ?-ended question behind a label and strips the label from the result', () => {
+      expect(latestQuestion('Speaker 3: What is your biggest weakness?')).toBe('What is your biggest weakness?')
+    })
+    it('strips label AND leading filler, keeping the interrogative cue', () => {
+      // "So," is filler → stripped; "can you" is a cue → kept (it's the question stem).
+      expect(latestQuestion('Speaker 2: So, can you design a rate limiter.')).toBe('can you design a rate limiter.')
+    })
+    it('still ignores a labeled statement', () => {
+      expect(latestQuestion('Speaker 1: I worked at Google for three years.')).toBeNull()
+    })
+    it('picks the newest labeled question across multiple speakers', () => {
+      const t = 'Speaker 1: I built the pipeline. Speaker 2: How did you handle failures.'
+      expect(latestQuestion(t)).toBe('How did you handle failures.')
+    })
+  })
 })

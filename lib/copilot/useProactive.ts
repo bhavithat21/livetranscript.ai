@@ -20,16 +20,31 @@ const CUE_RE =
 const FILLER_RE =
   /^(?:[\s,.\-–—]*\b(?:so|ok|okay|um|uh|erm|well|and|but|alright|all right|right|now|great|good|cool|yeah|yes|no|hmm|like|actually|basically|first|next|then|also|maybe|perhaps|let's|lets|let me|i guess|you know|i mean|for example)\b[\s,.:;\-–—]*)+/i
 
-// A sentence is question-shaped if it ends with '?' OR, after stripping leading
-// filler, opens with an interrogative/behavioral cue. ASR smart-format often
-// renders spoken questions with a period, so we can't rely on '?' alone.
-function looksLikeQuestion(sentence: string): boolean {
-  if (/\?\s*$/.test(sentence)) return true
-  return CUE_RE.test(sentence.replace(FILLER_RE, ''))
+// A diarized transcript prefixes each finalized line with "Speaker N: " (default
+// on for AssemblyAI/Deepgram). That label pushes the interrogative cue off the
+// START of the sentence, so CUE_RE would miss "Speaker 2: Walk me through…" — i.e.
+// auto-answer would silently sit on "Listening…" for every period-ended spoken
+// question in a real (diarized) interview. Strip the label first, everywhere the
+// sentence is tested or returned.
+const SPEAKER_RE = /^\s*Speaker\s+\d+:\s*/i
+
+function stripLabels(sentence: string): string {
+  return sentence.replace(SPEAKER_RE, '').replace(FILLER_RE, '').trim()
 }
 
-// Pull the most recent question-shaped sentence out of the transcript tail,
-// filler-trimmed (also gives the model a cleaner ask). Null if none.
+// A sentence is question-shaped if it ends with '?' OR, after stripping a speaker
+// label + leading filler, opens with an interrogative/behavioral cue. ASR
+// smart-format often renders spoken questions with a period, so we can't rely on
+// '?' alone; and '?' may itself sit after a "Speaker N:" label.
+function looksLikeQuestion(sentence: string): boolean {
+  const bare = sentence.replace(SPEAKER_RE, '')
+  if (/\?\s*$/.test(bare)) return true
+  return CUE_RE.test(bare.replace(FILLER_RE, ''))
+}
+
+// Pull the most recent question-shaped sentence out of the transcript tail, with
+// the speaker label + leading filler trimmed (a cleaner ask for the model, and no
+// "Speaker N:" leaking into the Answers feed). Null if none.
 export function latestQuestion(transcript: string): string | null {
   const sentences = transcript
     .replace(/\s+/g, ' ')
@@ -38,7 +53,7 @@ export function latestQuestion(transcript: string): string | null {
     .filter(Boolean)
   for (let i = sentences.length - 1; i >= 0; i--) {
     if (looksLikeQuestion(sentences[i]) && sentences[i].length >= 8) {
-      return sentences[i].replace(FILLER_RE, '').trim() || sentences[i]
+      return stripLabels(sentences[i]) || sentences[i]
     }
   }
   return null

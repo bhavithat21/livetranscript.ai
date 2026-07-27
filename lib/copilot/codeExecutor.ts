@@ -94,7 +94,10 @@ export async function executeTests(
       // tests block ALONE. Concatenating the solution too would duplicate the
       // function/type definitions and fail to compile on every run.
       if (canExecuteRemote(lang)) {
-        return runRemoteTests(tests, lang, Math.max(timeoutMs, 20_000))
+        // Client abort MUST exceed the server's own 20s Judge0 ceiling + round-trip,
+        // or a slow-but-successful run (public Judge0 queue near the wall limit) gets
+        // aborted client-side and mis-reported as "timed out". 30s gives real margin.
+        return runRemoteTests(tests, lang, Math.max(timeoutMs, 30_000))
       }
       return {
         passed: 0,

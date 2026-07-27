@@ -177,7 +177,10 @@ export function useAnswerFeed() {
       argsRef.current.set(id, { mode, meContext, image, instructions, transcript })
       setEntries((e) => {
         const next = [...e, { id, question, answer: '', streaming: true, retrying: false, failed: false }]
-        setCursor(next.length - 1) // jump the view to the newest (array index, not id)
+        // Only follow to the newest card if the user was ALREADY on the last one.
+        // If they've paged back to re-read an earlier answer, don't yank the view
+        // out from under them mid-sentence — the count badge signals a new answer.
+        setCursor((c) => (c >= e.length - 1 ? next.length - 1 : c))
         return next
       })
       await run(id, question, mode, meContext, image, instructions, transcript)
