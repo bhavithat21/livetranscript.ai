@@ -5,6 +5,7 @@ import { useLockMode } from '@/lib/desktop/useLockMode'
 import { useCopilot } from '@/lib/copilot/useCopilot'
 import { useScreenStream } from '@/lib/vision/useScreenStream'
 import { useModeContext } from '@/lib/copilot/useModeContext'
+import { useCandidateProfile } from '@/lib/copilot/useCandidateProfile'
 import { useProactive } from '@/lib/copilot/useProactive'
 import { useAnswerFeed } from '@/lib/copilot/useAnswerFeed'
 import { useMeContext } from '@/lib/copilot/useMeContext'
@@ -66,6 +67,7 @@ export function CopilotPanel({
   const [input, setInput] = useState('')
   const [mode, setMode] = useState<CopilotMode>('general')
   const context = useModeContext(mode) // per-mode uploaded documents + answer instructions
+  const profile = useCandidateProfile() // resume + JD: global, always-injected grounding
   const feed = useAnswerFeed()
   const me = useMeContext() // opt-in mic stream: "what I said" as AI context, never in transcript
   const [showContextEditor, setShowContextEditor] = useState(false)
@@ -112,9 +114,10 @@ export function CopilotPanel({
           : context.count > 0
             ? await context.retrieve(q)
             : null
-      // Combine what YOU said (mic context, if listening) with the matched story/
-      // chunk — grounds the answer without either appearing in the transcript.
-      const parts = [me.getMeContext() && `What I said: ${me.getMeContext()}`, retrieved].filter(Boolean)
+      // Combine the always-on candidate profile (resume + JD), what YOU said (mic
+      // context, if listening), and the matched story/chunk — all grounding the
+      // answer without any of it appearing in the transcript.
+      const parts = [profile.contextBlock(), me.getMeContext() && `What I said: ${me.getMeContext()}`, retrieved].filter(Boolean)
       const ctx = parts.length ? parts.join('\n\n') : null
       const image = screen.sharing && usesScreen(mode) ? screen.grabFrame() : null
       // Ground the auto-answer in the live transcript (what was actually said),
@@ -169,7 +172,10 @@ export function CopilotPanel({
         : context.count > 0
           ? await context.retrieve(q)
           : null
-    ask(q, mode, image, retrieved, context.instructions || null)
+    // Always-on candidate profile (resume + JD) prepended to any retrieved chunk,
+    // so every manual answer is grounded in the candidate's real background.
+    const merged = [profile.contextBlock(), retrieved].filter(Boolean).join('\n\n') || null
+    ask(q, mode, image, merged, context.instructions || null)
   }
 
   return (
@@ -351,7 +357,7 @@ export function CopilotPanel({
             </button>
           )}
         </div>
-        {showContextEditor && <ContextEditor context={context} />}
+        {showContextEditor && <ContextEditor context={context} profile={profile} />}
       </div>
 
       {/* Visible privacy indicator — the assistant only sees your screen while
@@ -456,7 +462,13 @@ export function CopilotPanel({
 // Upload documents (files or pasted text) + set answer instructions for the
 // active mode's chat. Files are read client-side, chunked + embedded on add;
 // nothing persists server-side — vectors live in this device's localStorage.
-function ContextEditor({ context }: { context: ReturnType<typeof useModeContext> }) {
+function ContextEditor({
+  context,
+  profile,
+}: {
+  context: ReturnType<typeof useModeContext>
+  profile: ReturnType<typeof useCandidateProfile>
+}) {
   const [pasteText, setPasteText] = useState('')
   const [instructionsDraft, setInstructionsDraft] = useState(context.instructions)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -487,6 +499,35 @@ function ContextEditor({ context }: { context: ReturnType<typeof useModeContext>
 
   return (
     <div className="mt-2 space-y-3">
+      {/* Resume + JD — GLOBAL, always-injected grounding (all modes). Set once. */}
+      <div>
+        <div className="flex items-center gap-2">
+          <label className="text-[11px] font-medium uppercase tracking-wide text-black/40">
+            Your background <span className="normal-case text-black/30">· grounds every mode</span>
+          </label>
+          {profile.hasProfile && (
+            <button onClick={profile.clear} className="ml-auto rounded-full px-2 py-0.5 text-[11px] text-black/40 hover:bg-black/5">
+              Clear
+            </button>
+          )}
+        </div>
+        <textarea
+          value={profile.resume}
+          onChange={(e) => profile.setResume(e.target.value)}
+          rows={3}
+          placeholder="Paste your resume — the AI grounds behavioral stories, coding language, and design domain in your real background…"
+          className="mt-1 w-full rounded-lg border border-black/15 bg-white/80 p-2 text-xs outline-none focus:border-emerald-700"
+        />
+        <textarea
+          value={profile.jd}
+          onChange={(e) => profile.setJd(e.target.value)}
+          rows={2}
+          placeholder="…and paste the job description (optional) to tune answers to the role."
+          className="mt-1.5 w-full rounded-lg border border-black/15 bg-white/80 p-2 text-xs outline-none focus:border-emerald-700"
+        />
+        {profile.savedNote && <p className="mt-1 text-[11px] text-[color:var(--stop)]">{profile.savedNote}</p>}
+      </div>
+
       <div>
         <label className="text-[11px] font-medium uppercase tracking-wide text-black/40">Instructions</label>
         <textarea

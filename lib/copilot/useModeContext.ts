@@ -1,5 +1,7 @@
 'use client'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { cosine } from './vector'
+import { mmrSelect } from './rerank'
 
 // Per-mode "context": documents (uploaded files or pasted text, chunked +
 // embedded) plus free-text instructions for HOW that mode's chat should answer.
@@ -42,18 +44,9 @@ export function chunkCorpus(raw: string): string[] {
     .slice(0, 100)
 }
 
-export function cosine(a: number[], b: number[]): number {
-  let dot = 0
-  let na = 0
-  let nb = 0
-  for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i]
-    na += a[i] * a[i]
-    nb += b[i] * b[i]
-  }
-  const denom = Math.sqrt(na) * Math.sqrt(nb)
-  return denom === 0 ? 0 : dot / denom
-}
+// cosine now lives in ./vector (shared with the server embed route + rerank without
+// an import cycle). Re-exported so existing importers of it from here keep working.
+export { cosine }
 
 async function embed(texts: string[]): Promise<number[][]> {
   const res = await fetch('/api/copilot/embed', {
@@ -219,27 +212,25 @@ export function useModeContext(mode: string) {
 
   const chunkCount = docs.reduce((n, d) => n + d.chunks.length, 0)
 
-  // Best-matching chunk across every document in this mode's context. Embeds
-  // the query, cosine-ranks all chunks, returns the top text if it clears the
-  // similarity floor (else null — the answer stays honest rather than forcing
-  // a bad match).
+  // Retrieve the most relevant context for a question. Was top-1 (one chunk); now
+  // top-k with MMR rerank so the answer gets several COMPLEMENTARY chunks instead of
+  // one (or three near-duplicates). Only chunks clearing the similarity floor are
+  // eligible, so a bad match still yields null rather than forcing irrelevant text.
   const retrieve = useCallback(
-    async (question: string, minScore = 0.2): Promise<string | null> => {
+    async (question: string, minScore = 0.2, k = 4): Promise<string | null> => {
       if (!chunkCount || !question.trim()) return null
       try {
         const [q] = await embed([question])
-        let best: StoryChunk | null = null
-        let bestScore = -1
-        for (const doc of docs) {
-          for (const c of doc.chunks) {
-            const s = cosine(q, c.embedding)
-            if (s > bestScore) {
-              bestScore = s
-              best = c
-            }
-          }
-        }
-        return best && bestScore >= minScore ? best.text : null
+        // Candidates above the relevance floor, across every doc in this mode.
+        const eligible = docs
+          .flatMap((doc) => doc.chunks)
+          .map((c) => ({ item: c.text, embedding: c.embedding, score: cosine(q, c.embedding) }))
+          .filter((c) => c.score >= minScore)
+        if (!eligible.length) return null
+        // MMR picks relevant-but-diverse chunks; join with separators so the model
+        // sees them as distinct snippets.
+        const picked = mmrSelect(q, eligible, Math.min(k, eligible.length))
+        return picked.join('\n\n— — —\n\n')
       } catch {
         return null // retrieval is best-effort; answer still runs ungrounded-but-honest
       }
