@@ -35,14 +35,20 @@ export async function POST(req: NextRequest) {
   const userId = await currentUserId()
   if (!userId) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
-  let body: { transcript?: string; questions?: { q: string; mode: string }[] }
+  let body: { transcript?: string; questions?: unknown }
   try {
     body = await req.json()
   } catch {
     return Response.json({ error: 'Invalid JSON' }, { status: 400 })
   }
-  const transcript = (body.transcript ?? '').slice(-MAX_TRANSCRIPT).trim()
-  const questions = Array.isArray(body.questions) ? body.questions.slice(0, MAX_QUESTIONS) : []
+  const transcript = (typeof body.transcript === 'string' ? body.transcript : '').slice(-MAX_TRANSCRIPT).trim()
+  // Coerce every element defensively — a malformed array (e.g. [null]) must not
+  // throw a TypeError on x.mode below; validate BEFORE mapping, like the other routes.
+  const questions = (Array.isArray(body.questions) ? body.questions : [])
+    .filter((x): x is Record<string, unknown> => !!x && typeof x === 'object')
+    .slice(0, MAX_QUESTIONS)
+    .map((x) => ({ q: String(x.q ?? '').slice(0, 2_000), mode: String(x.mode ?? 'general').slice(0, 40) }))
+    .filter((x) => x.q.trim())
   if (!transcript && !questions.length) return Response.json({ error: 'Nothing to review' }, { status: 400 })
 
   let model = modelForTier('smart')

@@ -17,13 +17,23 @@ export type LocalClassification = {
   isQuestion: boolean
 }
 
-// Strong per-mode signals. Presence of one is high-confidence for that mode.
+// STRONG per-mode signals — an unambiguous interview stem. One strong hit is
+// high-confidence and routes locally. These are phrases that essentially only appear
+// as that question type (not bare high-frequency words).
 const BEHAVIORAL_RE =
-  /\b(tell me about a time|give me an example of|describe a (?:time|situation)|a time when you|walk me through a|conflict|disagree(?:d|ment)?|failure|mistake|proud of|leadership|led a team|mentor|difficult (?:person|teammate|stakeholder)|feedback)\b/i
+  /\b(tell me about a time|give me an example of|describe a (?:time|situation)|a time when you|walk me through a time|tell me about a (?:conflict|disagreement|failure|mistake)|time you (?:disagreed|failed|led|mentored))\b/i
 const CODING_RE =
-  /\b(reverse a|sort (?:this|the|an|a )|implement (?:a |the )?(?:function|algorithm|method|class|stack|queue|hash ?map|linked list)|write (?:a )?(?:function|code|algorithm)|two sum|linked list|binary (?:tree|search)|palindrome|fibonacci|recursion|time complexity|big o|leetcode|debug this|refactor this|code this)\b/i
+  /\b(reverse a|implement (?:a |the )?(?:function|algorithm|method|class|stack|queue|hash ?map|linked list|binary)|write (?:a )?(?:function|code|algorithm)|two sum|linked list|binary (?:tree|search)|palindrome|fibonacci|time complexity|big o|leetcode|debug this|refactor this|code this)\b/i
 const SYSTEM_DESIGN_RE =
-  /\b(design (?:a|an|the)|system design|architect(?:ure)?|scale (?:this |it |them )?(?:to|up|out|a\b)|scalab|throughput|load balanc|shard|partition|rate limiter|url shortener|news feed|distributed|microservice|high availability|caching layer)\b/i
+  /\b(system design|architect(?:ure)?|design (?:a|an|the) (?:system|service|api|pipeline|database|scalable|distributed)|scal(?:e|ing)\b[^.?]*\b(?:to|billion|million|requests|users|traffic|qps)|scalab|throughput|load balanc|shard|url shortener|news feed|microservice|high availability|caching layer)\b/i
+
+// WEAK signals — bare high-frequency words (conflict, feedback, sort the, design the)
+// that OFTEN mean something else ("resolve a git merge conflict", "design the perfect
+// team culture"). A weak-only match must NOT be treated as confident — it escalates
+// to the LLM classifier instead of guessing. Presence here is used only to DETECT
+// ambiguity (so we don't confidently route on a weak token alone).
+const WEAK_RE =
+  /\b(conflict|feedback|failure|mistake|proud of|leadership|mentor|sort (?:this|the|a|an )|design (?:a|an|the)|scale (?:this|it|them|up|out))\b/i
 // Freshness signals → the answer needs LIVE web facts.
 const WEB_RE =
   /\b(latest|newest|current(?:ly)?|as of (?:now|today|this)|right now|this (?:year|week|month)|recent(?:ly)?|202[4-9]|today'?s|up to date|most recent|just (?:released|announced))\b/i
@@ -38,24 +48,33 @@ export function localClassify(questionRaw: string): LocalClassification | null {
   if (!q) return null
 
   const isQuestion = QUESTION_RE.test(q)
-  const needsWeb = WEB_RE.test(q)
 
-  // Count strong mode signals. Exactly ONE strong signal = confident; zero or a tie
-  // between modes = not confident → escalate to the LLM classifier (return null).
+  // Count STRONG mode signals only. Exactly one = confident local route.
   const hits: CopilotMode[] = []
   if (BEHAVIORAL_RE.test(q)) hits.push('behavioral')
   if (CODING_RE.test(q)) hits.push('coding')
   if (SYSTEM_DESIGN_RE.test(q)) hits.push('systemDesign')
 
+  // >1 strong signal (e.g. a genuinely mixed question) → ambiguous, let the LLM decide.
+  if (hits.length > 1) return null
+
   if (hits.length === 1) {
-    return { mode: hits[0], needsWeb, isQuestion }
+    const mode = hits[0]
+    // needsWeb only matters for fact-lookup modes. A behavioral/design/coding answer
+    // shouldn't trigger a web search (or get a "prefer live facts" block) just because
+    // it contains "recently" — that's noise + a needless ~12s hop.
+    const needsWeb = mode === 'general' && WEB_RE.test(q)
+    return { mode, needsWeb, isQuestion }
   }
-  // A freshness/general factual question with no technical-mode signal is confidently
-  // "general" (it's the fallback bucket) — handle it locally too.
-  if (hits.length === 0 && isQuestion) {
-    return { mode: 'general', needsWeb, isQuestion }
-  }
-  // Multiple competing signals ("design a function to..." could be coding or design)
-  // → ambiguous, let the LLM decide.
+
+  // No strong signal. If a WEAK token is present ("conflict", "design the", "sort the"),
+  // it's genuinely ambiguous — a git-conflict question, a team-culture question — so
+  // ESCALATE to the LLM rather than confidently mis-routing (the file's core invariant).
+  if (WEAK_RE.test(q)) return null
+
+  // No mode signal at all → it's a plain factual/general question. Route locally to
+  // general, and honor a freshness cue there (that's exactly where web facts help).
+  if (isQuestion) return { mode: 'general', needsWeb: WEB_RE.test(q), isQuestion }
+
   return null
 }

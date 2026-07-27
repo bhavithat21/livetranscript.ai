@@ -13,11 +13,14 @@
   /* Liquid-glass tokens (chrome only — nav, dock, cards) */
   --glass-bg: rgba(255, 255, 255, 0.55);
   --glass-border: rgba(255, 255, 255, 0.7);
-  /* The Ask panel holds READING text and sits over the page, so it needs a
-     brighter, warmer scrim than chrome glass — matched to the transcript's
-     --reader surface so the panel never reads darker than the transcript, while a
-     touch of translucency still lets the background gradient show through. */
-  --panel-bg: rgba(255, 253, 249, 0.88);
+  /* The Ask panel holds READING text and sits over the page. More translucent so
+     the transcript/background reads through it (user wants to see behind it), but
+     the blur keeps foreground text legible. ONE surface for the whole panel — inner
+     sections must NOT stack another tinted layer on top (that's the "two levels of
+     background" / "darker than transcript" bug). Use --panel-line for section
+     dividers instead of a background fill. */
+  --panel-bg: rgba(255, 253, 249, 0.62);
+  --panel-line: rgba(20, 21, 26, 0.08);
   --glass-shadow: 0 8px 32px rgba(20, 21, 26, 0.12);
   --glass-blur: 20px;
 
@@ -251,13 +254,18 @@ html.lt-desktop .overscroll-contain * {
     box-shadow: var(--glass-shadow);
   }
 
-  /* The Ask panel: a bright warm reading surface (matches the transcript) with a
-     light backdrop blur so the page gradient still refracts through — see-through,
-     but never darker than the transcript. Overrides .glass's dim 55% scrim. */
+  /* The Ask panel: ONE translucent surface. Stronger blur so foreground text stays
+     crisp while the background reads through the transparency. Inner sections use
+     borders (--panel-line), never a second background fill, so there's a single,
+     even backdrop — no "two levels" and never darker than the transcript. */
   .copilot-panel {
     background: var(--panel-bg);
-    -webkit-backdrop-filter: blur(16px) saturate(140%);
-    backdrop-filter: blur(16px) saturate(140%);
+    -webkit-backdrop-filter: blur(24px) saturate(150%);
+    backdrop-filter: blur(24px) saturate(150%);
+  }
+  /* Section dividers inside the panel: a hairline, not a tinted block. */
+  .panel-section {
+    border-bottom: 1px solid var(--panel-line);
   }
 
   /* Solid, warm reading surface for transcript payloads — never blurred/glassy,

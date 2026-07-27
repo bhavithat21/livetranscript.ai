@@ -30,9 +30,22 @@ describe('localClassify', () => {
     expect(localClassify('Reverse a linked list.')?.needsWeb).toBe(false)
   })
 
-  it('escalates AMBIGUOUS questions to the LLM (returns null) rather than guessing', () => {
-    // "design a function" trips both coding and systemDesign signals → don't guess.
-    expect(localClassify('Design a function to sort this array.')).toBeNull()
+  it('escalates AMBIGUOUS / weak-signal questions to the LLM (returns null) rather than guessing', () => {
+    // Bare "conflict" is a WEAK token — a git question, not necessarily behavioral.
+    expect(localClassify('How do you resolve a merge conflict in git?')).toBeNull()
+    // "give feedback on a pull request" — weak "feedback", actually a code-review q.
+    expect(localClassify('How do you give feedback on a pull request?')).toBeNull()
+    // "design the perfect team culture" — weak "design the", not system design.
+    expect(localClassify('How would you design the perfect team culture?')).toBeNull()
+    // "sort the workload" — weak "sort the", a staffing question, not an algorithm.
+    expect(localClassify('How do you sort the workload across your team?')).toBeNull()
+  })
+
+  it('does NOT flag needsWeb for non-general modes (no needless web hop on behavioral)', () => {
+    const r = localClassify('Tell me about a time you recently resolved a hard bug.')
+    // Strong behavioral stem wins; "recently" must not drag in a web search.
+    expect(r?.mode).toBe('behavioral')
+    expect(r?.needsWeb).toBe(false)
   })
 
   it('returns null on empty input', () => {

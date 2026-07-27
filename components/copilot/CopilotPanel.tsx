@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { Check, Eye, EyeOff, Lock, Monitor, MonitorOff, MoreHorizontal, Play, Send, Sparkles, X } from 'lucide-react'
 import { useLockMode } from '@/lib/desktop/useLockMode'
+import { useAppIdentity } from '@/lib/desktop/useAppIdentity'
 import { useCopilot } from '@/lib/copilot/useCopilot'
 import { useScreenStream } from '@/lib/vision/useScreenStream'
 import { useModeContext } from '@/lib/copilot/useModeContext'
@@ -82,6 +83,7 @@ export function CopilotPanel({
   // Post-interview review: generated on demand from the session's Q&A + transcript.
   const [review, setReview] = useState<{ loading: boolean; text: string | null; error: string | null }>({ loading: false, text: null, error: null })
   const lockMode = useLockMode() // desktop: click-through overlay (unlock via hotkey/tray)
+  const identity = useAppIdentity() // desktop: neutral window-title disguise picker
   // The turn index the orchestrator's auto test result belongs to. Pinned when
   // the result is produced so a later coding-mode chat answer (a new last turn)
   // doesn't inherit the stale panel. Derived during render (React's store-prev
@@ -250,20 +252,22 @@ export function CopilotPanel({
             onClick={() => setAuto((v) => !v)}
             data-active={auto}
             title={auto ? 'Auto-answer is ON — questions heard are answered automatically' : 'Auto-answer questions from the meeting'}
-            className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium text-black/60 transition-colors hover:bg-black/5 data-[active=true]:bg-emerald-700/10 data-[active=true]:text-emerald-800"
+            className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium text-ink/70 transition-[background-color,color] duration-100 hover:bg-black/[0.06] data-[active=true]:bg-emerald-700/15 data-[active=true]:text-emerald-800"
           >
             <span className={auto ? 'live-dot' : 'hidden'} aria-hidden />
             {auto ? 'Auto on' : 'Auto'}
           </button>
-          {/* 2 — Stealth: the safety toggle you hit when sharing screen. */}
+          {/* 2 — Stealth: the safety toggle you hit when sharing screen. Solid ink
+              contrast in both states so the icon is never faint on the translucent
+              panel (was text-black/50 → near-invisible; active white-on-white). */}
           <button
             onClick={() => setStealth((v) => !v)}
             data-active={stealth}
             aria-label="Stealth reading mode"
             title={stealth ? 'Stealth on — dim, monochrome, motionless. Tap to return to normal.' : 'Stealth reading mode — dim + motionless for a shared screen'}
-            className="flex h-9 w-9 items-center justify-center rounded-full text-black/50 transition-colors hover:bg-black/5 data-[active=true]:bg-black/70 data-[active=true]:text-white"
+            className="flex h-9 w-9 items-center justify-center rounded-full text-ink/70 transition-[background-color,color] duration-100 hover:bg-black/[0.06] data-[active=true]:bg-ink data-[active=true]:text-white"
           >
-            {stealth ? <EyeOff size={15} /> : <Eye size={15} />}
+            {stealth ? <EyeOff size={16} strokeWidth={2} /> : <Eye size={16} strokeWidth={2} />}
           </button>
           {/* 3 — overflow: Mic, Screen, Lock, Clear. A dot marks any active one. */}
           <button
@@ -271,11 +275,11 @@ export function CopilotPanel({
             data-active={moreOpen}
             aria-label="More controls"
             aria-expanded={moreOpen}
-            className="relative flex h-9 w-9 items-center justify-center rounded-full text-black/50 transition-colors hover:bg-black/5 data-[active=true]:bg-black/10"
+            className="relative flex h-9 w-9 items-center justify-center rounded-full text-ink/70 transition-[background-color,color] duration-100 hover:bg-black/[0.06] data-[active=true]:bg-black/10"
           >
-            <MoreHorizontal size={16} />
+            <MoreHorizontal size={18} strokeWidth={2} />
             {(me.listening || screen.sharing) && !moreOpen && (
-              <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-emerald-700" aria-hidden />
+              <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-emerald-700 ring-1 ring-white" aria-hidden />
             )}
           </button>
           {/* Close — always reachable. */}
@@ -294,7 +298,9 @@ export function CopilotPanel({
           <>
             {/* click-away scrim */}
             <button className="fixed inset-0 z-20 cursor-default" aria-hidden tabIndex={-1} onClick={() => setMoreOpen(false)} />
-            <div className="absolute right-3 top-full z-30 mt-1 w-52 overflow-hidden rounded-2xl border border-black/10 bg-[color:var(--panel-bg)] p-1 shadow-lg backdrop-blur-md">
+            {/* Solid surface (NOT the translucent --panel-bg) so the menu + its
+                icons read cleanly over whatever's behind the panel. */}
+            <div className="absolute right-3 top-full z-30 mt-1 w-52 overflow-hidden rounded-2xl border border-black/10 bg-white p-1 shadow-xl">
               <SheetItem
                 active={me.listening}
                 icon={me.listening ? <Mic size={15} /> : <MicOff size={15} />}
@@ -322,6 +328,27 @@ export function CopilotPanel({
                   label="Clear this chat"
                   onClick={() => { clear(); setMoreOpen(false) }}
                 />
+              )}
+              {/* Disguise (desktop): neutral WINDOW TITLE so the app doesn't read as
+                  "LiveTranscript" on a shared screen. Honest scope note below. */}
+              {identity.available && (
+                <div className="mt-1 border-t border-black/10 px-3 py-2">
+                  <label className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-black/45">
+                    <EyeOff size={13} /> Disguise window as
+                  </label>
+                  <select
+                    value={identity.current}
+                    onChange={(e) => identity.setIdentity(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-black/15 bg-white px-2 py-1.5 text-xs text-ink outline-none focus:border-emerald-700"
+                  >
+                    {identity.presets.map((p) => (
+                      <option key={p.id} value={p.id}>{p.label}</option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-[10px] leading-tight text-black/40">
+                    Renames the window title only. The app name + icon are set when the app is built.
+                  </p>
+                </div>
               )}
             </div>
           </>
@@ -366,7 +393,7 @@ export function CopilotPanel({
       {/* Context — upload documents + set instructions for how THIS mode's chat
           should answer. Separate per mode (coding/system design/behavioral/general
           each keep their own); chunked, embedded, and stored on this device. */}
-      <div className="border-b border-black/10 bg-black/[0.02] px-4 py-2">
+      <div className="panel-section px-4 py-2">
         <div className="flex items-center gap-2 text-xs">
           <span className="text-black/55">
             {context.storyCount > 0
