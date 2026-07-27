@@ -637,8 +637,9 @@ function Meeting({ roomId }: { roomId: string }) {
 
       {/* Bottom-center control dock: follow-along, source, mic mute, start/stop.
           Wraps + caps width so it never overflows a phone; rounded-3xl so a
-          wrapped multi-row dock still looks intentional. */}
-      <div className="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex justify-center sm:right-[var(--ask-w,0px)] px-3">
+          wrapped multi-row dock still looks intentional.
+          Hidden in Reader mode — reading surface only, no chrome. */}
+      <div className={`${reader ? 'hidden' : 'flex'} pointer-events-none fixed inset-x-0 bottom-6 z-40 justify-center sm:right-[var(--ask-w,0px)] px-3`}>
         <div className="glass pointer-events-auto flex max-w-[calc(100vw-1.5rem)] flex-wrap items-center justify-center gap-2 rounded-3xl px-4 py-2.5 sm:gap-3">
           {/* Follow along — repeat the latest line aloud, guided word-by-word.
               Available to everyone (a listener repeating the speaker is the point). */}
