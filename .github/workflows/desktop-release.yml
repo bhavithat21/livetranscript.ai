@@ -65,18 +65,14 @@ jobs:
           # Updater signing (required for auto-update). Set these in repo secrets.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # --- macOS code signing + notarization (OPTIONAL) ---
-          # Gated on the cert secret being present. Beta has no Apple cert, so these
-          # resolve to empty and tauri-action produces an UNSIGNED mac build. Passing
-          # an empty APPLE_CERTIFICATE (as the old unconditional form did) makes
-          # tauri-action attempt `security import` on nothing and the build fails —
-          # hence the `!= '' && ... || ''` guard on every Apple var.
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_CERTIFICATE || '' }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_SIGNING_IDENTITY || '' }}
-          APPLE_ID: ${{ secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_ID || '' }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_PASSWORD || '' }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_TEAM_ID || '' }}
+          # --- macOS code signing + notarization ---
+          # Intentionally OMITTED for the beta (no Apple Developer cert). Even an
+          # EMPTY APPLE_CERTIFICATE env var makes tauri-action run `security import`
+          # on empty data and fail ("SecKeychainItemImport: parameters not valid"),
+          # so the vars must be absent entirely, not empty — GitHub Actions can't
+          # conditionally omit an env key inline. Result: an UNSIGNED mac build
+          # (first-launch right-click→Open). Add the APPLE_* vars back here once an
+          # Apple Developer ID cert is available.
         with:
           projectPath: .
           # @tauri-apps/cli isn't a project dep; npx fetches it on-demand in CI so
