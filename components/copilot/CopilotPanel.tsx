@@ -6,6 +6,7 @@ import { useCopilot } from '@/lib/copilot/useCopilot'
 import { useScreenStream } from '@/lib/vision/useScreenStream'
 import { useModeContext } from '@/lib/copilot/useModeContext'
 import { useCandidateProfile } from '@/lib/copilot/useCandidateProfile'
+import { useOrchestrationRouter } from '@/lib/copilot/useOrchestrationRouter'
 import { useProactive } from '@/lib/copilot/useProactive'
 import { useAnswerFeed } from '@/lib/copilot/useAnswerFeed'
 import { useMeContext } from '@/lib/copilot/useMeContext'
@@ -68,6 +69,7 @@ export function CopilotPanel({
   const [mode, setMode] = useState<CopilotMode>('general')
   const context = useModeContext(mode) // per-mode uploaded documents + answer instructions
   const profile = useCandidateProfile() // resume + JD: global, always-injected grounding
+  const router = useOrchestrationRouter() // auto mode-routing + live web search for a question
   const feed = useAnswerFeed()
   const me = useMeContext() // opt-in mic stream: "what I said" as AI context, never in transcript
   const [showContextEditor, setShowContextEditor] = useState(false)
@@ -104,25 +106,42 @@ export function CopilotPanel({
     // Return the promise so useProactive's in-flight guard holds until this
     // answer finishes streaming (no duplicate answers as the ASR tail revises).
     return (async () => {
-      // Behavioral + an uploaded story book → pick the 2 best UNSPENT stories for
-      // this question (spent-once per round). Otherwise fall back to per-chunk RAG.
+      // ORCHESTRATOR ROUTING: classify the heard question → which mode + does it need
+      // live web facts. This auto-switches coding↔behavioral↔design mid-round instead
+      // of relying on the manual chip. Fail-soft: null classification keeps the
+      // current mode. Skip clearly-not-a-question chatter the regex detector let by.
+      const routed = await router.route(q)
+      if (routed.classification && !routed.classification.isQuestion) return
+      const answerMode: CopilotMode = routed.classification?.mode ?? mode
+      // Follow the routed mode in the UI (and make the NEXT turn's context match it).
+      if (answerMode !== mode) setMode(answerMode)
+
+      // Per-mode doc/story retrieval only when the mode ISN'T switching this turn —
+      // `context` is keyed to the current mode, so on a switch it holds the wrong
+      // mode's data; we ground on profile + transcript + web instead, and the
+      // switched context applies from the next turn.
+      const sameMode = answerMode === mode
       const retrieved =
-        mode === 'behavioral' && context.storyCount > 0
+        sameMode && answerMode === 'behavioral' && context.storyCount > 0
           ? await context.retrieveStories(q, 2).then((ss) =>
               ss.length ? ss.map((s) => `STORY — ${s.title}\n${s.fullText}`).join('\n\n---\n\n') : null,
             )
-          : context.count > 0
+          : sameMode && context.count > 0
             ? await context.retrieve(q)
             : null
-      // Combine the always-on candidate profile (resume + JD), what YOU said (mic
-      // context, if listening), and the matched story/chunk — all grounding the
-      // answer without any of it appearing in the transcript.
-      const parts = [profile.contextBlock(), me.getMeContext() && `What I said: ${me.getMeContext()}`, retrieved].filter(Boolean)
+      // Combine live WEB facts (if the question needed them), the always-on candidate
+      // profile (resume + JD), what YOU said (mic), and the matched story/chunk — all
+      // grounding the answer without any of it appearing in the transcript.
+      const parts = [
+        routed.webContext && `LIVE WEB RESULTS (current facts — prefer these for anything time-sensitive):\n${routed.webContext}`,
+        profile.contextBlock(),
+        me.getMeContext() && `What I said: ${me.getMeContext()}`,
+        retrieved,
+      ].filter(Boolean)
       const ctx = parts.length ? parts.join('\n\n') : null
-      const image = screen.sharing && usesScreen(mode) ? screen.grabFrame() : null
-      // Ground the auto-answer in the live transcript (what was actually said),
-      // like the manual chat does — not just the bare question.
-      await feed.answer(q, mode, ctx, image, context.instructions || null, getTranscript())
+      const image = screen.sharing && usesScreen(answerMode) ? screen.grabFrame() : null
+      // Answer in the ROUTED mode. Ground in the live transcript like manual chat does.
+      await feed.answer(q, answerMode, ctx, image, context.instructions || null, getTranscript())
     })()
   })
 
