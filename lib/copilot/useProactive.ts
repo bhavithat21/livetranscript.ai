@@ -44,7 +44,10 @@ export function latestQuestion(transcript: string): string | null {
   return null
 }
 
-const DEBOUNCE_MS = 1500
+// Poll fast so a heard question turns into an answer with minimal lag. The
+// in-flight guard + prefix-dedupe below keep this from stacking duplicate calls,
+// so a short interval is safe (was 1500ms, which added up to 1.5s of dead wait).
+const DEBOUNCE_MS = 600
 
 // Normalize for dedupe: lowercase, collapse whitespace, drop trailing punctuation
 // so "reverse a linked list" and "Reverse a linked list?" are one question.

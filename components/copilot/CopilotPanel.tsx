@@ -93,7 +93,9 @@ export function CopilotPanel({
       const parts = [me.getMeContext() && `What I said: ${me.getMeContext()}`, retrieved].filter(Boolean)
       const ctx = parts.length ? parts.join('\n\n') : null
       const image = screen.sharing ? screen.grabFrame() : null
-      await feed.answer(q, mode, ctx, image, context.instructions || null)
+      // Ground the auto-answer in the live transcript (what was actually said),
+      // like the manual chat does — not just the bare question.
+      await feed.answer(q, mode, ctx, image, context.instructions || null, getTranscript())
     })()
   })
 

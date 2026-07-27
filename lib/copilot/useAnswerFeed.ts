@@ -35,7 +35,7 @@ export function useAnswerFeed() {
   const [cursor, setCursor] = useState(0) // which entry the feed view is showing
   const idRef = useRef(0)
   // Remember each entry's request args so Retry can re-run the exact same ask.
-  const argsRef = useRef<Map<number, { mode: string; meContext: string | null; image: string | null; instructions?: string | null }>>(
+  const argsRef = useRef<Map<number, { mode: string; meContext: string | null; image: string | null; instructions?: string | null; transcript?: string | null }>>(
     new Map(),
   )
 
@@ -50,6 +50,7 @@ export function useAnswerFeed() {
       meContext: string | null,
       image: string | null,
       instructions?: string | null,
+      transcript?: string | null,
     ): Promise<boolean> => {
       const ctrl = new AbortController()
       let watchdog: ReturnType<typeof setTimeout> | undefined
@@ -66,7 +67,9 @@ export function useAnswerFeed() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             question,
-            transcript: '', // the question itself carries the ask; context below
+            // Ground the auto-answer in what was actually said (server caps + tails
+            // it). Was '' — proactive answers were ungrounded, hurting quality.
+            transcript: transcript ?? '',
             mode,
             image: image ?? undefined,
             context: meContext ?? undefined,
@@ -107,6 +110,7 @@ export function useAnswerFeed() {
       meContext: string | null,
       image: string | null,
       instructions?: string | null,
+      transcript?: string | null,
     ) => {
       for (let i = 0; i <= MAX_AUTO_RETRIES; i++) {
         if (i > 0) {
@@ -114,7 +118,7 @@ export function useAnswerFeed() {
           setEntries((e) => e.map((x) => (x.id === id ? { ...x, retrying: true, streaming: true } : x)))
           await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS[i - 1] ?? 2500))
         }
-        const ok = await attempt(id, question, mode, meContext, image, instructions)
+        const ok = await attempt(id, question, mode, meContext, image, instructions, transcript)
         if (ok) {
           setEntries((e) => e.map((x) => (x.id === id ? { ...x, streaming: false, retrying: false, failed: false } : x)))
           return
@@ -134,15 +138,16 @@ export function useAnswerFeed() {
       meContext: string | null,
       image: string | null,
       instructions?: string | null,
+      transcript?: string | null,
     ) => {
       const id = ++idRef.current
-      argsRef.current.set(id, { mode, meContext, image, instructions })
+      argsRef.current.set(id, { mode, meContext, image, instructions, transcript })
       setEntries((e) => {
         const next = [...e, { id, question, answer: '', streaming: true, retrying: false, failed: false }]
         setCursor(next.length - 1) // jump the view to the newest (array index, not id)
         return next
       })
-      await run(id, question, mode, meContext, image, instructions)
+      await run(id, question, mode, meContext, image, instructions, transcript)
     },
     [run],
   )
@@ -154,7 +159,7 @@ export function useAnswerFeed() {
       const args = argsRef.current.get(id)
       if (!entry || !args) return
       setEntries((e) => e.map((x) => (x.id === id ? { ...x, answer: '', streaming: true, retrying: false, failed: false } : x)))
-      void run(id, entry.question, args.mode, args.meContext, args.image, args.instructions)
+      void run(id, entry.question, args.mode, args.meContext, args.image, args.instructions, args.transcript)
     },
     [entries, run],
   )
