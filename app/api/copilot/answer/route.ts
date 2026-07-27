@@ -4,6 +4,7 @@ import { logError } from '@/lib/log'
 import { modeProfile, modelForTier, vendorForModel, thinkingConfigFor, fastFallbackModel } from '@/lib/copilot/modes'
 import { streamAnswer } from '@/lib/copilot/providers'
 import { recordUsage } from '@/lib/usage'
+import { costDims } from '@/lib/copilot/pricing'
 
 // On-demand copilot answer. Streams tokens back grounded in the transcript the
 // caller passes. Mirrors the auth-guard + input-cap + fail-soft conventions of
@@ -114,13 +115,16 @@ export async function POST(req: NextRequest) {
   // thinking only for system design.
   const posture = thinkingConfigFor(body.mode, model)
 
-  // Usage metric only (no cap): which mode/model each answer used + rough input size.
+  // Usage + COST metric (no cap): which mode/model each answer used, and an estimated
+  // $ cost from the input size we know here (transcript + question + context + history).
+  // Sum `est_cost_usd` in PostHog for a spend view. Output cost is approximated inside
+  // estimateCostUsd (the answer streams, so exact output length isn't known at emit).
+  const inputChars = transcript.length + question.length + (context?.length ?? 0) + history.reduce((n, h) => n + h.content.length, 0)
   recordUsage('answer', userId, {
     mode: profile.id,
     model,
-    vendor: vendorForModel(model),
     hasImage: !!image,
-    transcriptChars: transcript.length,
+    ...costDims(model, inputChars),
   })
 
   try {

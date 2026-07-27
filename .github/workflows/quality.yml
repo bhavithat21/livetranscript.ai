@@ -1,0 +1,62 @@
+name: Quality
+
+# Catch correctness AND answer-quality regressions on every push/PR that touches the
+# copilot logic or prompts — the same gate discipline code already has, extended to
+# eval quality. Prompt changes (lib/copilot/modes.ts) are the highest-risk edits and
+# were previously ungated; this makes a quality regression fail like a type error does.
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'lib/**'
+      - 'app/**'
+      - 'components/**'
+      - 'evals/**'
+      - 'package.json'
+      - '.github/workflows/quality.yml'
+  pull_request:
+    paths:
+      - 'lib/**'
+      - 'app/**'
+      - 'components/**'
+      - 'evals/**'
+  workflow_dispatch:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # 1. Types + unit suite — the existing code gate.
+      - name: Type check
+        run: pnpm exec tsc --noEmit
+      - name: Unit tests
+        run: pnpm exec vitest run
+
+      # 2. Question-detection eval — PURE LOGIC, no API key. Hard regression gate:
+      #    the eval itself fails if F1 drops below its floor, failing the job.
+      - name: Detection eval (F1 gate)
+        run: pnpm run eval:detection
+
+      # 3. Key-dependent evals (coding pass@1, behavioral voice). These SELF-SKIP
+      #    when no provider key is present, so they never break CI on a fork/PR
+      #    without secrets — but WHEN secrets exist (push to master) they run and a
+      #    quality regression fails the job. Non-blocking on absence, blocking on
+      #    presence-and-fail.
+      - name: Answer-quality evals (run if keys present)
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          pnpm run eval:coding
+          pnpm run eval:voice

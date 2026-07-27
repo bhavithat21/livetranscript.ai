@@ -166,26 +166,47 @@ function tokensFor(p: AnswerParams): AsyncGenerator<string> {
 // always-reachable backstop — until one starts streaming. So a whole-vendor outage
 // (Groq OR Anthropic OR OpenAI down) still yields an answer.
 //
-// Once tokens have STARTED we can't switch vendors mid-stream (the user may already
-// be reading), so a late failure re-throws and surfaces the "please retry" note —
-// and the client's watchdog + auto-retry (useAnswerFeed/useCopilot) covers that.
+// A short COMMIT BUFFER before painting: we hold the first COMMIT_CHARS of a
+// candidate's output before yielding anything. A failure while still buffering means
+// NOTHING was shown yet, so we can silently fail over to the next vendor — this
+// extends cross-vendor recovery past the very first token into the opening moments
+// of the stream (the common "vendor dies after a few tokens → truncated garbage"
+// case). At the fast tier's hundreds of tok/s the buffer fills in tens of ms
+// (imperceptible). Once flushed (user is reading), a later failure re-throws and the
+// client's watchdog + auto-retry take over — we never rewrite text already on screen.
+const COMMIT_CHARS = 64
+
 async function* withFallbackChain(p: AnswerParams): AsyncGenerator<string> {
   const candidates = [p.model, ...fallbackChain(p.model)]
   for (let i = 0; i < candidates.length; i++) {
     const model = candidates[i]
     const isLast = i === candidates.length - 1
-    let started = false
+    let committed = false // have we painted anything yet?
+    let buffer = ''
     try {
       for await (const t of tokensFor({ ...p, model })) {
-        started = true
-        yield t
+        if (committed) {
+          yield t
+          continue
+        }
+        buffer += t
+        // Once the buffer clears the commit threshold, flush it and start streaming.
+        if (buffer.length >= COMMIT_CHARS) {
+          committed = true
+          yield buffer
+          buffer = ''
+        }
       }
-      return // finished cleanly
+      // Stream ended cleanly. If it was shorter than the buffer, flush the remainder.
+      if (!committed && buffer) yield buffer
+      return
     } catch (e) {
-      // Mid-stream failure, or the last candidate failed → propagate so toReadable
-      // notes it and the client retries. Otherwise log and try the next vendor.
-      if (started || isLast) throw e
+      // If we already committed output, we can't switch vendors mid-read → propagate
+      // (toReadable notes it, client auto-retries). If we FAILED BEFORE committing —
+      // or this is the last candidate — otherwise fail over to the next vendor.
+      if (committed || isLast) throw e
       logError(`copilot/providers/fallback:${vendorForModel(model)}`, e)
+      // fall through to the next candidate (buffer discarded — nothing was shown)
     }
   }
 }
