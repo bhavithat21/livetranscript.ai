@@ -28,6 +28,7 @@ export function TranscriptView({
   fill = false,
   overrides,
   scale = 1,
+  scrollSpeed = 0,
 }: {
   segments: Segment[]
   theme: 'light' | 'dark'
@@ -48,18 +49,53 @@ export function TranscriptView({
   // Reader text-size multiplier (from useTextScale). 1 = default; scales the body
   // line font-size so people can enlarge/shrink captions for comfort.
   scale?: number
+  // Paced auto-scroll speed in px/sec. 0 = OFF (default → jump-follow the live edge,
+  // the original behavior). >0 = a gentle teleprompter creep at that rate, so the
+  // reader can consume hands-free at a chosen pace instead of snapping to newest.
+  scrollSpeed?: number
 }) {
   const scrollRef = useRef<HTMLDivElement>(null)
-  // Only follow the live edge when the reader is already near the bottom, so
-  // scrolling up to re-read isn't yanked back down. Instant (not smooth) so the
-  // ~10 updates/sec during speech don't stack competing animations = the jank.
+  // JUMP-FOLLOW (default, scrollSpeed=0): snap to the live edge as speech arrives,
+  // but only when already near the bottom, so scrolling up to re-read isn't yanked
+  // back. Instant (not smooth) so ~10 updates/sec don't stack competing animations.
   useEffect(() => {
-    if (!autoScroll) return
+    if (!autoScroll || scrollSpeed > 0) return
     const el = scrollRef.current
     if (!el) return
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120
     if (nearBottom) el.scrollTop = el.scrollHeight
-  }, [segments, autoScroll])
+  }, [segments, autoScroll, scrollSpeed])
+
+  // PACED CREEP (scrollSpeed>0): a teleprompter-style scroll at the chosen px/sec so
+  // the reader consumes hands-free at their pace. Won't scroll past the last line;
+  // a manual scroll-up pauses the creep briefly (never fights the reader). If new
+  // text pushes content far below the viewport it still catches up (never lags out).
+  useEffect(() => {
+    if (!autoScroll || scrollSpeed <= 0) return
+    const el = scrollRef.current
+    if (!el) return
+    if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return
+    let raf = 0
+    let last = 0
+    let pausedUntil = 0
+    const onManual = () => { pausedUntil = performance.now() + 2000 } // gesture → pause 2s
+    el.addEventListener('wheel', onManual, { passive: true })
+    el.addEventListener('touchstart', onManual, { passive: true })
+    const step = (t: number) => {
+      const atEnd = el.scrollHeight - el.scrollTop - el.clientHeight <= 1
+      if (last && t >= pausedUntil && !atEnd) {
+        el.scrollTop += (scrollSpeed * (t - last)) / 1000
+      }
+      last = t
+      raf = requestAnimationFrame(step)
+    }
+    raf = requestAnimationFrame(step)
+    return () => {
+      cancelAnimationFrame(raf)
+      el.removeEventListener('wheel', onManual)
+      el.removeEventListener('touchstart', onManual)
+    }
+  }, [autoScroll, scrollSpeed])
 
   // Color by SENDER identity (consistent across all clients), not the racy wire
   // slot. MUST run before any early return — Rules of Hooks: an early return that

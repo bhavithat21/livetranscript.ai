@@ -1,7 +1,7 @@
 'use client'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
-import { ArrowLeft, BookOpen, Check, Copy, Mic, MicOff, Sparkles, Users } from 'lucide-react'
+import { ArrowLeft, BookOpen, Check, ChevronDown, ChevronUp, Copy, Mic, MicOff, Sparkles, Users } from 'lucide-react'
 import { useMicStream, type AudioSource } from '@/lib/audio/useMicStream'
 import { useNativeCapture } from '@/lib/audio/useNativeCapture'
 import { logError } from '@/lib/log'
@@ -250,6 +250,16 @@ function Meeting({ roomId }: { roomId: string }) {
   const [view, setView] = useState<'transcript' | 'chat'>('transcript')
   const [showRoster, setShowRoster] = useState(false)
   const [askOpen, setAskOpen] = useState(false) // copilot side panel
+  // Collapse the meeting chrome (identity, meeting-id, roster, status, toggles) so
+  // the transcript gets the whole viewport for reading. A slim always-visible bar
+  // re-expands it; End stays reachable even while collapsed.
+  const [headerCollapsed, setHeaderCollapsed] = useState(false)
+  // Fullscreen Reader mode (like /record): distraction-free reading surface.
+  const [reader, setReader] = useState(false)
+  // Paced auto-scroll speed (px/sec). 0 = jump-follow the live edge (default).
+  // Stepped presets so the control is one tap, not a fiddly slider.
+  const SCROLL_SPEEDS = [0, 20, 40, 70] as const
+  const [speedIdx, setSpeedIdx] = useState(0)
   const panel = usePanelWidth() // shared width so the transcript reflows beside the panel
   const [followSource, setFollowSource] = useState<string | null>(null)
   const [startError, setStartError] = useState<string | null>(null)
@@ -415,6 +425,18 @@ function Meeting({ roomId }: { roomId: string }) {
         return
       }
       if (typing) return
+      // Esc exits Reader (only when it's open) — matches /record; doesn't end the meeting.
+      if (e.key === 'Escape' && reader) {
+        e.preventDefault()
+        setReader(false)
+        return
+      }
+      // R toggles Reader mode (like /record).
+      if (k === 'r') {
+        e.preventDefault()
+        setReader((v) => !v)
+        return
+      }
       if (k === 's' && !starting) {
         e.preventDefault()
         void (live ? onStop() : onStart())
@@ -426,7 +448,7 @@ function Meeting({ roomId }: { roomId: string }) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [live, starting, onStart, onStop, onCopyTranscript])
+  }, [live, starting, onStart, onStop, onCopyTranscript, reader])
 
   const me = speakerColor(mySlot < 0 ? 0 : mySlot, 'light')
 
@@ -447,8 +469,56 @@ function Meeting({ roomId }: { roomId: string }) {
           { keys: `${MOD}⇧H`, label: 'Hide / show window (desktop)' },
         ]}
       />
+      {/* Reader mode: hide ALL chrome, float a single Exit control (matches /record). */}
+      {reader && (
+        <button
+          onClick={() => setReader(false)}
+          className="glass fixed right-4 top-4 z-50 flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm"
+          title="Exit Reader (Esc)"
+        >
+          <BookOpen size={15} /> Exit Reader
+        </button>
+      )}
+
+      {/* Collapsed: a slim bar giving the transcript the full viewport. Keeps only
+          the expand toggle + Ask + End (the always-needed controls). */}
+      {!reader && headerCollapsed && (
+        <div className="flex items-center gap-2 px-4 py-1.5 sm:px-6">
+          <button
+            onClick={() => setHeaderCollapsed(false)}
+            className="glass glass-interactive flex min-h-8 items-center gap-1.5 rounded-full px-3 text-xs text-black/55"
+            title="Show meeting controls"
+            aria-expanded={false}
+          >
+            <ChevronDown size={14} /> Controls
+          </button>
+          <span className={`text-xs ${connected ? 'text-emerald-700' : 'text-black/40'}`}>{connected ? '●' : '○'}</span>
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              onClick={() => setAskOpen((v) => !v)}
+              data-active={askOpen}
+              className="glass glass-interactive flex min-h-8 items-center gap-1.5 rounded-full px-3 text-xs text-black/60 data-[active=true]:text-emerald-800"
+              title="Ask the transcript"
+            >
+              <Sparkles size={13} /> Ask
+            </button>
+            <button onClick={onEnd} className="btn-stop min-h-8 px-3 text-xs" title="End meeting for everyone">
+              End
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Top bar: home nav + identity + copyable meeting id + status, End on the right. */}
-      <header className="flex flex-wrap items-center gap-2 px-4 py-3 sm:gap-3 sm:px-6 sm:py-4">
+      <header className={`${headerCollapsed || reader ? 'hidden' : 'flex'} flex-wrap items-center gap-2 px-4 py-3 sm:gap-3 sm:px-6 sm:py-4`}>
+        <button
+          onClick={() => setHeaderCollapsed(true)}
+          className="glass glass-interactive flex min-h-11 w-11 items-center justify-center rounded-full text-black/50"
+          title="Collapse controls — give the transcript the full screen"
+          aria-expanded={true}
+        >
+          <ChevronUp size={16} />
+        </button>
         <HomeMenu />
         {!full && (
           <span className="flex items-center gap-1.5 text-sm">
@@ -479,6 +549,25 @@ function Meeting({ roomId }: { roomId: string }) {
             canDec={textScale.canDec}
             canInc={textScale.canInc}
           />
+          {/* Paced auto-scroll speed: Off → Slow → Med → Fast. One tap cycles it.
+              Off = follow the live edge; the rest creep hands-free at set px/sec. */}
+          <button
+            onClick={() => setSpeedIdx((i) => (i + 1) % SCROLL_SPEEDS.length)}
+            data-active={speedIdx > 0}
+            className="glass glass-interactive flex min-h-10 items-center gap-1.5 rounded-full px-3 text-sm text-black/55 data-[active=true]:text-emerald-800"
+            title="Auto-scroll speed (Off / Slow / Medium / Fast)"
+          >
+            ⇅ {['Off', 'Slow', 'Med', 'Fast'][speedIdx]}
+          </button>
+          {/* Reader mode: distraction-free full-viewport transcript (like /record). */}
+          <button
+            onClick={() => setReader((v) => !v)}
+            data-active={reader}
+            className="glass glass-interactive flex min-h-10 items-center gap-1.5 rounded-full px-3 text-sm text-black/55 data-[active=true]:text-emerald-800"
+            title="Reader mode — full-screen transcript"
+          >
+            <BookOpen size={15} /> Reader
+          </button>
           <div className="glass flex items-center rounded-full p-0.5 text-sm">
             <button
               onClick={() => setView('transcript')}
@@ -542,7 +631,7 @@ function Meeting({ roomId }: { roomId: string }) {
         {view === 'chat' ? (
           <ChatView segments={segments} theme="light" fill overrides={overrides} scale={textScale.scale} />
         ) : (
-          <TranscriptView segments={segments} theme="light" readerMode autoScroll fade fill overrides={overrides} scale={textScale.scale} />
+          <TranscriptView segments={segments} theme="light" readerMode={reader} autoScroll fade={!reader} fill overrides={overrides} scale={textScale.scale} scrollSpeed={SCROLL_SPEEDS[speedIdx]} />
         )}
       </div>
 
