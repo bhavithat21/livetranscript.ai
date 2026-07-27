@@ -23,6 +23,12 @@ jobs:
           - platform: windows-latest
             args: ''
     runs-on: ${{ matrix.platform }}
+    # Surface the signing secrets as job ENV so step `if:` can test them — `secrets.*`
+    # is NOT allowed in a step-level `if:` (it fails the whole workflow at parse time),
+    # but `env.*` is. Empty when the secret is unset → signing steps skip → green.
+    env:
+      HAS_APPLE_CERT: ${{ secrets.APPLE_CERTIFICATE }}
+      HAS_AZURE_CLIENT: ${{ secrets.AZURE_CLIENT_ID }}
     steps:
       - uses: actions/checkout@v4
 
@@ -69,7 +75,7 @@ jobs:
       #   APPLE_SIGNING_IDENTITY ("Developer ID Application: NAME (TEAMID)"),
       #   APPLE_ID, APPLE_PASSWORD (app-specific pw), APPLE_TEAM_ID.
       - name: Enable macOS signing (only if cert secret present)
-        if: matrix.platform == 'macos-latest' && secrets.APPLE_CERTIFICATE != ''
+        if: matrix.platform == 'macos-latest' && env.HAS_APPLE_CERT != ''
         run: |
           {
             echo "APPLE_CERTIFICATE=${{ secrets.APPLE_CERTIFICATE }}"
@@ -88,7 +94,7 @@ jobs:
       #   AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET,
       #   AZURE_TS_ENDPOINT, AZURE_TS_ACCOUNT, AZURE_TS_CERT_PROFILE.
       - name: Enable Windows signing (only if Azure creds present)
-        if: matrix.platform == 'windows-latest' && secrets.AZURE_CLIENT_ID != ''
+        if: matrix.platform == 'windows-latest' && env.HAS_AZURE_CLIENT != ''
         shell: pwsh
         run: |
           "AZURE_TENANT_ID=${{ secrets.AZURE_TENANT_ID }}" >> $env:GITHUB_ENV
