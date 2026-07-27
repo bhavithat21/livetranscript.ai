@@ -1,5 +1,6 @@
 'use client'
 import { useCallback, useRef, useState } from 'react'
+import { captureLatency } from './latency'
 
 // A SEPARATE, navigable feed of auto-generated answers (distinct from the chat
 // thread). Each detected question becomes one entry {question, answer} that
@@ -30,6 +31,11 @@ const TOKEN_GAP_MS = 15_000
 const MAX_AUTO_RETRIES = 2
 const RETRY_BACKOFF_MS = [800, 2500]
 
+// How many prior same-mode Q&A pairs to feed back as history. Enough for the model
+// to see which behavioral stories it already used (no-reuse) without bloating the
+// prompt — each prior answer is capped server-side anyway.
+const HISTORY_TURNS = 6
+
 export function useAnswerFeed() {
   const [entries, setEntries] = useState<AnswerEntry[]>([])
   const [cursor, setCursor] = useState(0) // which entry the feed view is showing
@@ -38,6 +44,23 @@ export function useAnswerFeed() {
   const argsRef = useRef<Map<number, { mode: string; meContext: string | null; image: string | null; instructions?: string | null; transcript?: string | null }>>(
     new Map(),
   )
+  // Mirror entries in a ref so attempt() can build history from PRIOR answers
+  // without adding itself as a dep (which would recreate the callback each token).
+  const entriesRef = useRef<AnswerEntry[]>([])
+  entriesRef.current = entries
+
+  // Prior finished Q&A in the SAME mode, oldest-first, as chat history — so the
+  // model remembers which stories it already spent (behavioral no-reuse) and keeps
+  // continuity. Excludes the current entry, streaming/failed ones, and empties.
+  const buildHistory = (currentId: number, mode: string): { role: 'user' | 'assistant'; content: string }[] => {
+    const turns: { role: 'user' | 'assistant'; content: string }[] = []
+    for (const e of entriesRef.current) {
+      if (e.id >= currentId || e.streaming || e.failed || !e.answer.trim()) continue
+      if (argsRef.current.get(e.id)?.mode !== mode) continue
+      turns.push({ role: 'user', content: e.question }, { role: 'assistant', content: e.answer })
+    }
+    return turns.slice(-HISTORY_TURNS * 2)
+  }
 
   // One streaming attempt. Returns true if it produced any tokens, false on
   // error/stall/empty — the caller decides whether to auto-retry. Resets the
@@ -60,6 +83,10 @@ export function useAnswerFeed() {
       }
       arm(STALL_TIMEOUT_MS)
       let gotAny = false
+      // Latency span: request start → first token (ttft) → completion (total).
+      const startedAt = performance.now()
+      let firstTokenAt: number | null = null
+      let raw = ''
       setEntries((e) => e.map((x) => (x.id === id ? { ...x, answer: '' } : x)))
       try {
         const res = await fetch('/api/copilot/answer', {
@@ -71,6 +98,9 @@ export function useAnswerFeed() {
             // it). Was '' — proactive answers were ungrounded, hurting quality.
             transcript: transcript ?? '',
             mode,
+            // Prior same-mode answers as history so the model won't reuse a
+            // behavioral story across questions and keeps continuity on follow-ups.
+            history: buildHistory(id, mode),
             image: image ?? undefined,
             context: meContext ?? undefined,
             instructions: instructions ?? undefined,
@@ -85,12 +115,15 @@ export function useAnswerFeed() {
           if (done) break
           const text = dec.decode(value, { stream: true })
           if (text) {
+            if (firstTokenAt === null) firstTokenAt = performance.now()
             gotAny = true
+            raw += text
             arm(TOKEN_GAP_MS) // reset the stall timer on every token
             setEntries((e) => e.map((x) => (x.id === id ? { ...x, answer: x.answer + text } : x)))
           }
         }
         clearTimeout(watchdog)
+        captureLatency(mode, startedAt, firstTokenAt, raw)
         return gotAny // empty-but-OK stream counts as a non-answer → retryable
       } catch {
         clearTimeout(watchdog)

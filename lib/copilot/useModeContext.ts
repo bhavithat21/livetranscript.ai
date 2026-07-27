@@ -1,5 +1,5 @@
 'use client'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 // Per-mode "context": documents (uploaded files or pasted text, chunked +
 // embedded) plus free-text instructions for HOW that mode's chat should answer.
@@ -13,9 +13,15 @@ import { useCallback, useEffect, useState } from 'react'
 // ON THIS DEVICE (localStorage, keyed per mode) — no vector DB, nothing new
 // persisted server-side.
 
+import { parseStoryBook, looksLikeStoryBook } from './storyBook'
+
 export type StoryChunk = { text: string; embedding: number[] }
 export type ContextDoc = { id: string; name: string; chunks: StoryChunk[] }
-type Persisted = { instructions: string; docs: ContextDoc[] }
+// A whole story from an uploaded story book (behavioral mode): the retrieval key is
+// embedded to match a question; fullText is fed to the model to answer. Kept
+// separate from generic chunks so we can rank + spend STORIES, not paragraphs.
+export type StoryEntry = { id: string; title: string; embedding: number[]; fullText: string }
+type Persisted = { instructions: string; docs: ContextDoc[]; stories?: StoryEntry[] }
 
 const MAX_DOCS = 20
 const MAX_INSTRUCTIONS = 4_000
@@ -60,11 +66,11 @@ async function embed(texts: string[]): Promise<number[][]> {
 function load(mode: string): Persisted {
   try {
     const raw = localStorage.getItem(keyFor(mode))
-    if (!raw) return { instructions: '', docs: [] }
+    if (!raw) return { instructions: '', docs: [], stories: [] }
     const parsed = JSON.parse(raw) as Partial<Persisted>
-    return { instructions: parsed.instructions ?? '', docs: parsed.docs ?? [] }
+    return { instructions: parsed.instructions ?? '', docs: parsed.docs ?? [], stories: parsed.stories ?? [] }
   } catch {
-    return { instructions: '', docs: [] } // corrupt/absent — empty context
+    return { instructions: '', docs: [], stories: [] } // corrupt/absent — empty context
   }
 }
 
@@ -78,14 +84,19 @@ function persist(mode: string, data: Persisted) {
 
 export function useModeContext(mode: string) {
   const [docs, setDocs] = useState<ContextDoc[]>([])
+  const [stories, setStories] = useState<StoryEntry[]>([])
   const [instructions, setInstructionsState] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Stories already USED this round — spent once, per the book's rule. Session-only
+  // (a ref, not persisted): a new interview round starts fresh. resetSpent() clears it.
+  const spentRef = useRef<Set<string>>(new Set())
 
   // Each mode has its OWN context — reload whenever the active mode changes.
   useEffect(() => {
     const data = load(mode)
     setDocs(data.docs)
+    setStories(data.stories ?? [])
     setInstructionsState(data.instructions)
     setError(null)
   }, [mode])
@@ -94,12 +105,16 @@ export function useModeContext(mode: string) {
     (text: string) => {
       const capped = text.slice(0, MAX_INSTRUCTIONS)
       setInstructionsState(capped)
-      persist(mode, { instructions: capped, docs })
+      persist(mode, { instructions: capped, docs, stories })
     },
-    [mode, docs],
+    [mode, docs, stories],
   )
 
-  // Chunk + embed a document's raw text and add it to this mode's context.
+  // Add a document. A structured STORY BOOK (behavioral mode) is parsed into whole
+  // stories, each embedded on its selector key (title + LPs + use-when + spine) so a
+  // question can pick the right story. Anything else is chunked per-paragraph as
+  // before. A book uploaded outside behavioral mode still parses — the stories just
+  // live in that mode's context.
   const addDocument = useCallback(
     async (name: string, raw: string) => {
       setError(null)
@@ -107,39 +122,69 @@ export function useModeContext(mode: string) {
         setError(`Up to ${MAX_DOCS} documents per mode`)
         return
       }
-      const texts = chunkCorpus(raw)
-      if (!texts.length) {
-        setError(`${name || 'That document'} has no usable text`)
-        return
-      }
       setSaving(true)
       try {
+        if (looksLikeStoryBook(raw)) {
+          const parsed = parseStoryBook(raw)
+          if (!parsed.length) {
+            setError(`${name || 'That story book'} had no recognizable stories`)
+            return
+          }
+          // Embed each story's SELECTOR KEY (not its full prose) so ranking matches
+          // the question to the right story, per the book's own "sounds like" table.
+          const vectors = await embed(parsed.map((s) => s.retrievalKey))
+          const newStories: StoryEntry[] = parsed.map((s, i) => ({
+            id: s.id,
+            title: s.title,
+            embedding: vectors[i],
+            fullText: s.fullText,
+          }))
+          // A book replaces the prior book (re-upload = refresh), and also drops it in
+          // as a doc entry so the UI shows "1 doc" + the count.
+          const doc: ContextDoc = { id: crypto.randomUUID(), name: name || 'Story book', chunks: [] }
+          const nextDocs = [...docs, doc]
+          spentRef.current = new Set() // fresh book → nothing spent yet
+          setStories(newStories)
+          setDocs(nextDocs)
+          persist(mode, { instructions, docs: nextDocs, stories: newStories })
+          return
+        }
+        const texts = chunkCorpus(raw)
+        if (!texts.length) {
+          setError(`${name || 'That document'} has no usable text`)
+          return
+        }
         const vectors = await embed(texts)
         const chunks = texts.map((text, i) => ({ text, embedding: vectors[i] }))
         const doc: ContextDoc = { id: crypto.randomUUID(), name: name || 'Untitled', chunks }
         const next = [...docs, doc]
         setDocs(next)
-        persist(mode, { instructions, docs: next })
+        persist(mode, { instructions, docs: next, stories })
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Could not add document')
       } finally {
         setSaving(false)
       }
     },
-    [mode, docs, instructions],
+    [mode, docs, instructions, stories],
   )
 
   const removeDocument = useCallback(
     (id: string) => {
       const next = docs.filter((d) => d.id !== id)
+      // Removing the last doc also clears any parsed stories (they came from a book).
+      const nextStories = next.length ? stories : []
       setDocs(next)
-      persist(mode, { instructions, docs: next })
+      setStories(nextStories)
+      persist(mode, { instructions, docs: next, stories: nextStories })
     },
-    [mode, docs, instructions],
+    [mode, docs, stories, instructions],
   )
 
   const clear = useCallback(() => {
     setDocs([])
+    setStories([])
+    spentRef.current = new Set()
     setInstructionsState('')
     try {
       localStorage.removeItem(keyFor(mode))
@@ -178,10 +223,41 @@ export function useModeContext(mode: string) {
     [docs, chunkCount],
   )
 
+  // Pick the best UNSPENT stories for a question and mark them spent — the book's
+  // core rule: a round needs 2 stories, each story spent once. Ranks all unspent
+  // stories by cosine of the question against their selector key, returns the top
+  // `n` (distinct), and records them as spent so the next question picks different
+  // ones. Returns [] if there's no story book or the bank is exhausted.
+  const retrieveStories = useCallback(
+    async (question: string, n = 2): Promise<{ title: string; fullText: string }[]> => {
+      if (!stories.length || !question.trim()) return []
+      try {
+        const [q] = await embed([question])
+        const ranked = stories
+          .filter((s) => !spentRef.current.has(s.id))
+          .map((s) => ({ s, score: cosine(q, s.embedding) }))
+          .sort((a, b) => b.score - a.score)
+          .slice(0, n)
+        if (!ranked.length) return [] // every story already spent this round
+        for (const { s } of ranked) spentRef.current.add(s.id)
+        return ranked.map(({ s }) => ({ title: s.title, fullText: s.fullText }))
+      } catch {
+        return []
+      }
+    },
+    [stories],
+  )
+
+  // Start a fresh round — every story becomes available again.
+  const resetSpent = useCallback(() => {
+    spentRef.current = new Set()
+  }, [])
+
   return {
     docs,
     instructions,
     count: chunkCount,
+    storyCount: stories.length,
     saving,
     error,
     setInstructions,
@@ -189,5 +265,7 @@ export function useModeContext(mode: string) {
     removeDocument,
     clear,
     retrieve,
+    retrieveStories,
+    resetSpent,
   }
 }

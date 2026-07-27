@@ -5,6 +5,7 @@ import {
   extractTests,
   executeTests,
   canExecute,
+  isRemoteLanguage,
   normalizeLanguage,
   preloadRuntime,
   type TestRunResult,
@@ -58,7 +59,12 @@ export function useOrchestrator(ask: AskFn) {
 
     const lang = normalizeLanguage(prob.language || codeBlock.language)
 
-    if (!canExecute(lang)) {
+    // Auto-execute ONLY for locally-runnable languages (Python/JS/TS). Remote
+    // (compiled) languages would egress the on-screen code to a third-party
+    // executor without the user clicking — same no-egress-without-consent rule as
+    // the typed path. The solution + tests still render; the user runs them via the
+    // panel's "Run tests · remote" button when they choose.
+    if (!canExecute(lang) || isRemoteLanguage(lang)) {
       setStage('done')
       return
     }

@@ -1,5 +1,6 @@
 'use client'
 import { useCallback, useRef, useState } from 'react'
+import { captureLatency } from './latency'
 
 // Copilot chat state + streaming. Sends the question + transcript tail to
 // /api/copilot/answer and appends streamed tokens to the latest assistant turn.
@@ -62,6 +63,9 @@ export function useCopilot(getTranscript: () => string) {
       arm(STALL_TIMEOUT_MS)
 
       let finalContent = ''
+      // Latency span: request start → first token (ttft) → completion (total).
+      const startedAt = performance.now()
+      let firstTokenAt: number | null = null
       try {
         const res = await fetch('/api/copilot/answer', {
           method: 'POST',
@@ -86,7 +90,10 @@ export function useCopilot(getTranscript: () => string) {
           const { done, value } = await reader.read()
           if (done) break
           const text = decoder.decode(value, { stream: true })
-          if (text) arm(TOKEN_GAP_MS) // reset the stall timer on every token
+          if (text) {
+            if (firstTokenAt === null) firstTokenAt = performance.now()
+            arm(TOKEN_GAP_MS) // reset the stall timer on every token
+          }
           finalContent += text
           setTurns((t) => {
             const next = t.slice()
@@ -96,6 +103,7 @@ export function useCopilot(getTranscript: () => string) {
           })
         }
         clearTimeout(watchdog)
+        captureLatency(mode, startedAt, firstTokenAt, finalContent)
       } catch (e) {
         clearTimeout(watchdog)
         // A user-superseded abort returns silently; a STALL abort surfaces an error.

@@ -10,9 +10,14 @@
   --signal: #0f766e;
   --stop: #b91c1c;
 
-  /* Liquid-glass tokens (chrome only, never behind reading text) */
+  /* Liquid-glass tokens (chrome only — nav, dock, cards) */
   --glass-bg: rgba(255, 255, 255, 0.55);
   --glass-border: rgba(255, 255, 255, 0.7);
+  /* The Ask panel holds READING text and sits over the page, so it needs a
+     brighter, warmer scrim than chrome glass — matched to the transcript's
+     --reader surface so the panel never reads darker than the transcript, while a
+     touch of translucency still lets the background gradient show through. */
+  --panel-bg: rgba(255, 253, 249, 0.88);
   --glass-shadow: 0 8px 32px rgba(20, 21, 26, 0.12);
   --glass-blur: 20px;
 
@@ -246,6 +251,15 @@ html.lt-desktop .overscroll-contain * {
     box-shadow: var(--glass-shadow);
   }
 
+  /* The Ask panel: a bright warm reading surface (matches the transcript) with a
+     light backdrop blur so the page gradient still refracts through — see-through,
+     but never darker than the transcript. Overrides .glass's dim 55% scrim. */
+  .copilot-panel {
+    background: var(--panel-bg);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    backdrop-filter: blur(16px) saturate(140%);
+  }
+
   /* Solid, warm reading surface for transcript payloads — never blurred/glassy,
      so body text keeps maximum contrast (the #1 product value). */
   .reader-surface {
@@ -408,3 +422,52 @@ html.lt-desktop .overscroll-contain * {
   .dock-live { animation: none; }
   .btn-signal, .btn-stop, .btn-ghost { transition: none; }
 }
+
+/* ── Stealth reading mode ──────────────────────────────────────────────────
+   Applied to the copilot panel while the screen is shared. Human peripheral
+   vision locks onto MOTION and RED, and a bright glassy panel is the visual
+   signature an interviewer notices. Stealth removes exactly those tells:
+   near-monochrome + dim, no glow/hover-lift, and every pulsing/red dot becomes
+   a static low-chroma mark. Motion is REMOVED here (not just reduced) so it
+   holds regardless of the OS reduced-motion setting. Load-bearing text is
+   pushed toward full contrast so it stays readable at the lower luminance. */
+.lt-stealth {
+  --signal: #52525b; /* zinc — kill the emerald so nothing on the panel is chromatic */
+  background: #101012 !important;
+  color: #d4d4d8 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border-color: rgba(255, 255, 255, 0.06) !important;
+}
+/* Static, low-chroma dot — no pulse, no red. */
+.lt-stealth .live-dot {
+  animation: none !important;
+  background: #6b7280 !important;
+  box-shadow: none !important;
+}
+/* No hover-lift / interactive glow on the reading surface. */
+.lt-stealth .glass-interactive:hover {
+  transform: none !important;
+  box-shadow: none !important;
+}
+/* Raise load-bearing text; the reader must stay legible at low luminance. */
+.lt-stealth .text-ink { color: #e4e4e7 !important; }
+.lt-stealth .text-black\/70,
+.lt-stealth .text-black\/55,
+.lt-stealth .text-black\/50,
+.lt-stealth .text-black\/45,
+.lt-stealth .text-black\/40 { color: #a1a1aa !important; }
+/* Emerald/amber accents flatten to the neutral signal in stealth. */
+.lt-stealth .text-emerald-800,
+.lt-stealth .text-amber-700 { color: #a1a1aa !important; }
+/* Surfaces that were near-white flip dark so the panel reads as one dim plane. */
+.lt-stealth .bg-white,
+.lt-stealth .bg-white\/70,
+.lt-stealth .bg-white\/80 { background: #18181b !important; }
+/* Kill any decorative motion inside the panel. */
+.lt-stealth .rise-in,
+.lt-stealth .dock-live { animation: none !important; }
+.lt-stealth *,
+.lt-stealth *::before,
+.lt-stealth *::after { animation-play-state: paused !important; }

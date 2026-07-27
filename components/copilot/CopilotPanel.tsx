@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
-import { Check, Lock, Monitor, MonitorOff, Play, Send, Sparkles, X } from 'lucide-react'
+import { Check, Eye, EyeOff, Lock, Monitor, MonitorOff, MoreHorizontal, Play, Send, Sparkles, X } from 'lucide-react'
 import { useLockMode } from '@/lib/desktop/useLockMode'
 import { useCopilot } from '@/lib/copilot/useCopilot'
 import { useScreenStream } from '@/lib/vision/useScreenStream'
@@ -16,12 +16,16 @@ import {
   executeCode,
   executeTests,
   canExecute,
+  isRemoteLanguage,
   preloadRuntime,
   type TestRunResult,
 } from '@/lib/copilot/codeExecutor'
 import { type RunResult } from '@/lib/copilot/pyodideRunner'
 import { useAutoCapture } from '@/lib/vision/useAutoCapture'
 import { useOrchestrator, type OrchestratorStage, type ExtractedProblem } from '@/lib/copilot/useOrchestrator'
+import { Markdown } from './Markdown'
+import { parseDraftStream } from '@/lib/copilot/draftProtocol'
+import { splitAnswer } from '@/lib/copilot/answerStructure'
 
 // Ask-your-transcript side panel. Grounded, streaming answers from the live
 // transcript. Matches the app's editorial-glass language: glass surface, emerald
@@ -34,6 +38,15 @@ const QUICK_ACTIONS = [
   'What are the action items?',
   'What did I miss?',
 ]
+
+// Screen frames are only useful — and only sent — in the two modes that reason
+// about what's on screen: a coding problem, or a system-design canvas/diagram.
+// General/behavioral never attach a frame even if screen-sharing is left on, so
+// no image is billed or leaked for a mode that can't use it.
+const SCREEN_MODES: readonly CopilotMode[] = ['coding', 'systemDesign']
+function usesScreen(mode: CopilotMode): boolean {
+  return SCREEN_MODES.includes(mode)
+}
 
 export function CopilotPanel({
   getTranscript,
@@ -58,6 +71,8 @@ export function CopilotPanel({
   const [showContextEditor, setShowContextEditor] = useState(false)
   const orchestrator = useOrchestrator(ask)
   const [auto, setAuto] = useState(false)
+  const [stealth, setStealth] = useState(false)
+  const [moreOpen, setMoreOpen] = useState(false) // overflow sheet for secondary controls
   const [view, setView] = useState<'chat' | 'answers'>('chat')
   const lockMode = useLockMode() // desktop: click-through overlay (unlock via hotkey/tray)
   // The turn index the orchestrator's auto test result belongs to. Pinned when
@@ -87,12 +102,21 @@ export function CopilotPanel({
     // Return the promise so useProactive's in-flight guard holds until this
     // answer finishes streaming (no duplicate answers as the ASR tail revises).
     return (async () => {
-      const retrieved = context.count > 0 ? await context.retrieve(q) : null
-      // Combine what YOU said (mic context, if listening) with any matched context
-      // document chunk — grounds the answer without either appearing in the transcript.
+      // Behavioral + an uploaded story book → pick the 2 best UNSPENT stories for
+      // this question (spent-once per round). Otherwise fall back to per-chunk RAG.
+      const retrieved =
+        mode === 'behavioral' && context.storyCount > 0
+          ? await context.retrieveStories(q, 2).then((ss) =>
+              ss.length ? ss.map((s) => `STORY — ${s.title}\n${s.fullText}`).join('\n\n---\n\n') : null,
+            )
+          : context.count > 0
+            ? await context.retrieve(q)
+            : null
+      // Combine what YOU said (mic context, if listening) with the matched story/
+      // chunk — grounds the answer without either appearing in the transcript.
       const parts = [me.getMeContext() && `What I said: ${me.getMeContext()}`, retrieved].filter(Boolean)
       const ctx = parts.length ? parts.join('\n\n') : null
-      const image = screen.sharing ? screen.grabFrame() : null
+      const image = screen.sharing && usesScreen(mode) ? screen.grabFrame() : null
       // Ground the auto-answer in the live transcript (what was actually said),
       // like the manual chat does — not just the bare question.
       await feed.answer(q, mode, ctx, image, context.instructions || null, getTranscript())
@@ -132,10 +156,19 @@ export function CopilotPanel({
   const submit = async (q: string) => {
     if (!q.trim() || streaming) return
     setInput('')
-    // Attach a screen frame only when the user has screen-sharing on.
-    const image = screen.sharing ? screen.grabFrame() : null
-    // Ground the answer in this mode's uploaded context documents (RAG), if any.
-    const retrieved = context.count > 0 ? await context.retrieve(q) : null
+    // Attach a screen frame only when sharing is on AND this mode reasons about
+    // the screen (coding / system design) — never for general/behavioral.
+    const image = screen.sharing && usesScreen(mode) ? screen.grabFrame() : null
+    // Behavioral + story book → the 2 best unspent stories for this question;
+    // otherwise per-chunk RAG from this mode's uploaded documents.
+    const retrieved =
+      mode === 'behavioral' && context.storyCount > 0
+        ? await context.retrieveStories(q, 2).then((ss) =>
+            ss.length ? ss.map((s) => `STORY — ${s.title}\n${s.fullText}`).join('\n\n---\n\n') : null,
+          )
+        : context.count > 0
+          ? await context.retrieve(q)
+          : null
     ask(q, mode, image, retrieved, context.instructions || null)
   }
 
@@ -143,7 +176,7 @@ export function CopilotPanel({
     <aside
       // Full-width on mobile; on ≥sm the width follows the drag-resized value
       // (--panel-w), so the drawer is user-resizable and the preference sticks.
-      className="glass relative flex h-full w-full flex-col overflow-hidden border-l border-black/10 sm:w-[var(--panel-w)] sm:rounded-l-3xl"
+      className={`glass copilot-panel relative flex h-full w-full flex-col overflow-hidden border-l border-black/10 sm:w-[var(--panel-w)] sm:rounded-l-3xl${stealth ? ' lt-stealth' : ''}`}
       style={{ '--panel-w': `${width}px` } as CSSProperties}
     >
       {/* Left-edge resize handle (desktop only). Drag to widen/narrow the panel.
@@ -156,58 +189,49 @@ export function CopilotPanel({
         title="Drag to resize"
         className="absolute inset-y-0 left-0 z-10 hidden w-1.5 touch-none bg-black/10 hover:bg-emerald-700/30 sm:block"
       />
-      <header className="flex items-center gap-2 border-b border-black/10 px-4 py-3">
-        <Sparkles size={16} className="text-[color:var(--signal)]" />
+      {/* Header — calm + low-chrome. Only the TWO in-interview essentials stay
+          always-visible (Auto-answer, Stealth); everything set-up-once (Mic, Screen,
+          Lock, Clear) lives in the ⋯ overflow sheet. Fewer competing targets = less
+          to scan under interview stress. Active secondary controls surface a small
+          dot on the ⋯ so nothing "on" is hidden. */}
+      <header className="relative flex items-center gap-2 border-b border-black/10 px-4 py-3">
+        <Sparkles size={16} className="shrink-0 text-[color:var(--signal)]" />
         <span className="font-[family-name:var(--font-serif)] text-base font-semibold">Ask</span>
-        <span className="hidden text-xs text-black/40 sm:inline">grounded in your transcript</span>
         <div className="ml-auto flex items-center gap-1">
+          {/* 1 — Auto-answer: the primary live control. */}
           <button
             onClick={() => setAuto((v) => !v)}
             data-active={auto}
             title={auto ? 'Auto-answer is ON — questions heard are answered automatically' : 'Auto-answer questions from the meeting'}
-            className="flex items-center gap-1 rounded-full px-2 py-1 text-xs text-black/55 transition-colors hover:bg-black/5 data-[active=true]:bg-emerald-700/10 data-[active=true]:text-emerald-800"
+            className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium text-black/60 transition-colors hover:bg-black/5 data-[active=true]:bg-emerald-700/10 data-[active=true]:text-emerald-800"
           >
             <span className={auto ? 'live-dot' : 'hidden'} aria-hidden />
-            <span className="hidden sm:inline">{auto ? 'Auto on' : 'Auto'}</span>
-            <span className="sm:hidden">A</span>
+            {auto ? 'Auto on' : 'Auto'}
           </button>
+          {/* 2 — Stealth: the safety toggle you hit when sharing screen. */}
           <button
-            onClick={() => (me.listening ? me.stopListening() : me.startListening())}
-            data-active={me.listening}
-            title={me.listening ? 'Mic on — what you say feeds the AI (never shown in the transcript)' : 'Add your voice as AI context (not transcribed)'}
-            className="flex items-center gap-1 rounded-full px-2 py-1 text-xs text-black/55 transition-colors hover:bg-black/5 data-[active=true]:bg-emerald-700/10 data-[active=true]:text-emerald-800"
+            onClick={() => setStealth((v) => !v)}
+            data-active={stealth}
+            aria-label="Stealth reading mode"
+            title={stealth ? 'Stealth on — dim, monochrome, motionless. Tap to return to normal.' : 'Stealth reading mode — dim + motionless for a shared screen'}
+            className="flex h-9 w-9 items-center justify-center rounded-full text-black/50 transition-colors hover:bg-black/5 data-[active=true]:bg-black/70 data-[active=true]:text-white"
           >
-            {me.listening ? <Mic size={13} /> : <MicOff size={13} />}
-            <span className="hidden sm:inline">{me.listening ? 'Mic (me)' : 'Mic'}</span>
+            {stealth ? <EyeOff size={15} /> : <Eye size={15} />}
           </button>
+          {/* 3 — overflow: Mic, Screen, Lock, Clear. A dot marks any active one. */}
           <button
-            onClick={() => (screen.sharing ? screen.stop() : screen.start())}
-            data-active={screen.sharing}
-            title={screen.sharing ? 'Stop sharing your screen' : 'Let the assistant see your screen'}
-            className="flex items-center gap-1 rounded-full px-2 py-1 text-xs text-black/55 transition-colors hover:bg-black/5 data-[active=true]:bg-emerald-700/10 data-[active=true]:text-emerald-800"
+            onClick={() => setMoreOpen((v) => !v)}
+            data-active={moreOpen}
+            aria-label="More controls"
+            aria-expanded={moreOpen}
+            className="relative flex h-9 w-9 items-center justify-center rounded-full text-black/50 transition-colors hover:bg-black/5 data-[active=true]:bg-black/10"
           >
-            {screen.sharing ? <Monitor size={13} /> : <MonitorOff size={13} />}
-            <span className="hidden sm:inline">{screen.sharing ? 'Seeing screen' : 'See screen'}</span>
+            <MoreHorizontal size={16} />
+            {(me.listening || screen.sharing) && !moreOpen && (
+              <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-emerald-700" aria-hidden />
+            )}
           </button>
-          {/* Lock (click-through) mode — desktop only. Turning it ON makes the
-              overlay pass clicks through to other apps; it can only be UNLOCKED via
-              the global hotkey (⌘/Ctrl+Shift+L) or the tray, since a locked window
-              can't be clicked. Button is view-only ON here. */}
-          {lockMode.available && !lockMode.locked && (
-            <button
-              onClick={lockMode.enable}
-              title="Lock (click-through): float on top and work in other apps. Unlock with ⌘/Ctrl+Shift+L or the tray."
-              className="flex items-center gap-1 rounded-full px-2 py-1 text-xs text-black/55 transition-colors hover:bg-black/5"
-            >
-              <Lock size={13} />
-              <span className="hidden sm:inline">Lock</span>
-            </button>
-          )}
-          {turns.length > 0 && (
-            <button onClick={clear} className="rounded-full px-2 py-1 text-xs text-black/45 hover:bg-black/5 hover:text-ink">
-              Clear
-            </button>
-          )}
+          {/* Close — always reachable. */}
           <button
             onClick={onClose}
             aria-label="Close assistant"
@@ -216,6 +240,45 @@ export function CopilotPanel({
             <X size={16} />
           </button>
         </div>
+
+        {/* Overflow sheet — anchored under the ⋯. Secondary controls, roomy targets,
+            each with a label so nothing is a mystery glyph. */}
+        {moreOpen && (
+          <>
+            {/* click-away scrim */}
+            <button className="fixed inset-0 z-20 cursor-default" aria-hidden tabIndex={-1} onClick={() => setMoreOpen(false)} />
+            <div className="absolute right-3 top-full z-30 mt-1 w-52 overflow-hidden rounded-2xl border border-black/10 bg-[color:var(--panel-bg)] p-1 shadow-lg backdrop-blur-md">
+              <SheetItem
+                active={me.listening}
+                icon={me.listening ? <Mic size={15} /> : <MicOff size={15} />}
+                label={me.listening ? 'Mic on (your voice → AI)' : 'Add your voice as context'}
+                onClick={() => (me.listening ? me.stopListening() : me.startListening())}
+              />
+              <SheetItem
+                active={screen.sharing}
+                icon={screen.sharing ? <Monitor size={15} /> : <MonitorOff size={15} />}
+                label={screen.sharing ? 'Sharing your screen' : 'Let the AI see your screen'}
+                onClick={() => (screen.sharing ? screen.stop() : screen.start())}
+              />
+              {lockMode.available && !lockMode.locked && (
+                <SheetItem
+                  active={false}
+                  icon={<Lock size={15} />}
+                  label="Lock (click-through)"
+                  onClick={() => { lockMode.enable(); setMoreOpen(false) }}
+                />
+              )}
+              {turns.length > 0 && (
+                <SheetItem
+                  active={false}
+                  icon={<X size={15} />}
+                  label="Clear this chat"
+                  onClick={() => { clear(); setMoreOpen(false) }}
+                />
+              )}
+            </div>
+          </>
+        )}
       </header>
 
       {/* Mode selector — per-domain answer styling (coding / system design /
@@ -259,10 +322,23 @@ export function CopilotPanel({
       <div className="border-b border-black/10 bg-black/[0.02] px-4 py-2">
         <div className="flex items-center gap-2 text-xs">
           <span className="text-black/55">
-            {context.docs.length > 0 || context.instructions
-              ? `Context: ${context.docs.length} doc${context.docs.length === 1 ? '' : 's'}${context.instructions ? ' · instructions set' : ''}`
-              : 'No context yet — answers stay generic'}
+            {context.storyCount > 0
+              ? `Story bank: ${context.storyCount} stories${context.instructions ? ' · instructions set' : ''}`
+              : context.docs.length > 0 || context.instructions
+                ? `Context: ${context.docs.length} doc${context.docs.length === 1 ? '' : 's'}${context.instructions ? ' · instructions set' : ''}`
+                : 'No context yet — answers stay generic'}
           </span>
+          {/* New round: re-arm every story so the next questions can reuse the bank
+              from scratch (stories are spent-once within a round). */}
+          {context.storyCount > 0 && (
+            <button
+              onClick={context.resetSpent}
+              title="Start a fresh round — all stories become available again"
+              className="rounded-full px-2 py-0.5 text-emerald-800 hover:bg-emerald-700/10"
+            >
+              New round
+            </button>
+          )}
           <button
             onClick={() => setShowContextEditor((v) => !v)}
             className="ml-auto rounded-full px-2 py-0.5 text-emerald-800 hover:bg-emerald-700/10"
@@ -334,6 +410,10 @@ export function CopilotPanel({
               key={i}
               content={t.content}
               streaming={streaming && i === turns.length - 1}
+              // Auto-run the tests once a TYPED coding answer finishes (local
+              // languages only — remote code egresses, so that stays click-to-run).
+              // This closes the gap where only the screen-capture path self-verified.
+              autoRun={mode === 'coding' && i === turns.length - 1}
               autoTestResult={
                 mode === 'coding' && i === autoTestTurn && orchestrator.testResult
                   ? orchestrator.testResult
@@ -479,12 +559,12 @@ function ContextEditor({ context }: { context: ReturnType<typeof useModeContext>
           <input
             ref={fileInputRef}
             type="file"
-            accept=".txt,.md,text/plain,text/markdown"
+            accept=".txt,.md,.html,.htm,text/plain,text/markdown,text/html"
             multiple
             onChange={(e) => onFiles(e.target.files)}
             className="hidden"
           />
-          <span className="text-[11px] text-black/40">.txt / .md · stored on this device</span>
+          <span className="text-[11px] text-black/40">.txt / .md / .html story book · stored on this device</span>
         </div>
         <div className="mt-2">
           <textarea
@@ -525,17 +605,20 @@ function useSlowAutoScroll(
     const el = ref.current
     if (!el || !enabled || streaming || entryId === undefined) return
     if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return
-    if (el.scrollHeight <= el.clientHeight) return // nothing to scroll
 
     let cancelled = false
     let last = 0
     const SPEED = 24 // px per second — unhurried reading pace
     let raf = 0
+    // The step idles (doesn't advance) until content overflows, so it survives a
+    // short answer whose tall content (an async-mounted Mermaid SVG, late markdown
+    // reflow) only exceeds the viewport AFTER the effect runs — a ResizeObserver
+    // no longer needed: we just never give up while the loop is alive.
     const step = (t: number) => {
       if (cancelled) return
-      if (last) {
-        const next = el.scrollTop + (SPEED * (t - last)) / 1000
-        el.scrollTop = next
+      const canScroll = el.scrollHeight > el.clientHeight + 1
+      if (last && canScroll) {
+        el.scrollTop = el.scrollTop + (SPEED * (t - last)) / 1000
         if (el.scrollTop + el.clientHeight >= el.scrollHeight - 1) return // reached the end
       }
       last = t
@@ -561,6 +644,32 @@ function useSlowAutoScroll(
       el.removeEventListener('pointerdown', cancel)
     }
   }, [ref, entryId, streaming, enabled])
+}
+
+// One row in the header overflow sheet — a roomy labeled control, active state
+// shown by the signal color so an "on" toggle is obvious in the list.
+function SheetItem({
+  active,
+  icon,
+  label,
+  onClick,
+}: {
+  active: boolean
+  icon: React.ReactNode
+  label: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      onClick={onClick}
+      data-active={active}
+      className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-xs text-black/70 transition-colors hover:bg-black/5 data-[active=true]:text-emerald-800"
+    >
+      <span className={active ? 'text-emerald-700' : 'text-black/40'}>{icon}</span>
+      <span className="flex-1">{label}</span>
+      {active && <span className="h-1.5 w-1.5 rounded-full bg-emerald-700" aria-hidden />}
+    </button>
+  )
 }
 
 // The navigable auto-answer feed: one Q&A card at a time, paged prev/next.
@@ -610,11 +719,27 @@ function AnswersView({
       <div ref={bodyRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
         <div className="text-xs font-medium uppercase tracking-wide text-[color:var(--signal)]">Question</div>
         <p className="text-sm font-medium text-ink">{e?.question}</p>
-        <div className="text-xs font-medium uppercase tracking-wide text-black/40">Answer</div>
-        <div className="whitespace-pre-wrap break-words text-sm leading-relaxed text-ink">
-          {e?.answer}
-          {e?.streaming && <span className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse bg-[color:var(--signal)] align-middle" aria-hidden />}
-        </div>
+        {(() => {
+          // Two-pass draft protocol: while a fast draft is showing, badge it as a
+          // "Quick take"; it's cleanly replaced by the refined answer when ready.
+          const parsed = parseDraftStream(e?.answer ?? '')
+          return (
+            <>
+              <div className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-black/40">
+                {parsed.phase === 'draft' ? (
+                  <span className="flex items-center gap-1 text-amber-700">
+                    <span className="live-dot" aria-hidden /> Quick take
+                  </span>
+                ) : (
+                  'Answer'
+                )}
+              </div>
+              {/* Structure-native: say-this-now hero + body + reserve drawer, so a
+                  one-second glance lands on the line to say next. */}
+              <StructuredAnswer content={parsed.text} streaming={e?.streaming ?? false} />
+            </>
+          )
+        })()}
         {e?.retrying && (
           <p className="flex items-center gap-1.5 text-xs text-black/50">
             <span className="live-dot" aria-hidden /> Retrying…
@@ -631,19 +756,30 @@ function AnswersView({
 function AssistantTurn({
   content,
   streaming,
+  autoRun,
   autoTestResult,
 }: {
   content: string
   streaming: boolean
+  autoRun?: boolean
   autoTestResult?: TestRunResult
 }) {
   const [result, setResult] = useState<RunResult | null>(null)
   const [testResult, setTestResult] = useState<TestRunResult | null>(null)
   const [running, setRunning] = useState(false)
-  const codeBlock = streaming ? null : extractCode(content)
-  const testsBlock = streaming ? null : extractTests(content)
+  // Strip the two-pass draft framing so code extraction + render see clean text.
+  const { text: displayContent, phase } = parseDraftStream(content)
+  const codeBlock = streaming ? null : extractCode(displayContent)
+  const testsBlock = streaming ? null : extractTests(displayContent)
 
   const displayTestResult = testResult ?? autoTestResult ?? null
+
+  // "remote" must reflect the language that ACTUALLY executes — that's the tests
+  // block (run() executes on testsBlock.language), falling back to the code block.
+  // Deriving it from codeBlock alone let a tests-block language mismatch slip a
+  // remote language past the no-egress-without-click guard.
+  const execLang = testsBlock?.language ?? codeBlock?.language
+  const remote = execLang ? isRemoteLanguage(execLang) : false
 
   const run = async () => {
     if (!codeBlock) return
@@ -652,17 +788,37 @@ function AssistantTurn({
     setTestResult(null)
     if (testsBlock && canExecute(testsBlock.language)) {
       setTestResult(await executeTests(codeBlock.code, testsBlock.tests, testsBlock.language))
-    } else if (canExecute(codeBlock.language)) {
+    } else if (!remote && canExecute(codeBlock.language)) {
+      // Bare-snippet run (stdout) is a LOCAL-only convenience; remote languages need
+      // the test-harness program, so without a :tests block there's nothing to run.
       setResult(await executeCode(codeBlock.code, codeBlock.language))
     }
     setRunning(false)
   }
 
-  const executable = codeBlock && canExecute(codeBlock.language)
+  // Runnable if local, or remote WITH a tests block (the harness program to execute).
+  const executable = codeBlock && canExecute(codeBlock.language) && (!remote || !!testsBlock)
+
+  // Auto-run once a typed coding answer settles — LOCAL languages only (running
+  // remote code would egress without a click). Runs a single time per answer; the
+  // screen-capture orchestrator already self-verifies its own path.
+  const autoRanRef = useRef(false)
+  useEffect(() => {
+    if (!autoRun || streaming || autoRanRef.current) return
+    if (!codeBlock || !testsBlock || remote || !canExecute(testsBlock.language)) return
+    autoRanRef.current = true
+    void run()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoRun, streaming, codeBlock, testsBlock, remote])
 
   return (
     <div className="flex flex-col items-start gap-2">
-      <RichContent content={content} streaming={streaming} />
+      {phase === 'draft' && (
+        <span className="flex items-center gap-1 text-xs font-medium uppercase tracking-wide text-amber-700">
+          <span className="live-dot" aria-hidden /> Quick take
+        </span>
+      )}
+      <RichContent content={displayContent} streaming={streaming} />
       {codeBlock && executable && (
         <div className="w-full">
           {!autoTestResult && (
@@ -670,9 +826,10 @@ function AssistantTurn({
               onClick={run}
               disabled={running}
               className="btn-ghost flex items-center gap-1.5 text-xs disabled:opacity-50"
-              title={testsBlock ? `Run ${codeBlock.language} tests in sandbox` : `Run ${codeBlock.language} in sandbox`}
+              title={remote ? `Run ${codeBlock.language} tests on the remote sandbox (code leaves your device)` : `Run ${codeBlock.language} tests in the browser sandbox`}
             >
               <Play size={12} /> {running ? 'Running…' : testsBlock ? 'Run tests' : 'Run code'}
+              {remote && <span className="ml-1 text-black/40">· remote</span>}
             </button>
           )}
 
@@ -699,18 +856,55 @@ function AssistantTurn({
   )
 }
 
-// Renders assistant content with inline Mermaid diagrams.
+// Structure-native answer: the say-this-now LEDE as a pinned hero, the supporting
+// script as the body, and DO-NOT-say-aloud material (glossary / follow-ups / metric
+// defense) tucked into a "Reserve" drawer that opens only when the interviewer
+// probes. This expresses the answer's structure so a one-second glance lands on the
+// line to say next — the product's core reading experience.
+function StructuredAnswer({ content, streaming }: { content: string; streaming: boolean }) {
+  const { lede, body, reserve } = splitAnswer(content)
+  return (
+    <div className="space-y-3">
+      {lede && (
+        // Tier 1 — the hero line. Larger, near-full-contrast, accent left-rule.
+        <p className="border-l-[3px] border-[color:var(--signal)] pl-3 text-lg font-medium leading-snug text-ink">
+          {lede}
+          {streaming && !body && <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-[color:var(--signal)] align-middle" aria-hidden />}
+        </p>
+      )}
+      {body && <RichContent content={body} streaming={streaming && !reserve} />}
+      {reserve && (
+        // Tier 3 — reserve. Recessed + collapsed; the safety net that must never be
+        // read aloud by reflex. Opens on demand when a follow-up actually lands.
+        <details className="rounded-lg border border-black/10 bg-black/[0.02]">
+          <summary className="cursor-pointer px-3 py-1.5 text-[11px] font-medium uppercase tracking-wide text-black/45">
+            Reserve — don&rsquo;t say aloud (follow-ups, glossary, metrics)
+          </summary>
+          <div className="px-3 pb-2 opacity-80">
+            <RichContent content={reserve} streaming={false} />
+          </div>
+        </details>
+      )}
+    </div>
+  )
+}
+
+// Renders assistant content as markdown with inline Mermaid diagrams. Mermaid
+// fences are pulled out and rendered as live diagrams; everything else (headings,
+// lists, tables, bold, inline/fenced code) renders as formatted markdown so the
+// answer reads like a designed document during hands-free auto-scroll.
 function RichContent({ content, streaming }: { content: string; streaming: boolean }) {
   const parts = content.split(/(```mermaid\n[\s\S]*?```)/g)
 
   return (
-    <div className="max-w-[92%] whitespace-pre-wrap break-words text-sm leading-relaxed text-ink">
+    <div className="max-w-[92%] break-words text-sm leading-relaxed text-ink">
       {parts.map((part, i) => {
         const mermaidMatch = part.match(/```mermaid\n([\s\S]*?)```/)
         if (mermaidMatch) {
           return <MermaidDiagram key={i} code={mermaidMatch[1].trim()} />
         }
-        return <span key={i}>{part}</span>
+        if (!part.trim()) return null
+        return <Markdown key={i}>{part}</Markdown>
       })}
       {streaming && (
         <span className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse bg-[color:var(--signal)] align-middle" aria-hidden />

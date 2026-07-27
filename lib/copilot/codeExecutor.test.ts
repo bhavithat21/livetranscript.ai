@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { extractCode, extractTests, normalizeLanguage, canExecute } from './codeExecutor'
+import { extractCode, extractTests, normalizeLanguage, canExecute, isRemoteLanguage } from './codeExecutor'
 
 describe('normalizeLanguage', () => {
   it('normalizes python variants', () => {
@@ -31,18 +31,21 @@ describe('normalizeLanguage', () => {
 })
 
 describe('canExecute', () => {
-  it('returns true for python, javascript, typescript', () => {
-    expect(canExecute('python')).toBe(true)
-    expect(canExecute('javascript')).toBe(true)
-    expect(canExecute('typescript')).toBe(true)
-    expect(canExecute('py')).toBe(true)
-    expect(canExecute('js')).toBe(true)
+  it('runs python, javascript, typescript LOCALLY (in-browser, not remote)', () => {
+    for (const l of ['python', 'javascript', 'typescript', 'py', 'js']) {
+      expect(canExecute(l)).toBe(true)
+      expect(isRemoteLanguage(l)).toBe(false)
+    }
   })
-  it('returns false for non-executable languages', () => {
-    expect(canExecute('java')).toBe(false)
-    expect(canExecute('cpp')).toBe(false)
-    expect(canExecute('go')).toBe(false)
-    expect(canExecute('rust')).toBe(false)
+  it('runs compiled languages via the REMOTE executor (still executable, but remote)', () => {
+    for (const l of ['java', 'cpp', 'go', 'rust', 'csharp', 'ruby', 'swift', 'kotlin', 'scala']) {
+      expect(canExecute(l)).toBe(true)
+      expect(isRemoteLanguage(l)).toBe(true)
+    }
+  })
+  it('returns false for a language with no executor at all', () => {
+    expect(canExecute('brainfuck')).toBe(false)
+    expect(isRemoteLanguage('brainfuck')).toBe(false)
   })
 })
 

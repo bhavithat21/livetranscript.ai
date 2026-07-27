@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server'
 import { currentUserId } from '@/lib/auth'
 import { logError } from '@/lib/log'
-import { modeProfile, modelForTier, vendorForModel, thinkingConfigFor } from '@/lib/copilot/modes'
+import { modeProfile, modelForTier, vendorForModel, thinkingConfigFor, fastFallbackModel } from '@/lib/copilot/modes'
 import { streamAnswer } from '@/lib/copilot/providers'
 
 // On-demand copilot answer. Streams tokens back grounded in the transcript the
@@ -18,6 +18,10 @@ import { streamAnswer } from '@/lib/copilot/providers'
 const MAX_TRANSCRIPT = 60_000
 const MAX_QUESTION = 2_000
 const MAX_HISTORY = 8
+// A prior ASSISTANT turn can be a full two-story behavioral answer (~4k chars); cap
+// it well above MAX_QUESTION so history isn't clipped mid-story — which would break
+// the behavioral no-reuse memory (the model must see the whole story it already told).
+const MAX_HISTORY_CONTENT = 8_000
 const MAX_INSTRUCTIONS = 4_000
 // A downscaled JPEG data URL is well under this; caps a hostile/oversized payload.
 const MAX_IMAGE_CHARS = 1_200_000 // ~900KB base64
@@ -77,21 +81,26 @@ export async function POST(req: NextRequest) {
     ? body.history
         .filter((t) => (t?.role === 'user' || t?.role === 'assistant') && typeof t.content === 'string')
         .slice(-MAX_HISTORY)
-        .map((t) => ({ role: t.role, content: clean(t.content, MAX_QUESTION) }))
+        .map((t) => ({ role: t.role, content: clean(t.content, MAX_HISTORY_CONTENT) }))
     : []
 
   // Purpose-specific model: coding/design => smart (Claude), behavioral/general
-  // => fast (OpenAI). A screen read needs the stronger vision model, so force
+  // => fast (Groq). A screen read needs the stronger vision model, so force
   // 'smart' when an image is attached.
   let model = modelForTier(image ? 'smart' : profile.tier)
-  // If the smart tier resolves to Anthropic but no key is set, fall back to the
-  // fast (OpenAI) model so the copilot still answers rather than erroring.
-  if (vendorForModel(model) === 'anthropic' && !process.env.ANTHROPIC_API_KEY) {
-    model = modelForTier('fast')
+  // Degrade to a reachable model if the chosen vendor has no key configured, so
+  // the copilot still answers rather than erroring. Groq's own runtime failures
+  // (rate limit, outage) are handled by the fast-tier fallback inside streamAnswer.
+  const keyFor = (m: string): boolean => {
+    switch (vendorForModel(m)) {
+      case 'anthropic': return !!process.env.ANTHROPIC_API_KEY
+      case 'groq': return !!process.env.GROQ_API_KEY
+      case 'openai': return !!process.env.OPENAI_API_KEY
+      default: return true
+    }
   }
-  if (vendorForModel(model) === 'openai' && !process.env.OPENAI_API_KEY) {
-    return Response.json({ error: 'Assistant unavailable' }, { status: 500 })
-  }
+  if (!keyFor(model)) model = fastFallbackModel()
+  if (!keyFor(model)) return Response.json({ error: 'Assistant unavailable' }, { status: 500 })
 
   // Append the user's own instructions to the mode's fixed system prompt (never
   // replace it — the mode's grounding/format rules still apply).
@@ -114,6 +123,7 @@ export async function POST(req: NextRequest) {
       question,
       image,
       temperature: profile.temperature,
+      maxTokens: profile.maxTokens,
       thinking: posture.thinking,
       effort: posture.effort,
     })

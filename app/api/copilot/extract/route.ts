@@ -7,6 +7,36 @@ import OpenAI from 'openai'
 
 const MAX_IMAGE_CHARS = 1_200_000
 
+// Vision extract runs on Gemini Flash by default: fastest + cheapest at reading
+// dense text/code off a screenshot, and its native JSON mode removes the
+// regex-scrape step. Override with COPILOT_MODEL_VISION; falls back to the smart
+// tier (Claude Sonnet) when GEMINI_API_KEY is unset or Gemini errors.
+const VISION_MODEL = process.env.COPILOT_MODEL_VISION || 'gemini-flash-latest'
+const GEMINI_URL = (model: string) =>
+  `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`
+
+// Call Gemini with the screenshot + prompt in JSON mode; returns the raw JSON
+// text. Throws on any non-200 or missing key so the caller can fall back.
+async function extractWithGemini(prompt: string, mediaType: string, data: string): Promise<string> {
+  const key = process.env.GEMINI_API_KEY
+  if (!key) throw new Error('no gemini key')
+  const res = await fetch(GEMINI_URL(VISION_MODEL), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-goog-api-key': key },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: mediaType, data } }] }],
+      generationConfig: { responseMimeType: 'application/json', temperature: 0 },
+    }),
+  })
+  if (!res.ok) throw new Error(`gemini ${res.status}`)
+  const json = (await res.json()) as {
+    candidates?: { content?: { parts?: { text?: string }[] } }[]
+  }
+  const text = json.candidates?.[0]?.content?.parts?.[0]?.text
+  if (!text) throw new Error('gemini empty response')
+  return text
+}
+
 const EXTRACT_PROMPT = `Analyze this screenshot. If it shows a coding problem or interview question, extract its details as JSON. If it does NOT show a coding problem, respond with exactly: {"noProblem": true}
 
 For a coding problem, respond with raw JSON only (no markdown fences, no explanation):
@@ -98,47 +128,59 @@ export async function POST(req: NextRequest) {
 
   if (!image) return Response.json({ error: 'No valid image' }, { status: 400 })
 
-  let model = modelForTier('smart')
-  if (vendorForModel(model) === 'anthropic' && !process.env.ANTHROPIC_API_KEY) {
-    model = modelForTier('fast')
-  }
-  if (vendorForModel(model) === 'openai' && !process.env.OPENAI_API_KEY) {
-    return Response.json({ error: 'Extraction unavailable' }, { status: 500 })
-  }
+  const m = image.match(/^data:(image\/[a-z]+);base64,(.+)$/i)
+  if (!m) return Response.json({ error: 'Invalid image format' }, { status: 400 })
+  const [mediaType, imgData] = [m[1], m[2]]
 
   try {
-    let raw: string
+    let raw: string | null = null
 
-    if (vendorForModel(model) === 'anthropic') {
-      const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
-      const m = image.match(/^data:(image\/[a-z]+);base64,(.+)$/i)
-      if (!m) return Response.json({ error: 'Invalid image format' }, { status: 400 })
+    // Primary: Gemini Flash (fast/cheap dense-text OCR, native JSON mode). On any
+    // failure fall through to the smart-tier Claude/OpenAI path below.
+    try {
+      raw = await extractWithGemini(EXTRACT_PROMPT, mediaType, imgData)
+    } catch (e) {
+      logError('api/copilot/extract/gemini', e)
+      raw = null
+    }
 
-      const response = await client.messages.create({
-        model,
-        max_tokens: 2000,
-        messages: [{
-          role: 'user',
-          content: [
-            { type: 'text', text: EXTRACT_PROMPT },
-            { type: 'image', source: { type: 'base64', media_type: m[1] as 'image/jpeg', data: m[2] } },
-          ],
-        }],
-      })
-      raw = response.content[0].type === 'text' ? response.content[0].text : ''
-    } else {
-      const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-      const response = await client.chat.completions.create({
-        model,
-        messages: [{
-          role: 'user',
-          content: [
-            { type: 'text', text: EXTRACT_PROMPT },
-            { type: 'image_url', image_url: { url: image, detail: 'high' } },
-          ],
-        }],
-      })
-      raw = response.choices[0]?.message?.content ?? ''
+    if (raw === null) {
+      // Fallback: smart tier (Claude Sonnet), or the fast model if Anthropic is
+      // keyless. Returns 500 only if no fallback vendor is configured either.
+      let model = modelForTier('smart')
+      if (vendorForModel(model) === 'anthropic' && !process.env.ANTHROPIC_API_KEY) {
+        model = modelForTier('fast')
+      }
+      if (vendorForModel(model) === 'anthropic') {
+        const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+        const response = await client.messages.create({
+          model,
+          max_tokens: 2000,
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'text', text: EXTRACT_PROMPT },
+              { type: 'image', source: { type: 'base64', media_type: mediaType as 'image/jpeg', data: imgData } },
+            ],
+          }],
+        })
+        raw = response.content[0].type === 'text' ? response.content[0].text : ''
+      } else if (vendorForModel(model) === 'openai' && process.env.OPENAI_API_KEY) {
+        const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+        const response = await client.chat.completions.create({
+          model,
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'text', text: EXTRACT_PROMPT },
+              { type: 'image_url', image_url: { url: image, detail: 'high' } },
+            ],
+          }],
+        })
+        raw = response.choices[0]?.message?.content ?? ''
+      } else {
+        return Response.json({ error: 'Extraction unavailable' }, { status: 500 })
+      }
     }
 
     const jsonMatch = raw.match(/\{[\s\S]*\}/)

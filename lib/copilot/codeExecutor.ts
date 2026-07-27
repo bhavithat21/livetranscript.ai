@@ -1,6 +1,7 @@
 'use client'
 import { runPython, runTests as runPyTests, preloadPyodide, type TestRunResult } from './pyodideRunner'
 import { runJavaScript, runJsTests, type JsTestRunResult } from './jsRunner'
+import { runRemoteTests, canExecuteRemote } from './remoteRunner'
 
 export type { TestRunResult } from './pyodideRunner'
 
@@ -18,10 +19,22 @@ export type SupportedLanguage =
   | 'kotlin'
   | 'scala'
 
-const EXECUTABLE_LANGUAGES = new Set(['python', 'javascript', 'typescript'])
+// Run IN THE BROWSER (WASM worker) — instant, private, zero egress. Best for these.
+const LOCAL_LANGUAGES = new Set(['python', 'javascript', 'typescript'])
 
+// A language can be executed if the browser runs it locally OR a remote executor
+// (Judge0, via /api/execute) covers it. This is now every language the copilot
+// generates — no more "generated but unverifiable" answers.
 export function canExecute(language: string): boolean {
-  return EXECUTABLE_LANGUAGES.has(normalizeLanguage(language))
+  const lang = normalizeLanguage(language)
+  return LOCAL_LANGUAGES.has(lang) || canExecuteRemote(lang)
+}
+
+// Whether execution needs the network (remote executor) vs runs locally in the
+// browser — the UI uses this to tell the user their code egresses for these langs.
+export function isRemoteLanguage(language: string): boolean {
+  const lang = normalizeLanguage(language)
+  return !LOCAL_LANGUAGES.has(lang) && canExecuteRemote(lang)
 }
 
 export function normalizeLanguage(lang: string): SupportedLanguage {
@@ -75,11 +88,19 @@ export async function executeTests(
     }
 
     default:
+      // Compiled / non-browser languages run remotely. Per the CODING prompt, the
+      // :tests block for these languages is ALREADY a complete standalone program
+      // that restates the solution + a main() printing PASS/FAIL — so we send the
+      // tests block ALONE. Concatenating the solution too would duplicate the
+      // function/type definitions and fail to compile on every run.
+      if (canExecuteRemote(lang)) {
+        return runRemoteTests(tests, lang, Math.max(timeoutMs, 20_000))
+      }
       return {
         passed: 0,
         failed: 0,
         total: 0,
-        cases: [{ label: `Execution not available for ${lang}`, passed: false, error: 'Language not supported for in-browser execution' }],
+        cases: [{ label: `Execution not available for ${lang}`, passed: false, error: 'No executor for this language' }],
       }
   }
 }
