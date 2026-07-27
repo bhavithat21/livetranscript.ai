@@ -104,6 +104,9 @@ jobs:
           "AZURE_TS_ACCOUNT=${{ secrets.AZURE_TS_ACCOUNT }}" >> $env:GITHUB_ENV
           "AZURE_TS_CERT_PROFILE=${{ secrets.AZURE_TS_CERT_PROFILE }}" >> $env:GITHUB_ENV
           "LT_WINDOWS_SIGN=1" >> $env:GITHUB_ENV
+          # Merge the signing overlay ONLY now — it adds bundle.windows.signCommand.
+          # Kept out of the base config so unsigned builds never invoke pwsh/signtool.
+          "WIN_SIGN_ARGS=--config src-tauri/tauri.windows-sign.conf.json" >> $env:GITHUB_ENV
           Write-Host "Windows Azure Trusted Signing ENABLED for this build."
 
       - name: Build + publish desktop app
@@ -122,7 +125,9 @@ jobs:
           # @tauri-apps/cli isn't a project dep; npx fetches it on-demand in CI so
           # the pnpm lockfile stays untouched. App deps still install via pnpm above.
           tauriScript: npx @tauri-apps/cli
-          args: ${{ matrix.args }}
+          # WIN_SIGN_ARGS is empty unless the Windows-signing step set it (Azure creds
+          # present) → the signing overlay is merged only when actually signing.
+          args: ${{ matrix.args }} ${{ env.WIN_SIGN_ARGS }}
           tagName: ${{ github.ref_name }}
           releaseName: 'LiveTranscript ${{ github.ref_name }}'
           releaseBody: 'Auto-generated release. The desktop app updates itself on launch.'

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "//": "Config-MERGE overlay that adds Windows Authenticode signing. Applied via `--config src-tauri/tauri.windows-sign.conf.json` by the release workflow ONLY when Azure Trusted Signing creds are present. Kept OUT of the base config so ordinary/unsigned builds never invoke signCommand (which previously broke the Windows build with 'failed to run pwsh' + a SignTool error on the sidecar). No signCommand in the base = no signing attempt unless this overlay is explicitly merged in.",
+  "bundle": {
+    "windows": {
+      "signCommand": {
+        "cmd": "pwsh",
+        "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/sign-windows.ps1", "%1"]
+      }
+    }
+  }
+}
