@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { Check, Eye, EyeOff, Lock, Monitor, MonitorOff, MoreHorizontal, Play, Send, Sparkles, X } from 'lucide-react'
 import { useLockMode } from '@/lib/desktop/useLockMode'
 import { useAppIdentity } from '@/lib/desktop/useAppIdentity'
@@ -9,7 +9,7 @@ import { useModeContext } from '@/lib/copilot/useModeContext'
 import { useCandidateProfile } from '@/lib/copilot/useCandidateProfile'
 import { useOrchestrationRouter } from '@/lib/copilot/useOrchestrationRouter'
 import { latencyStats } from '@/lib/copilot/latency'
-import { useProactive } from '@/lib/copilot/useProactive'
+import { useProactive, latestQuestion } from '@/lib/copilot/useProactive'
 import { useAnswerFeed } from '@/lib/copilot/useAnswerFeed'
 import { useMeContext } from '@/lib/copilot/useMeContext'
 import { ChevronDown, ChevronLeft, ChevronRight, Mic, MicOff } from 'lucide-react'
@@ -102,51 +102,55 @@ export function CopilotPanel({
     if (mode === 'coding') preloadRuntime('python')
   }, [mode])
 
-  // Proactive: while auto is on, questions heard in the transcript are answered
-  // automatically into the SEPARATE navigable answer feed (not the chat thread).
-  // Pulls this mode's uploaded-document context; a screen frame attaches if
-  // sharing is on.
-  useProactive(auto, getTranscript, (q) => {
-    setView('answers') // surface the feed as answers arrive
-    // Return the promise so useProactive's in-flight guard holds until this
-    // answer finishes streaming (no duplicate answers as the ASR tail revises).
-    return (async () => {
-      // ORCHESTRATOR ROUTING: classify the heard question → which mode + does it need
-      // live web facts. This auto-switches coding↔behavioral↔design mid-round instead
-      // of relying on the manual chip. Fail-soft: null classification keeps the
-      // current mode. Skip clearly-not-a-question chatter the regex detector let by.
-      const routed = await router.route(q)
-      if (routed.classification && !routed.classification.isQuestion) return
-      const answerMode: CopilotMode = routed.classification?.mode ?? mode
-      // Follow the routed mode in the UI (and make the NEXT turn's context match it).
-      if (answerMode !== mode) setMode(answerMode)
+  // Generate an answer for a heard question into the answer feed — shared by the
+  // proactive auto-path AND the manual "Answer" button. Classifies → routes mode →
+  // grounds (web/profile/story/chunk) → answers. `viaButton` skips the is-question
+  // gate (the user explicitly asked, so answer even if the classifier is unsure).
+  const answerQuestion = useCallback(
+    (q: string, viaButton = false) => {
+      setView('answers')
+      return (async () => {
+        const routed = await router.route(q)
+        if (!viaButton && routed.classification && !routed.classification.isQuestion) return
+        const answerMode: CopilotMode = routed.classification?.mode ?? mode
+        if (answerMode !== mode) setMode(answerMode)
+        const sameMode = answerMode === mode
+        const retrieved =
+          sameMode && answerMode === 'behavioral' && context.storyCount > 0
+            ? await context.retrieveStories(q, 2).then((ss) =>
+                ss.length ? ss.map((s) => `STORY — ${s.title}\n${s.fullText}`).join('\n\n---\n\n') : null,
+              )
+            : sameMode && context.count > 0
+              ? await context.retrieve(q)
+              : null
+        const parts = [
+          routed.webContext && `LIVE WEB RESULTS (current facts — prefer these for anything time-sensitive):\n${routed.webContext}`,
+          profile.contextBlock(),
+          me.getMeContext() && `What I said: ${me.getMeContext()}`,
+          retrieved,
+        ].filter(Boolean)
+        const ctx = parts.length ? parts.join('\n\n') : null
+        const image = screen.sharing && usesScreen(answerMode) ? screen.grabFrame() : null
+        await feed.answer(q, answerMode, ctx, image, context.instructions || null, getTranscript())
+      })()
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [mode, context, profile, me, screen, router, feed, getTranscript],
+  )
 
-      // Per-mode doc/story retrieval only when the mode ISN'T switching this turn —
-      // `context` is keyed to the current mode, so on a switch it holds the wrong
-      // mode's data; we ground on profile + transcript + web instead, and the
-      // switched context applies from the next turn.
-      const sameMode = answerMode === mode
-      const retrieved =
-        sameMode && answerMode === 'behavioral' && context.storyCount > 0
-          ? await context.retrieveStories(q, 2).then((ss) =>
-              ss.length ? ss.map((s) => `STORY — ${s.title}\n${s.fullText}`).join('\n\n---\n\n') : null,
-            )
-          : sameMode && context.count > 0
-            ? await context.retrieve(q)
-            : null
-      // Combine live WEB facts (if the question needed them), the always-on candidate
-      // profile (resume + JD), what YOU said (mic), and the matched story/chunk — all
-      // grounding the answer without any of it appearing in the transcript.
-      const parts = [
-        routed.webContext && `LIVE WEB RESULTS (current facts — prefer these for anything time-sensitive):\n${routed.webContext}`,
-        profile.contextBlock(),
-        me.getMeContext() && `What I said: ${me.getMeContext()}`,
-        retrieved,
-      ].filter(Boolean)
-      const ctx = parts.length ? parts.join('\n\n') : null
-      const image = screen.sharing && usesScreen(answerMode) ? screen.grabFrame() : null
-      // Answer in the ROUTED mode. Ground in the live transcript like manual chat does.
-      await feed.answer(q, answerMode, ctx, image, context.instructions || null, getTranscript())
+  // Manual "Answer" button: answer the latest question heard in the transcript RIGHT
+  // NOW (user controls timing instead of waiting for the auto settle). Null if none.
+  const answerLatest = useCallback(() => {
+    const q = latestQuestion(getTranscript())
+    if (q) void answerQuestion(q, true)
+  }, [answerQuestion, getTranscript])
+
+  // Proactive: while auto is on, a settled (complete) heard question is answered
+  // automatically into the navigable answer feed. Returns the promise so the hook's
+  // in-flight guard holds until streaming finishes (no stacked duplicates).
+  useProactive(auto, getTranscript, (q) => {
+    return (async () => {
+      await answerQuestion(q)
     })()
   })
 
@@ -450,7 +454,7 @@ export function CopilotPanel({
       )}
 
       {view === 'answers' ? (
-        <AnswersView feed={feed} auto={auto} review={review} onReview={runReview} />
+        <AnswersView feed={feed} auto={auto} review={review} onReview={runReview} onAnswerLatest={answerLatest} />
       ) : (
       <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4">
         {visibleTurns.length === 0 && !error && (
@@ -768,15 +772,19 @@ function SheetItem({
   label: string
   onClick: () => void
 }) {
+  // High contrast in BOTH states so it's never faint: inactive = solid ink text on
+  // the white sheet; active = a filled emerald pill (obvious "on" affordance, not a
+  // subtle color shift). The sheet is always bg-white (set on its container), so
+  // this reads the same regardless of stealth/translucent panel behind it.
   return (
     <button
       onClick={onClick}
       data-active={active}
-      className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-xs text-black/70 transition-colors hover:bg-black/5 data-[active=true]:text-emerald-800"
+      className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-xs text-ink transition-colors hover:bg-black/[0.06] data-[active=true]:bg-emerald-700/12 data-[active=true]:font-medium data-[active=true]:text-emerald-900"
     >
-      <span className={active ? 'text-emerald-700' : 'text-black/40'}>{icon}</span>
+      <span className={active ? 'text-emerald-700' : 'text-ink/55'}>{icon}</span>
       <span className="flex-1">{label}</span>
-      {active && <span className="h-1.5 w-1.5 rounded-full bg-emerald-700" aria-hidden />}
+      {active && <span className="h-1.5 w-1.5 rounded-full bg-emerald-600" aria-hidden />}
     </button>
   )
 }
@@ -787,11 +795,13 @@ function AnswersView({
   auto,
   review,
   onReview,
+  onAnswerLatest,
 }: {
   feed: ReturnType<typeof useAnswerFeed>
   auto: boolean
   review: { loading: boolean; text: string | null; error: string | null }
   onReview: () => void
+  onAnswerLatest: () => void
 }) {
   const bodyRef = useRef<HTMLDivElement>(null)
   const e = feed.current
@@ -805,10 +815,15 @@ function AnswersView({
 
   if (feed.count === 0) {
     return (
-      <div className="flex-1 overflow-y-auto px-4 py-8 text-center">
+      <div className="flex flex-1 flex-col items-center justify-center gap-4 overflow-y-auto px-4 py-8 text-center">
         <p className="font-[family-name:var(--font-serif)] text-lg text-black/40">
-          {auto ? 'Listening… answers to questions will appear here.' : 'Turn on Auto to auto-answer questions from the meeting.'}
+          {auto ? 'Listening… answers to questions will appear here.' : 'Turn on Auto to auto-answer questions — or answer the last question now.'}
         </p>
+        {/* Manual Answer: answer the latest heard question on demand, without waiting
+            for the auto settle (or with Auto off entirely). */}
+        <button onClick={onAnswerLatest} className="btn-signal flex items-center gap-1.5 px-4 py-2 text-sm">
+          <Sparkles size={15} /> Answer last question
+        </button>
       </div>
     )
   }
@@ -821,6 +836,14 @@ function AnswersView({
         <span className="tabular-nums">{feed.cursor + 1} / {feed.count}</span>
         <button onClick={feed.next} disabled={feed.cursor >= feed.count - 1} className="rounded-full p-1 hover:bg-black/5 disabled:opacity-30" aria-label="Next">
           <ChevronRight size={16} />
+        </button>
+        {/* Answer the latest heard question on demand (in addition to auto). */}
+        <button
+          onClick={onAnswerLatest}
+          className="flex items-center gap-1 rounded-full px-2 py-1 font-medium text-emerald-800 hover:bg-emerald-700/10"
+          title="Answer the last question heard, now"
+        >
+          <Sparkles size={13} /> Answer
         </button>
         {e?.failed && (
           <button onClick={() => feed.retry(e.id)} className="rounded-full px-2 py-1 text-emerald-800 hover:bg-emerald-700/10" title="Retry this answer">

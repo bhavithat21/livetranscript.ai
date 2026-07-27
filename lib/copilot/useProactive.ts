@@ -76,6 +76,16 @@ function isSameOrExtension(a: string, b: string): boolean {
   return a === b || a.startsWith(b) || b.startsWith(a)
 }
 
+// SETTLE gate: a spoken question is still being spoken when it first becomes
+// question-shaped ("Tell me about a time you…" appears before "…led a hard
+// migration."). Firing immediately answers a FRAGMENT. So we wait until the latest
+// candidate question STOPS GROWING for this long — the speaker finished the thought —
+// before answering. Balances "don't cut them off" against "answer promptly".
+const SETTLE_MS = 1_200
+// A question that already ends with '?' is complete — fire after a shorter settle so
+// clearly-finished questions still feel instant.
+const SETTLE_MS_TERMINATED = 400
+
 export function useProactive(
   enabled: boolean,
   getTranscript: () => string,
@@ -90,18 +100,51 @@ export function useProactive(
   onQuestionRef.current = onQuestion
   const getRef = useRef(getTranscript)
   getRef.current = getTranscript
+  // The candidate question we're WAITING on, its normalized key, and when it last
+  // changed — the basis for "has it stopped growing?".
+  const pendingRef = useRef<{ q: string; key: string; since: number } | null>(null)
 
   useEffect(() => {
-    if (!enabled) return
-    // Poll the transcript on a debounce; fire when a fresh question appears.
+    if (!enabled) {
+      pendingRef.current = null
+      return
+    }
     const id = setInterval(() => {
       if (inFlightRef.current) return // don't stack answers while one is generating
       const q = latestQuestion(getRef.current())
-      if (!q) return
+      if (!q) {
+        pendingRef.current = null
+        return
+      }
       const key = normalizeKey(q)
-      // Skip if it matches (or merely extends the tail of) one already asked.
-      if (askedRef.current.some((k) => isSameOrExtension(k, key))) return
+      // Already answered (or a tail-extension of one we answered)? Skip.
+      if (askedRef.current.some((k) => isSameOrExtension(k, key))) {
+        pendingRef.current = null
+        return
+      }
+      const now = Date.now()
+      const pending = pendingRef.current
+      // Still growing (this candidate extends the one we were tracking, or it's new)
+      // → (re)start the settle clock and WAIT. This is what stops us answering a
+      // half-spoken question.
+      if (!pending || !isSameOrExtension(pending.key, key)) {
+        pendingRef.current = { q, key, since: now }
+        return
+      }
+      // Same thought as last tick but the text changed (grew) → reset the clock.
+      if (pending.key !== key) {
+        pendingRef.current = { q, key, since: now }
+        return
+      }
+      // Unchanged since last tick — has it been stable long enough to count as
+      // "the speaker finished"? Terminated questions settle faster.
+      const terminated = /\?\s*$/.test(q)
+      const settleMs = terminated ? SETTLE_MS_TERMINATED : SETTLE_MS
+      if (now - pending.since < settleMs) return // keep waiting
+
+      // Settled → answer the COMPLETE question.
       askedRef.current.push(key)
+      pendingRef.current = null
       inFlightRef.current = true
       setLastAsked(q)
       Promise.resolve(onQuestionRef.current(q)).finally(() => {
