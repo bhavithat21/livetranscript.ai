@@ -1,5 +1,22 @@
 import { useCallback, useRef } from 'react'
 import type { MicStreamOptions } from './useMicStream'
+import { logError } from '@/lib/log'
+
+// Coerce whatever the Tauri IPC channel delivered into an ArrayBuffer, or null
+// if it's not binary-shaped. Covers ArrayBuffer (docs), Uint8Array (observed on
+// some webviews), and number[] (JSON-serialized fallback path).
+function toArrayBuffer(message: unknown): ArrayBuffer | null {
+  if (message instanceof ArrayBuffer) return message
+  if (ArrayBuffer.isView(message)) {
+    const v = message as Uint8Array
+    // Copy so downstream owns a plain, exactly-sized ArrayBuffer.
+    return v.buffer.slice(v.byteOffset, v.byteOffset + v.byteLength) as ArrayBuffer
+  }
+  if (Array.isArray(message) && (message.length === 0 || typeof message[0] === 'number')) {
+    return new Uint8Array(message as number[]).buffer as ArrayBuffer
+  }
+  return null
+}
 
 // Native system-audio capture bridge for the Tauri desktop build. Mirrors
 // useMicStream's start()/stop() so callers can try native first and fall back
@@ -34,16 +51,26 @@ export function useNativeCapture() {
       const { invoke, Channel } = await import('@tauri-apps/api/core')
       const channel = new Channel<ArrayBuffer>()
 
+      let badShapeLogged = false
       channel.onmessage = (message) => {
-        // InvokeResponseBody::Raw arrives as an ArrayBuffer (16-bit LE mono PCM).
-        // Guard defensively in case a non-Raw body ever slips through.
-        if (!(message instanceof ArrayBuffer)) return
+        // InvokeResponseBody::Raw SHOULD arrive as an ArrayBuffer (16-bit LE mono
+        // PCM), but the delivered shape varies by webview/Tauri version (typed
+        // array, number[]). Coerce instead of dropping — a silent drop here kills
+        // the meter AND transcription with zero errors anywhere.
+        const pcm = toArrayBuffer(message)
+        if (!pcm) {
+          if (!badShapeLogged) {
+            badShapeLogged = true
+            logError('nativeCapture/frame-shape', new Error(`unexpected channel payload: ${Object.prototype.toString.call(message)}`))
+          }
+          return
+        }
         if (opts.isMuted?.()) {
           onLevel(0)
           return // muted: keep the tap alive but send nothing (same as useMicStream)
         }
-        onPcm(message)
-        onLevel(rms16(message))
+        onPcm(pcm)
+        onLevel(rms16(pcm))
       }
 
       stoppingRef.current = false
