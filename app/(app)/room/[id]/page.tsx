@@ -25,6 +25,7 @@ import { RosterPanel } from '@/components/room/RosterPanel'
 import { FollowAlong } from '@/components/room/FollowAlong'
 import { CopilotPanel } from '@/components/copilot/CopilotPanel'
 import { useLockMode } from '@/lib/desktop/useLockMode'
+import { LeverSwitch } from '@/components/ui/LeverSwitch'
 import { usePanelWidth } from '@/lib/copilot/usePanelWidth'
 import { HomeMenu } from '@/components/nav/HomeMenu'
 import type { TranscriptionProvider } from '@/lib/transcription/types'
@@ -485,17 +486,11 @@ function Meeting({ roomId }: { roomId: string }) {
           {lockMode.available && (
             <div className="glass flex items-center gap-2 rounded-full px-3 py-1.5 text-sm">
               <Lock size={14} className={lockMode.locked ? 'text-emerald-600' : 'text-black/50'} />
-              <button
-                role="switch"
-                aria-checked={lockMode.locked}
-                aria-label="Lock (click-through)"
-                onClick={() => { if (!lockMode.locked) void lockMode.enable() }}
-                className={`relative h-5 w-9 rounded-full transition-colors duration-200 ${lockMode.locked ? 'bg-emerald-500' : 'bg-black/20'}`}
-              >
-                <span
-                  className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform duration-200 ${lockMode.locked ? 'translate-x-[18px]' : 'translate-x-0.5'}`}
-                />
-              </button>
+              <LeverSwitch
+                checked={lockMode.locked}
+                onChange={(on) => { if (on) void lockMode.enable() }}
+                label="Lock (click-through)"
+              />
               {/* ponytail: native title tooltip — custom popover only if styling ever matters */}
               <span
                 title={`Lock makes this window click-through so you can work in apps behind it. Release with ${MOD}⇧L (works even while locked).`}
