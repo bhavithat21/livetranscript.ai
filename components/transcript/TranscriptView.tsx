@@ -4,6 +4,7 @@ import { speakerColor } from '@/lib/speakers/palette'
 import { colorMap, segmentSlot } from '@/lib/room/roomStore'
 import { cn } from '@/lib/utils'
 import { splitSentences, type Segment } from '@/lib/transcript/store'
+import { isTauri } from '@/lib/audio/useNativeCapture'
 
 // Sentences for a segment; never empty so a blank/whitespace interim still holds
 // its place in the list (avoids a line vanishing then reappearing mid-speech).
@@ -96,6 +97,32 @@ export function TranscriptView({
       el.removeEventListener('touchstart', onManual)
     }
   }, [autoScroll, scrollSpeed])
+
+  // SCROLL-WHILE-LOCKED (desktop): when the window is click-through, wheel events
+  // can't reach it — the shell registers global Cmd/Ctrl+Shift+↑/↓ during lock and
+  // emits 'lock-scroll'. Scroll half a viewport per press; a scroll-up also earns
+  // the same follow-pause a manual wheel gesture would (handled by nearBottom above).
+  useEffect(() => {
+    if (!isTauri()) return
+    let unlisten: (() => void) | undefined
+    let alive = true
+    ;(async () => {
+      const { listen } = await import('@tauri-apps/api/event')
+      const un = await listen<string>('lock-scroll', (e) => {
+        const el = scrollRef.current
+        if (!el) return
+        const delta = (el.clientHeight / 2) * (e.payload === 'up' ? -1 : 1)
+        el.scrollBy({ top: delta, behavior: 'smooth' })
+      })
+      // Effect torn down while listen() was in flight → release immediately.
+      if (!alive) un()
+      else unlisten = un
+    })()
+    return () => {
+      alive = false
+      unlisten?.()
+    }
+  }, [])
 
   // Color by SENDER identity (consistent across all clients), not the racy wire
   // slot. MUST run before any early return — Rules of Hooks: an early return that

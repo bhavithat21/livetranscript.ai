@@ -474,6 +474,7 @@ function Meeting({ roomId }: { roomId: string }) {
           { keys: `${MOD}C`, label: 'Copy transcript' },
           { keys: `${MOD}⇧H`, label: 'Hide / show window (desktop)' },
           { keys: `${MOD}⇧L`, label: 'Lock / release click-through (desktop)' },
+          { keys: `${MOD}⇧↑/↓`, label: 'Scroll transcript while locked (desktop)' },
         ]}
       />
       {/* Reader mode: hide ALL chrome, float Exit + (desktop) Lock controls (matches /record). */}
@@ -500,7 +501,8 @@ function Meeting({ roomId }: { roomId: string }) {
                   className="pointer-events-none absolute right-0 top-full z-50 mt-2 hidden w-60 rounded-xl border border-black/10 bg-white px-3 py-2 text-xs leading-relaxed text-black/70 shadow-xl group-focus-within:block group-hover:block"
                 >
                   Lock makes this window click-through so you can work in apps behind it.
-                  Release with <kbd className="rounded bg-black/[0.07] px-1 font-sans">{MOD}⇧L</kbd> — it works even while locked.
+                  Scroll with <kbd className="rounded bg-black/[0.07] px-1 font-sans">{MOD}⇧↑/↓</kbd>, release
+                  with <kbd className="rounded bg-black/[0.07] px-1 font-sans">{MOD}⇧L</kbd> — both work while locked.
                 </span>
               </span>
             </div>

@@ -88,6 +88,13 @@ pub struct TrayHandles {
 #[cfg(target_os = "macos")]
 #[tauri::command]
 fn request_screen_capture_access() -> bool {
+    // macOS 15+: the sidecar uses a CoreAudio process tap, whose "System Audio
+    // Recording Only" permission is prompted by the OS on first capture and never
+    // re-confirmed — Screen Recording isn't needed, so don't fire its TCC prompt
+    // (that prompt is the recurring launch nag this build removes).
+    if macos_major_version() >= 15 {
+        return true;
+    }
     // Linked from the OS; the standard TCC entry points for Screen Recording.
     #[link(name = "CoreGraphics", kind = "framework")]
     extern "C" {
@@ -115,6 +122,19 @@ fn request_screen_capture_access() -> bool {
 fn request_screen_capture_access() -> bool {
     // Windows loopback capture needs no OS permission; nothing to request.
     true
+}
+
+// Major macOS version (e.g. 15 for Sequoia) from the kernel, no deprecated APIs.
+// sysctl "kern.osproductversion" returns "15.3.1"-style strings on 10.13+.
+#[cfg(target_os = "macos")]
+fn macos_major_version() -> u32 {
+    std::process::Command::new("sysctl")
+        .args(["-n", "kern.osproductversion"])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .and_then(|s| s.trim().split('.').next().and_then(|v| v.parse().ok()))
+        .unwrap_or(0) // unknown → 0 → keep the legacy Screen-Recording prompt path
 }
 
 // Toggle OS-level screen-capture exclusion at runtime (Windows
@@ -205,7 +225,37 @@ fn apply_lock(app: &tauri::AppHandle, enabled: bool) -> Result<(), String> {
     if let Some(item) = lock(&app.state::<TrayHandles>().lock_item).as_ref() {
         let _ = item.set_checked(enabled);
     }
+    // Scroll-while-locked: a click-through window can't receive wheel events, so
+    // register GLOBAL CmdOrCtrl+Shift+Up/Down only while locked (they're common
+    // editing shortcuts — never hold them when unlocked) and emit to the webview.
+    apply_lock_scroll_hotkeys(app, enabled);
     Ok(())
+}
+
+// Register/release the lock-scroll hotkeys with lock mode. Fail-soft like the
+// other shortcuts: an OS refusal (hotkey taken) just means no scroll-while-locked.
+#[cfg(desktop)]
+fn apply_lock_scroll_hotkeys(app: &tauri::AppHandle, enabled: bool) {
+    use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+    #[cfg(target_os = "macos")]
+    let primary = Modifiers::SUPER;
+    #[cfg(not(target_os = "macos"))]
+    let primary = Modifiers::CONTROL;
+    let up = Shortcut::new(Some(Modifiers::SHIFT | primary), Code::ArrowUp);
+    let down = Shortcut::new(Some(Modifiers::SHIFT | primary), Code::ArrowDown);
+    if enabled {
+        for (sc, dir) in [(up, "up"), (down, "down")] {
+            let _ = app.global_shortcut().on_shortcut(sc, move |app, shortcut, event| {
+                use tauri::Emitter;
+                if event.state == ShortcutState::Pressed && shortcut == &sc {
+                    let _ = app.emit("lock-scroll", dir);
+                }
+            });
+        }
+    } else {
+        let _ = app.global_shortcut().unregister(up);
+        let _ = app.global_shortcut().unregister(down);
+    }
 }
 
 // Flip lock mode atomically (reads current, writes inverse under one lock hold).

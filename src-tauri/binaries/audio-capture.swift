@@ -1,25 +1,142 @@
 import Foundation
 import ScreenCaptureKit
 import CoreMedia
+import CoreAudio
 
 // LiveTranscript macOS system-audio helper.
 //
 // Captures the system output mix (what's playing — e.g. the Zoom desktop app)
-// via ScreenCaptureKit and writes raw mono Float32 48kHz little-endian PCM to
-// stdout with NO header. The Rust parent (src-tauri/src/macos_capture.rs)
-// converts to 16-bit PCM and forwards it over the Tauri IPC channel to the web
-// UI's ASR pipeline.
+// and writes raw mono Float32 little-endian PCM to stdout with NO header. The
+// Rust parent (src-tauri/src/macos_capture.rs) converts to 16-bit PCM and
+// forwards it over the Tauri IPC channel to the web UI's ASR pipeline.
 //
-// Design notes:
-//  - This is the battle-tested "SystemAudioDump" pattern shipped by open-source
-//    Cluely clones (glass, cheating-daddy): a tiny standalone SCK binary piping
-//    PCM to stdout, isolated in its own process so a capture crash can't take
-//    down the app.
-//  - It is a PASSIVE tap of the output mixer — it never seizes the mic or the
-//    output device, so Zoom keeps working and there's no echo/feedback.
-//  - Diagnostics go to stderr so they never corrupt the PCM byte stream.
-//  - When Rust closes the read end of our stdout, the default SIGPIPE
-//    terminates us — that's the clean stop path.
+// Two engines, best-first:
+//  1. CoreAudio process tap (macOS 15+): AudioHardwareCreateProcessTap on a
+//     mono global tap. Uses the "System Audio Recording Only" TCC permission —
+//     granted ONCE, never periodically re-confirmed (unlike Screen Recording),
+//     and shows no purple screen-recording indicator.
+//  2. ScreenCaptureKit (macOS 13/14, or tap failure): the previous engine.
+//     Needs the Screen Recording grant, which macOS 15+ re-confirms after
+//     reboots/updates — the recurring dialog this rewrite eliminates.
+//
+// Protocol with the Rust parent (stderr, line-oriented):
+//   "RATE <hz>"  — PCM sample rate, printed before READY (tap runs at the
+//                  output device's native rate, not always 48k).
+//   "READY"      — capture is live; PCM follows on stdout.
+// Anything else on stderr is diagnostics. A failed start exits nonzero with no
+// READY, so the parent falls back instead of silently recording nothing.
+//
+// Both engines are PASSIVE taps of the output mixer — they never seize the mic
+// or the output device, so Zoom keeps working and there's no echo/feedback.
+// When Rust closes the read end of our stdout, the default SIGPIPE terminates
+// us — that's the clean stop path for both engines.
+
+private let err = FileHandle.standardError
+private func diag(_ s: String) { err.write((s + "\n").data(using: .utf8)!) }
+
+struct CaptureError: Error, CustomStringConvertible {
+    let description: String
+    init(_ d: String) { description = d }
+}
+
+// MARK: - Engine 1: CoreAudio process tap (macOS 15+)
+
+// Writes mono f32 LE to stdout from a global process tap routed through a
+// private aggregate device. Kill-driven teardown (SIGPIPE), so no explicit
+// destroy calls — process death releases the private tap + aggregate.
+@available(macOS 15.0, *)
+final class ProcessTapCapturer {
+    private var ioProcID: AudioDeviceIOProcID?
+    private var aggregateID = AudioObjectID(kAudioObjectUnknown)
+    private let out = FileHandle.standardOutput
+
+    // Returns the tap's sample rate. Throws if the tap can't be created — the
+    // first call on a fresh install triggers the "System Audio Recording Only"
+    // permission prompt (attributed to the parent app); a denial surfaces here
+    // as an error and the caller falls back to ScreenCaptureKit.
+    func start() throws -> Double {
+        // Mono mixdown of ALL processes' output. No exclusions: this helper
+        // emits no audio itself, and the parent webview plays nothing during
+        // capture, so self-capture feedback isn't a real path here.
+        let desc = CATapDescription(monoGlobalTapButExcludeProcesses: [])
+        desc.isPrivate = true // invisible to other audio apps
+        desc.muteBehavior = .unmuted // the user keeps hearing their audio
+
+        var tap = AudioObjectID(kAudioObjectUnknown)
+        var status = AudioHardwareCreateProcessTap(desc, &tap)
+        guard status == noErr, tap != kAudioObjectUnknown else {
+            throw CaptureError("tap create failed (\(status)) — permission denied?")
+        }
+
+        // The tap's stream format: mono f32 at the output device's native rate.
+        var fmt = AudioStreamBasicDescription()
+        var size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioTapPropertyFormat,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        status = AudioObjectGetPropertyData(tap, &addr, 0, nil, &size, &fmt)
+        guard status == noErr, fmt.mSampleRate > 0 else {
+            throw CaptureError("tap format read failed (\(status))")
+        }
+
+        // Private aggregate device wrapping just the tap; its IOProc is how we
+        // pull samples out.
+        let aggDesc: [String: Any] = [
+            kAudioAggregateDeviceNameKey as String: "LiveTranscript Tap",
+            kAudioAggregateDeviceUIDKey as String: UUID().uuidString,
+            kAudioAggregateDeviceIsPrivateKey as String: true,
+            kAudioAggregateDeviceTapAutoStartKey as String: true,
+            kAudioAggregateDeviceTapListKey as String: [
+                [kAudioSubTapUIDKey as String: desc.uuid.uuidString]
+            ],
+        ]
+        status = AudioHardwareCreateAggregateDevice(aggDesc as CFDictionary, &aggregateID)
+        guard status == noErr else {
+            throw CaptureError("aggregate device create failed (\(status))")
+        }
+
+        status = AudioDeviceCreateIOProcIDWithBlock(&ioProcID, aggregateID, nil) {
+            [out] _, inInputData, _, _, _ in
+            // ponytail: stdout write on the audio callback thread — same pattern
+            // as the SCK engine's sample-handler queue; a stalled pipe just
+            // back-pressures capture, and the parent reads continuously.
+            let buffers = UnsafeMutableAudioBufferListPointer(
+                UnsafeMutablePointer(mutating: inInputData))
+            guard let buf = buffers.first, let data = buf.mData, buf.mDataByteSize > 0 else {
+                return
+            }
+            let ch = Int(buf.mNumberChannels)
+            if ch <= 1 {
+                out.write(Data(bytes: data, count: Int(buf.mDataByteSize)))
+            } else {
+                // Defensive: the mono tap descriptor should already give 1ch,
+                // but downmix interleaved frames if the format ever differs.
+                let total = Int(buf.mDataByteSize) / 4
+                let frames = total / ch
+                let src = data.assumingMemoryBound(to: Float32.self)
+                var mono = [Float32](repeating: 0, count: frames)
+                for i in 0..<frames {
+                    var s: Float32 = 0
+                    for c in 0..<ch { s += src[i * ch + c] }
+                    mono[i] = s / Float32(ch)
+                }
+                mono.withUnsafeBytes { out.write(Data($0)) }
+            }
+        }
+        guard status == noErr, let procID = ioProcID else {
+            throw CaptureError("IOProc create failed (\(status))")
+        }
+        status = AudioDeviceStart(aggregateID, procID)
+        guard status == noErr else {
+            throw CaptureError("device start failed (\(status))")
+        }
+        return fmt.mSampleRate
+    }
+}
+
+// MARK: - Engine 2: ScreenCaptureKit fallback (macOS 13/14)
+
 @available(macOS 13.0, *)
 final class AudioCapturer: NSObject, SCStreamOutput, SCStreamDelegate {
     private var stream: SCStream?
@@ -29,7 +146,7 @@ final class AudioCapturer: NSObject, SCStreamOutput, SCStreamDelegate {
         let content = try await SCShareableContent.excludingDesktopWindows(
             false, onScreenWindowsOnly: false)
         guard let display = content.displays.first else {
-            FileHandle.standardError.write("no display\n".data(using: .utf8)!)
+            diag("no display")
             exit(1)
         }
         // Exclude our own app so we never capture our own output (no feedback).
@@ -52,11 +169,10 @@ final class AudioCapturer: NSObject, SCStreamOutput, SCStreamDelegate {
                                    sampleHandlerQueue: DispatchQueue(label: "audio.pcm"))
         try await stream.startCapture()
         self.stream = stream
-        // Readiness sentinel on stderr: capture is live. The Rust parent waits for
-        // this before telling the frontend audio is flowing — so a denied
-        // Screen-Recording permission (start throws, no READY) surfaces as a
-        // failure and the app falls back instead of silently recording nothing.
-        FileHandle.standardError.write("READY\n".data(using: .utf8)!)
+        // Readiness sentinel: capture is live. A denied Screen-Recording
+        // permission throws above (no READY) → the parent falls back.
+        diag("RATE 48000")
+        diag("READY")
     }
 
     func stream(_ stream: SCStream,
@@ -81,21 +197,49 @@ final class AudioCapturer: NSObject, SCStreamOutput, SCStreamDelegate {
     }
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
-        FileHandle.standardError.write("stopped: \(error)\n".data(using: .utf8)!)
+        diag("stopped: \(error)")
         exit(1)
     }
 }
 
+// MARK: - Main: tap first, SCK fallback
+
 guard #available(macOS 13.0, *) else {
-    FileHandle.standardError.write("requires macOS 13+\n".data(using: .utf8)!)
+    diag("requires macOS 13+")
     exit(1)
 }
-let capturer = AudioCapturer()
-Task {
-    do { try await capturer.start() }
-    catch {
-        FileHandle.standardError.write("start failed: \(error)\n".data(using: .utf8)!)
-        exit(1)
+
+// Keep the active engine alive for the process lifetime (dispatchMain never
+// returns; teardown is process death via SIGPIPE when the parent closes stdout).
+var keepAlive: AnyObject?
+
+var tapStarted = false
+if #available(macOS 15.0, *) {
+    // Gate at 15.0 (API exists at 14.2) because 15 is where the automatic
+    // "System Audio Recording Only" permission prompt on tap creation is
+    // reliable; on 14.x SCK's prompt story is the battle-tested one.
+    do {
+        let tapCapturer = ProcessTapCapturer()
+        let rate = try tapCapturer.start()
+        keepAlive = tapCapturer
+        diag("RATE \(Int(rate))")
+        diag("READY")
+        tapStarted = true
+    } catch {
+        diag("tap failed: \(error) — falling back to ScreenCaptureKit")
     }
 }
-dispatchMain()  // keep alive; SCK delivers on its own queue
+
+if !tapStarted {
+    let capturer = AudioCapturer()
+    keepAlive = capturer
+    Task {
+        do { try await capturer.start() }
+        catch {
+            diag("start failed: \(error)")
+            exit(1)
+        }
+    }
+}
+
+dispatchMain()  // keep alive; both engines deliver on their own queues
