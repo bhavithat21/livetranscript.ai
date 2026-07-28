@@ -32,7 +32,21 @@ import CoreAudio
 // us — that's the clean stop path for both engines.
 
 private let err = FileHandle.standardError
-private func diag(_ s: String) { err.write((s + "\n").data(using: .utf8)!) }
+// Diagnostics go to stderr (parent forwards to its console) AND to a file, so we
+// can debug Finder-launched apps where nothing captures the parent's stderr.
+private let diagLog: FileHandle? = {
+    let path = "/tmp/livetranscript-audio.log"
+    if !FileManager.default.fileExists(atPath: path) {
+        FileManager.default.createFile(atPath: path, contents: nil)
+    }
+    let h = FileHandle(forWritingAtPath: path)
+    h?.seekToEndOfFile()
+    return h
+}()
+private func diag(_ s: String) {
+    err.write((s + "\n").data(using: .utf8)!)
+    diagLog?.write("[\(Date())] \(s)\n".data(using: .utf8)!)
+}
 
 struct CaptureError: Error, CustomStringConvertible {
     let description: String
@@ -49,6 +63,24 @@ final class ProcessTapCapturer {
     private var ioProcID: AudioDeviceIOProcID?
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
     private let out = FileHandle.standardOutput
+    // A tap created without effective permission (TCC attribution quirks when
+    // spawned from an app bundle) fails SILENTLY: everything returns noErr but
+    // the IOProc never fires. Verify liveness instead of trusting return codes.
+    private let firstFrame = DispatchSemaphore(value: 0)
+    private var sawFrame = false
+
+    // True once the IOProc delivered at least one buffer within `timeout`.
+    func waitForFirstFrame(timeout: TimeInterval) -> Bool {
+        return firstFrame.wait(timeout: .now() + timeout) == .success
+    }
+
+    func teardown() {
+        if let procID = ioProcID, aggregateID != kAudioObjectUnknown {
+            AudioDeviceStop(aggregateID, procID)
+            AudioDeviceDestroyIOProcID(aggregateID, procID)
+            AudioHardwareDestroyAggregateDevice(aggregateID)
+        }
+    }
 
     // Returns the tap's sample rate. Throws if the tap can't be created — the
     // first call on a fresh install triggers the "System Audio Recording Only"
@@ -97,7 +129,12 @@ final class ProcessTapCapturer {
         }
 
         status = AudioDeviceCreateIOProcIDWithBlock(&ioProcID, aggregateID, nil) {
-            [out] _, inInputData, _, _, _ in
+            [out, firstFrame] _, inInputData, _, _, _ in
+            // Liveness signal for waitForFirstFrame (main gates READY on this).
+            if !self.sawFrame {
+                self.sawFrame = true
+                firstFrame.signal()
+            }
             // ponytail: stdout write on the audio callback thread — same pattern
             // as the SCK engine's sample-handler queue; a stalled pipe just
             // back-pressures capture, and the parent reads continuously.
@@ -221,10 +258,20 @@ if #available(macOS 15.0, *) {
     do {
         let tapCapturer = ProcessTapCapturer()
         let rate = try tapCapturer.start()
-        keepAlive = tapCapturer
-        diag("RATE \(Int(rate))")
-        diag("READY")
-        tapStarted = true
+        // Every call above can return noErr yet deliver nothing (silent TCC
+        // denial when spawned from an app bundle). The IOProc fires continuously
+        // once truly live — even for silence — so a missing first frame within
+        // 3s means the tap is dead: tear it down and use SCK instead.
+        if tapCapturer.waitForFirstFrame(timeout: 3.0) {
+            keepAlive = tapCapturer
+            diag("ENGINE tap")
+            diag("RATE \(Int(rate))")
+            diag("READY")
+            tapStarted = true
+        } else {
+            tapCapturer.teardown()
+            diag("tap started but delivered no frames in 3s — falling back to ScreenCaptureKit")
+        }
     } catch {
         diag("tap failed: \(error) — falling back to ScreenCaptureKit")
     }

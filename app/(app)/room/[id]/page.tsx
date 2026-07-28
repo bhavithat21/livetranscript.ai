@@ -329,7 +329,16 @@ function Meeting({ roomId }: { roomId: string }) {
         try {
           nativeRate = await native.start(onPcm, setLevel, { isMuted: () => mutedRef.current })
         } catch (err) {
-          logError('room/native.start', err) // native tap failed — fall back to browser
+          logError('room/native.start', err)
+          if (native.isNative) {
+            // Desktop: getDisplayMedia doesn't work in the shell webview, so a
+            // browser fallback would show a share picker that captures nothing.
+            // Fail with the actionable fix instead.
+            throw new Error(
+              'System-audio capture was blocked by macOS. Open System Settings → Privacy & Security → Screen & System Audio Recording, enable LiveTranscript, then quit and reopen the app.',
+            )
+          }
+          // Browser: fall through to the getDisplayMedia share picker below.
         }
       }
       const rate =
