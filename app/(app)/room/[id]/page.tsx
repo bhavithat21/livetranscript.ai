@@ -1,7 +1,7 @@
 'use client'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
-import { ArrowLeft, BookOpen, Check, ChevronDown, ChevronUp, Copy, Lock, Mic, MicOff, Sparkles, Users } from 'lucide-react'
+import { ArrowLeft, BookOpen, Check, ChevronDown, ChevronUp, Copy, Info, Lock, Mic, MicOff, Sparkles, Users } from 'lucide-react'
 import { useMicStream, type AudioSource } from '@/lib/audio/useMicStream'
 import { useNativeCapture } from '@/lib/audio/useNativeCapture'
 import { logError } from '@/lib/log'
@@ -478,17 +478,33 @@ function Meeting({ roomId }: { roomId: string }) {
       {/* Reader mode: hide ALL chrome, float Exit + (desktop) Lock controls (matches /record). */}
       {reader && (
         <div className="fixed right-4 top-4 z-50 flex items-center gap-2">
-          {/* Lock (click-through): pass clicks/keys through to apps behind the window.
-              Once on, this window can't be clicked — release is the GLOBAL hotkey
-              Cmd/Ctrl+Shift+L (or the tray). Desktop only. */}
-          {lockMode.available && !lockMode.locked && (
-            <button
-              onClick={() => void lockMode.enable()}
-              className="glass flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm"
-              title={`Lock (click-through) — release with ${MOD}⇧L`}
-            >
-              <Lock size={15} /> Lock
-            </button>
+          {/* Lock (click-through): Apple-style switch. Turning it ON makes the whole
+              window pass clicks through, so the switch itself becomes unclickable —
+              release is the GLOBAL hotkey Cmd/Ctrl+Shift+L (or the tray). The (i)
+              tooltip carries that warning. Desktop only. */}
+          {lockMode.available && (
+            <div className="glass flex items-center gap-2 rounded-full px-3 py-1.5 text-sm">
+              <Lock size={14} className={lockMode.locked ? 'text-emerald-600' : 'text-black/50'} />
+              <button
+                role="switch"
+                aria-checked={lockMode.locked}
+                aria-label="Lock (click-through)"
+                onClick={() => { if (!lockMode.locked) void lockMode.enable() }}
+                className={`relative h-5 w-9 rounded-full transition-colors duration-200 ${lockMode.locked ? 'bg-emerald-500' : 'bg-black/20'}`}
+              >
+                <span
+                  className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform duration-200 ${lockMode.locked ? 'translate-x-[18px]' : 'translate-x-0.5'}`}
+                />
+              </button>
+              {/* ponytail: native title tooltip — custom popover only if styling ever matters */}
+              <span
+                title={`Lock makes this window click-through so you can work in apps behind it. Release with ${MOD}⇧L (works even while locked).`}
+                aria-label={`Lock makes the window click-through. Release with ${MOD}⇧L.`}
+                className="flex cursor-help text-black/40"
+              >
+                <Info size={14} />
+              </span>
+            </div>
           )}
           {!lockMode.locked && (
             <button
@@ -498,12 +514,6 @@ function Meeting({ roomId }: { roomId: string }) {
             >
               <BookOpen size={15} /> Exit Reader
             </button>
-          )}
-          {/* Locked: buttons are unclickable anyway — show the release hint instead. */}
-          {lockMode.locked && (
-            <span className="glass flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs text-black/50">
-              <Lock size={13} /> Locked — {MOD}⇧L to release
-            </span>
           )}
         </div>
       )}
