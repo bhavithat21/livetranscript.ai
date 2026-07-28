@@ -1,7 +1,7 @@
 'use client'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
-import { ArrowLeft, BookOpen, Check, ChevronDown, ChevronUp, Copy, Mic, MicOff, Sparkles, Users } from 'lucide-react'
+import { ArrowLeft, BookOpen, Check, ChevronDown, ChevronUp, Copy, Lock, Mic, MicOff, Sparkles, Users } from 'lucide-react'
 import { useMicStream, type AudioSource } from '@/lib/audio/useMicStream'
 import { useNativeCapture } from '@/lib/audio/useNativeCapture'
 import { logError } from '@/lib/log'
@@ -24,6 +24,7 @@ import { ShortcutHelp, MOD } from '@/components/ui/ShortcutHelp'
 import { RosterPanel } from '@/components/room/RosterPanel'
 import { FollowAlong } from '@/components/room/FollowAlong'
 import { CopilotPanel } from '@/components/copilot/CopilotPanel'
+import { useLockMode } from '@/lib/desktop/useLockMode'
 import { usePanelWidth } from '@/lib/copilot/usePanelWidth'
 import { HomeMenu } from '@/components/nav/HomeMenu'
 import type { TranscriptionProvider } from '@/lib/transcription/types'
@@ -256,6 +257,10 @@ function Meeting({ roomId }: { roomId: string }) {
   const [headerCollapsed, setHeaderCollapsed] = useState(false)
   // Fullscreen Reader mode (like /record): distraction-free reading surface.
   const [reader, setReader] = useState(false)
+  // Desktop: lock (click-through) so you can work in other apps with Reader
+  // floating on top. Unlock is native-only (Cmd/Ctrl+Shift+L or tray) — a
+  // click-through window can't be clicked.
+  const lockMode = useLockMode()
   // Paced auto-scroll speed (px/sec). 0 = jump-follow the live edge (default).
   // Stepped presets so the control is one tap, not a fiddly slider.
   const SCROLL_SPEEDS = [0, 20, 40, 70] as const
@@ -467,17 +472,40 @@ function Meeting({ roomId }: { roomId: string }) {
           { keys: 'Space / M', label: 'Mute / unmute (while live)' },
           { keys: `${MOD}C`, label: 'Copy transcript' },
           { keys: `${MOD}⇧H`, label: 'Hide / show window (desktop)' },
+          { keys: `${MOD}⇧L`, label: 'Lock / release click-through (desktop)' },
         ]}
       />
-      {/* Reader mode: hide ALL chrome, float a single Exit control (matches /record). */}
+      {/* Reader mode: hide ALL chrome, float Exit + (desktop) Lock controls (matches /record). */}
       {reader && (
-        <button
-          onClick={() => setReader(false)}
-          className="glass fixed right-4 top-4 z-50 flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm"
-          title="Exit Reader (Esc)"
-        >
-          <BookOpen size={15} /> Exit Reader
-        </button>
+        <div className="fixed right-4 top-4 z-50 flex items-center gap-2">
+          {/* Lock (click-through): pass clicks/keys through to apps behind the window.
+              Once on, this window can't be clicked — release is the GLOBAL hotkey
+              Cmd/Ctrl+Shift+L (or the tray). Desktop only. */}
+          {lockMode.available && !lockMode.locked && (
+            <button
+              onClick={() => void lockMode.enable()}
+              className="glass flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm"
+              title={`Lock (click-through) — release with ${MOD}⇧L`}
+            >
+              <Lock size={15} /> Lock
+            </button>
+          )}
+          {!lockMode.locked && (
+            <button
+              onClick={() => setReader(false)}
+              className="glass flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm"
+              title="Exit Reader (Esc)"
+            >
+              <BookOpen size={15} /> Exit Reader
+            </button>
+          )}
+          {/* Locked: buttons are unclickable anyway — show the release hint instead. */}
+          {lockMode.locked && (
+            <span className="glass flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs text-black/50">
+              <Lock size={13} /> Locked — {MOD}⇧L to release
+            </span>
+          )}
+        </div>
       )}
 
       {/* Collapsed: a slim bar giving the transcript the full viewport. Keeps only
