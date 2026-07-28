@@ -110,6 +110,34 @@ if (failures.length) {
   process.exit(1)
 }
 
+// ALSO publish the human-download installers (dmg / setup.exe — different files
+// from the updater artifacts above) under STABLE versionless keys, so the
+// website's download links (NEXT_PUBLIC_DOWNLOAD_*_URL) never go stale when a
+// release ships. Set the env vars ONCE to:
+//   {FRONT_DOOR}/LiveTranscript-latest-universal.dmg
+//   {FRONT_DOOR}/LiveTranscript-latest-x64-setup.exe
+async function uploadAs(filePath, stableName) {
+  const body = readFileSync(filePath)
+  await put(`updates/${stableName}`, body, { access: 'public', token, addRandomSuffix: false, allowOverwrite: true })
+  console.log(`uploaded updates/${stableName} (from ${basename(filePath)})`)
+}
+function findBySuffix(root, suffix) {
+  for (const entry of readdirSync(root)) {
+    const p = join(root, entry)
+    if (statSync(p).isDirectory()) {
+      const found = findBySuffix(p, suffix)
+      if (found) return found
+    } else if (entry.endsWith(suffix)) {
+      return p
+    }
+  }
+  return null
+}
+const dmg = findBySuffix(dir, '.dmg')
+if (dmg) await uploadAs(dmg, 'LiveTranscript-latest-universal.dmg')
+const exe = findBySuffix(dir, '-setup.exe')
+if (exe) await uploadAs(exe, 'LiveTranscript-latest-x64-setup.exe')
+
 // Upload the rewritten manifest last, at the stable key the app polls.
 writeFileSync(manifestPath, JSON.stringify(manifest, null, 2))
 await upload(manifestPath)
