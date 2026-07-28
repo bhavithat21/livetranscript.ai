@@ -491,13 +491,17 @@ function Meeting({ roomId }: { roomId: string }) {
                 onChange={(on) => { if (on) void lockMode.enable() }}
                 label="Lock (click-through)"
               />
-              {/* ponytail: native title tooltip — custom popover only if styling ever matters */}
-              <span
-                title={`Lock makes this window click-through so you can work in apps behind it. Release with ${MOD}⇧L (works even while locked).`}
-                aria-label={`Lock makes the window click-through. Release with ${MOD}⇧L.`}
-                className="flex cursor-help text-black/40"
-              >
-                <Info size={14} />
+              {/* Real popover — native title tooltips don't render in the Tauri
+                  WebView. CSS-only: shows on hover or keyboard focus. */}
+              <span className="group relative flex" tabIndex={0} aria-label={`Lock makes the window click-through. Release with ${MOD}⇧L.`}>
+                <Info size={14} className="cursor-help text-black/40" />
+                <span
+                  role="tooltip"
+                  className="pointer-events-none absolute right-0 top-full z-50 mt-2 hidden w-60 rounded-xl border border-black/10 bg-white px-3 py-2 text-xs leading-relaxed text-black/70 shadow-xl group-focus-within:block group-hover:block"
+                >
+                  Lock makes this window click-through so you can work in apps behind it.
+                  Release with <kbd className="rounded bg-black/[0.07] px-1 font-sans">{MOD}⇧L</kbd> — it works even while locked.
+                </span>
               </span>
             </div>
           )}
