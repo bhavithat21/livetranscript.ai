@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { Check, Eye, EyeOff, Lock, Monitor, MonitorOff, MoreHorizontal, Play, Send, Sparkles, X } from 'lucide-react'
 import { useLockMode } from '@/lib/desktop/useLockMode'
+import { LeverSwitch } from '@/components/ui/LeverSwitch'
 import { useAppIdentity } from '@/lib/desktop/useAppIdentity'
 import { useCopilot } from '@/lib/copilot/useCopilot'
 import { useScreenStream } from '@/lib/vision/useScreenStream'
@@ -252,27 +253,24 @@ export function CopilotPanel({
         <span className="font-[family-name:var(--font-serif)] text-base font-semibold">Ask</span>
         <div className="ml-auto flex items-center gap-1">
           {/* 1 — Auto-answer: the primary live control. */}
-          <button
-            onClick={() => setAuto((v) => !v)}
+          <div
             data-active={auto}
             title={auto ? 'Auto-answer is ON — questions heard are answered automatically' : 'Auto-answer questions from the meeting'}
-            className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium text-ink/70 transition-[background-color,color] duration-100 hover:bg-black/[0.06] data-[active=true]:bg-emerald-700/15 data-[active=true]:text-emerald-800"
+            className="flex items-center gap-1.5 rounded-full px-2 py-1.5 text-xs font-medium text-ink/70 data-[active=true]:text-emerald-800"
           >
-            <span className={auto ? 'live-dot' : 'hidden'} aria-hidden />
-            {auto ? 'Auto on' : 'Auto'}
-          </button>
+            Auto
+            <LeverSwitch checked={auto} onChange={setAuto} label="Auto-answer questions" />
+          </div>
           {/* 2 — Stealth: the safety toggle you hit when sharing screen. Solid ink
               contrast in both states so the icon is never faint on the translucent
               panel (was text-black/50 → near-invisible; active white-on-white). */}
-          <button
-            onClick={() => setStealth((v) => !v)}
-            data-active={stealth}
-            aria-label="Stealth reading mode"
-            title={stealth ? 'Stealth on — dim, monochrome, motionless. Tap to return to normal.' : 'Stealth reading mode — dim + motionless for a shared screen'}
-            className="flex h-9 w-9 items-center justify-center rounded-full text-ink/70 transition-[background-color,color] duration-100 hover:bg-black/[0.06] data-[active=true]:bg-ink data-[active=true]:text-white"
+          <div
+            title={stealth ? 'Stealth on — dim, monochrome, motionless. Flip to return to normal.' : 'Stealth reading mode — dim + motionless for a shared screen'}
+            className="flex items-center gap-1.5 rounded-full px-2 py-1.5 text-ink/70"
           >
             {stealth ? <EyeOff size={16} strokeWidth={2} /> : <Eye size={16} strokeWidth={2} />}
-          </button>
+            <LeverSwitch checked={stealth} onChange={setStealth} label="Stealth reading mode" />
+          </div>
           {/* 3 — overflow: Mic, Screen, Lock, Clear. A dot marks any active one. */}
           <button
             onClick={() => setMoreOpen((v) => !v)}
@@ -307,12 +305,14 @@ export function CopilotPanel({
             <div className="absolute right-3 top-full z-30 mt-1 w-52 overflow-hidden rounded-2xl border border-black/10 bg-white p-1 shadow-xl">
               <SheetItem
                 active={me.listening}
+                toggle
                 icon={me.listening ? <Mic size={15} /> : <MicOff size={15} />}
                 label={me.listening ? 'Mic on (your voice → AI)' : 'Add your voice as context'}
                 onClick={() => (me.listening ? me.stopListening() : me.startListening())}
               />
               <SheetItem
                 active={screen.sharing}
+                toggle
                 icon={screen.sharing ? <Monitor size={15} /> : <MonitorOff size={15} />}
                 label={screen.sharing ? 'Sharing your screen' : 'Let the AI see your screen'}
                 onClick={() => (screen.sharing ? screen.stop() : screen.start())}
@@ -766,11 +766,14 @@ function SheetItem({
   icon,
   label,
   onClick,
+  toggle = false,
 }: {
   active: boolean
   icon: React.ReactNode
   label: string
   onClick: () => void
+  /** On/off rows render a trailing lever switch instead of the active dot. */
+  toggle?: boolean
 }) {
   // High contrast in BOTH states so it's never faint: inactive = solid ink text on
   // the white sheet; active = a filled emerald pill (obvious "on" affordance, not a
@@ -784,7 +787,15 @@ function SheetItem({
     >
       <span className={active ? 'text-emerald-700' : 'text-ink/55'}>{icon}</span>
       <span className="flex-1">{label}</span>
-      {active && <span className="h-1.5 w-1.5 rounded-full bg-emerald-600" aria-hidden />}
+      {toggle ? (
+        // Visual-only: the whole row is the button; a nested input would be
+        // invalid inside a <button>, so render the switch decorative.
+        <span className="scale-75" aria-hidden>
+          <LeverSwitch checked={active} decorative />
+        </span>
+      ) : (
+        active && <span className="h-1.5 w-1.5 rounded-full bg-emerald-600" aria-hidden />
+      )}
     </button>
   )
 }

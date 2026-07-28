@@ -702,15 +702,11 @@ function Meeting({ roomId }: { roomId: string }) {
                 />
               )}
               {live && (
-                <button
-                  onClick={() => setMuted((m) => !m)}
-                  data-active={muted}
-                  className="btn-ghost flex items-center gap-2 text-sm"
-                  title="Mute / unmute (M or Space)"
-                >
+                <div className="flex items-center gap-2 text-sm text-black/60" title="Mute / unmute (M or Space)">
                   {muted ? <MicOff size={16} /> : <Mic size={16} />}
                   <span className="hidden sm:inline">{muted ? 'Muted' : 'Mic on'}</span>
-                </button>
+                  <LeverSwitch checked={muted} onChange={setMuted} label="Mute microphone" />
+                </div>
               )}
               <Waveform level={level} active={live && !muted} />
               {!live ? (
