@@ -4,10 +4,10 @@ import { DeepgramProvider } from './deepgram'
 
 export type ProviderMaker = { name: string; make: () => TranscriptionProvider }
 
-// AssemblyAI primary; if its token mint fails (e.g. key not set) we fall back to Deepgram.
+// Deepgram primary; AssemblyAI as fallback.
 export const DEFAULT_MAKERS: ProviderMaker[] = [
-  { name: 'AssemblyAI', make: () => new AssemblyAIProvider() },
   { name: 'Deepgram', make: () => new DeepgramProvider() },
+  { name: 'AssemblyAI', make: () => new AssemblyAIProvider() },
 ]
 
 // Names the picker offers. 'auto' keeps the smart-fallback order.
