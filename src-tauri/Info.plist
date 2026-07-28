@@ -12,6 +12,12 @@
   <dict>
     <key>NSMicrophoneUsageDescription</key>
     <string>LiveTranscript uses your microphone to transcribe what you say.</string>
+    <!-- CoreAudio process tap (macOS 15+ system-audio capture). WITHOUT this key
+         the OS never shows the one-time "System Audio Recording" prompt — the tap
+         silently delivers silence (no error, no SCK fallback), i.e. "app reads
+         system sound but no words". -->
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>LiveTranscript captures your computer&#39;s audio output to transcribe what&#39;s playing (e.g. a meeting), without touching your microphone.</string>
     <key>NSCameraUsageDescription</key>
     <string>LiveTranscript can use your camera for video features.</string>
   </dict>

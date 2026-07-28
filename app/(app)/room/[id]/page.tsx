@@ -249,7 +249,7 @@ function Meeting({ roomId }: { roomId: string }) {
   // Default to System sound (getDisplayMedia loopback) — no echo, no device
   // contention with Zoom/Meet. Mic is opt-in for the physical room only.
   const [source, setSource] = useState<AudioSource>('system')
-  const [view, setView] = useState<'transcript' | 'chat'>('transcript')
+  const [view, setView] = useState<'transcript' | 'chat'>('chat')
   const [showRoster, setShowRoster] = useState(false)
   const [askOpen, setAskOpen] = useState(false) // copilot side panel
   // Collapse the meeting chrome (identity, meeting-id, roster, status, toggles) so
