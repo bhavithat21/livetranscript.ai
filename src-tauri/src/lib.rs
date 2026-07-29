@@ -506,7 +506,11 @@ pub fn run() {
                 app.global_shortcut()
                     .on_shortcut(lock_toggle, move |app, shortcut, event| {
                         if event.state == ShortcutState::Pressed && shortcut == &lock_toggle {
-                            toggle_lock(app);
+                            // Must leave the shortcut dispatch thread before calling
+                            // toggle_lock — it unregisters shortcuts, which would
+                            // deadlock on the plugin's internal lock.
+                            let handle = app.clone();
+                            std::thread::spawn(move || toggle_lock(&handle));
                         }
                     })
                     .ok();
