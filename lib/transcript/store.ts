@@ -11,6 +11,8 @@ export type Segment = {
   isFinal: boolean
   sender?: string
   name?: string
+  startMs?: number
+  endMs?: number
 }
 
 // Pure: the new id is derived from the list (max + 1), so ids restart at 1 for a
@@ -22,11 +24,10 @@ export function mergeSegments(prev: Segment[], e: TranscriptEvent): Segment[] {
   const last = prev[prev.length - 1]
   if (last && !last.isFinal) {
     if (last.text === e.text && last.isFinal === e.isFinal && last.speaker === e.speaker) return prev
-    // replace the trailing interim (reuse its id)
-    return [...prev.slice(0, -1), { id: last.id, speaker: e.speaker, text: e.text, isFinal: e.isFinal }]
+    return [...prev.slice(0, -1), { id: last.id, speaker: e.speaker, text: e.text, isFinal: e.isFinal, startMs: e.startMs, endMs: e.endMs }]
   }
   const nextId = prev.reduce((max, s) => Math.max(max, s.id), 0) + 1
-  return [...prev, { id: nextId, speaker: e.speaker, text: e.text, isFinal: e.isFinal }]
+  return [...prev, { id: nextId, speaker: e.speaker, text: e.text, isFinal: e.isFinal, startMs: e.startMs, endMs: e.endMs }]
 }
 
 // Coerce untrusted input (the client-sent segments blob) into clean Segment[]

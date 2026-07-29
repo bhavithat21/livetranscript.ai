@@ -177,7 +177,17 @@ export function TranscriptView({
           // group into a turn instead of every line re-labelling and running on.
           // Group turns by SENDER (stable identity) — with a colorSlot override two
           // people could share a color, so sender is the correct turn boundary.
-          const newTurn = i === 0 || segments[i - 1]?.sender !== s.sender
+          const prev = segments[i - 1]
+          const senderChanged = i === 0 || prev?.sender !== s.sender
+          const silenceBreak = !senderChanged && prev?.endMs != null && s.startMs != null && s.startMs - prev.endMs >= 2000
+          const timeBreak = !senderChanged && (() => {
+            if (s.startMs == null) return false
+            let j = i - 1
+            while (j >= 0 && segments[j]?.sender === s.sender) j--
+            const turnStart = segments[j + 1]?.startMs
+            return turnStart != null && s.startMs - turnStart >= 30000
+          })()
+          const newTurn = senderChanged || silenceBreak || timeBreak
           // Only the trailing interim changes on each ASR tick; a memoized row with
           // primitive props lets React skip re-rendering (and re-splitting) every
           // other line — the difference between smooth and janky in long sessions.

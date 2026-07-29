@@ -81,14 +81,25 @@ export function ChatView({
 
 type Group = { key: string; speaker: number | null; name?: string; segments: Segment[] }
 
-// Merge consecutive segments from the same sender (or same speaker slot when
-// there's no sender, e.g. single-mic) into one chat bubble.
+const SILENCE_BREAK_MS = 2000
+const TIME_BREAK_MS = 30000
+
+// Merge consecutive segments from the same sender into one chat bubble,
+// but force a paragraph break on: speaker change, >2s silence, or >30s continuous.
 function groupBySpeaker(segments: Segment[]): Group[] {
   const groups: Group[] = []
   for (const s of segments) {
     const prev = groups[groups.length - 1]
     const sameSpeaker = prev && (s.sender ? prev.segments[0].sender === s.sender : prev.speaker === s.speaker)
-    if (sameSpeaker) {
+    let forceBreak = false
+    if (sameSpeaker && s.startMs != null) {
+      const lastSeg = prev.segments[prev.segments.length - 1]
+      const gap = lastSeg.endMs != null ? s.startMs - lastSeg.endMs : 0
+      if (gap >= SILENCE_BREAK_MS) forceBreak = true
+      const groupStart = prev.segments[0].startMs
+      if (groupStart != null && s.startMs - groupStart >= TIME_BREAK_MS) forceBreak = true
+    }
+    if (sameSpeaker && !forceBreak) {
       prev.segments.push(s)
     } else {
       groups.push({ key: String(s.id), speaker: s.speaker, name: s.name, segments: [s] })
