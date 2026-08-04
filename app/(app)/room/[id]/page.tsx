@@ -91,6 +91,7 @@ function Lobby({ roomId, onJoin }: { roomId: string; onJoin: () => void }) {
   const [copied, setCopied] = useState(false)
   const [idCopied, setIdCopied] = useState(false)
   const [joinId, setJoinId] = useState('')
+  useThemeMode()
 
   // Build the invite from the origin + THIS room id (not window.location.href,
   // which can still read "/room/new" right after the redirect). Set after mount
@@ -110,14 +111,17 @@ function Lobby({ roomId, onJoin }: { roomId: string; onJoin: () => void }) {
 
   return (
     <main className="mx-auto max-w-lg px-6 py-20">
-      {/* Back out of the lobby without joining — otherwise the join screen is a
-          dead end (no nav chrome here). Prefer real history back; fall to dashboard. */}
-      <button
-        onClick={() => (window.history.length > 1 ? router.back() : router.push('/dashboard'))}
-        className="mb-6 flex items-center gap-1.5 text-sm text-black/50 transition-colors hover:text-ink"
-      >
-        <ArrowLeft size={16} /> Back
-      </button>
+      <div className="mb-6 flex items-center justify-between">
+        {/* Back out of the lobby without joining — otherwise the join screen is a
+            dead end (no nav chrome here). Prefer real history back; fall to dashboard. */}
+        <button
+          onClick={() => (window.history.length > 1 ? router.back() : router.push('/dashboard'))}
+          className="flex items-center gap-1.5 text-sm text-black/50 transition-colors hover:text-ink"
+        >
+          <ArrowLeft size={16} /> Back
+        </button>
+        <ThemeToggle label className="glass glass-interactive" />
+      </div>
       <p className="text-sm font-medium uppercase tracking-widest text-emerald-700">Live meeting</p>
       <h1 className="mt-2 font-[family-name:var(--font-serif)] text-3xl leading-tight sm:text-4xl">
         You&rsquo;re about to join
@@ -476,7 +480,7 @@ function Meeting({ roomId }: { roomId: string }) {
     <main
       // Ask panel open on desktop → reserve its width as right-padding so the
       // meeting header/transcript reflow beside it (not under it). Mobile: sheet.
-      className="relative flex h-dvh flex-col overflow-hidden bg-[#faf9f7] text-[#16151a] sm:pr-[var(--ask-w,0px)] sm:transition-[padding] sm:duration-200"
+      className="relative flex h-dvh flex-col overflow-hidden bg-[color:var(--paper)] text-[color:var(--ink)] sm:pr-[var(--ask-w,0px)] sm:transition-[padding] sm:duration-200"
       style={askOpen ? ({ '--ask-w': `${panel.width}px` } as React.CSSProperties) : undefined}
     >
       <ShortcutHelp
