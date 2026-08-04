@@ -60,7 +60,9 @@ export function Waveform({ level, active }: { level: number; active: boolean }) 
             className="w-[3px] rounded-full transition-[height,opacity] duration-75"
             style={{
               height: `${Math.max(3, h * 32)}px`,
-              background: active ? 'var(--signal)' : 'rgba(20,21,26,0.15)',
+              // Idle bars derive from --ink so they invert with the theme; a fixed
+              // dark rgba was invisible against the dark surface.
+              background: active ? 'var(--signal)' : 'color-mix(in srgb, var(--ink) 22%, transparent)',
               opacity: active ? 0.5 + h * 0.5 : 0.4,
             }}
           />

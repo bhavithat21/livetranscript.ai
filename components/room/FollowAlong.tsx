@@ -85,7 +85,13 @@ export function FollowAlong({
   useEffect(() => () => void end(), [end])
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-[#faf9f7]/98 backdrop-blur-sm">
+    // --paper (not the literal light hex) so this full-screen overlay follows the
+    // theme — hard-coded #faf9f7 made Follow-along a blinding white sheet in dark
+    // mode. color-mix keeps the original near-opaque frosting.
+    <div
+      className="fixed inset-0 z-50 flex flex-col backdrop-blur-sm"
+      style={{ background: 'color-mix(in srgb, var(--paper) 98%, transparent)' }}
+    >
       <header className="flex items-center gap-3 px-6 py-4">
         <span className="text-sm font-medium uppercase tracking-widest text-emerald-700">
           Follow along

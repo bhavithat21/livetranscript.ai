@@ -20,7 +20,8 @@ export function mergeRoomSegments(prev: Segment[], m: RoomMessage): Segment[] {
           return prev
         }
         const next = prev.slice()
-        next[i] = { ...prev[i], speaker: m.speaker, text: m.text, isFinal: m.isFinal }
+        // Keep the interim's original startMs — only its end advances as words land.
+        next[i] = { ...prev[i], speaker: m.speaker, text: m.text, isFinal: m.isFinal, startMs: prev[i].startMs ?? m.startMs, endMs: m.endMs }
         return next
       }
       break // last line for this sender is final → append a new one
@@ -29,7 +30,7 @@ export function mergeRoomSegments(prev: Segment[], m: RoomMessage): Segment[] {
   const nextId = prev.reduce((max, s) => Math.max(max, s.id), 0) + 1
   return [
     ...prev,
-    { id: nextId, speaker: m.speaker, text: m.text, isFinal: m.isFinal, sender: m.sender, name: m.name },
+    { id: nextId, speaker: m.speaker, text: m.text, isFinal: m.isFinal, sender: m.sender, name: m.name, startMs: m.startMs, endMs: m.endMs },
   ]
 }
 

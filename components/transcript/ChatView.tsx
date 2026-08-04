@@ -1,25 +1,31 @@
 'use client'
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { speakerColor } from '@/lib/speakers/palette'
-import { splitSentences, type Segment } from '@/lib/transcript/store'
+import { colorMap, segmentSlot } from '@/lib/room/roomStore'
+import { paragraphize, splitSentences, type Segment } from '@/lib/transcript/store'
+import { useThemeMode } from '@/lib/transcript/useThemeMode'
 import type { SpeakerOverrides } from './TranscriptView'
 
 // Chat-bubble view of a meeting transcript. Consecutive lines from the same
-// speaker are grouped into one bubble, labeled with their display name (from
-// login) and colored by speaker slot. Auto-scrolls to the newest message.
+// speaker are grouped under one name label, then split into a bubble per
+// paragraph — so an uninterrupted monologue reads as a stack of scannable
+// messages instead of one wall. Auto-scrolls to the newest message.
 export function ChatView({
   segments,
-  theme = 'light',
+  theme: themeProp,
   fill = false,
   overrides,
   scale = 1,
 }: {
   segments: Segment[]
+  // Optional override; omit it to follow the app-wide theme (see TranscriptView).
   theme?: 'light' | 'dark'
   fill?: boolean
   overrides?: SpeakerOverrides
   scale?: number
 }) {
+  const globalTheme = useThemeMode().theme
+  const theme = themeProp ?? globalTheme
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -28,6 +34,12 @@ export function ChatView({
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 160
     if (nearBottom) el.scrollTop = el.scrollHeight
   }, [segments])
+
+  // Color by SENDER identity, exactly as TranscriptView does. The wire `speaker`
+  // field races the roster and can arrive equal for everyone — coloring by it
+  // painted every bubble with slot 0, so the chat tab lost speaker distinction
+  // entirely. MUST run before the early return (Rules of Hooks).
+  const colors = useMemo(() => colorMap(segments), [segments])
 
   if (segments.length === 0) {
     return (
@@ -50,27 +62,32 @@ export function ChatView({
         {groups.map((g) => {
           const sender = g.segments[0].sender
           const ov = sender ? overrides?.[sender] : undefined
-          const speaker = speakerColor(ov?.colorSlot ?? g.speaker ?? 0, theme)
+          const speaker = speakerColor(ov?.colorSlot ?? segmentSlot(g.segments[0], colors), theme)
           const name = ov?.name?.trim() || g.name?.trim() || speaker.name
-          const pending = g.segments.some((s) => !s.isFinal)
           return (
-            <div key={g.key} className="flex flex-col gap-1">
+            <div key={g.key} className="flex flex-col gap-2">
               <span
                 className="px-1 font-[family-name:var(--font-serif)] text-sm font-semibold"
                 style={{ color: speaker.color }}
               >
                 {name}
               </span>
-              <div
-                className="glass flex max-w-[85%] flex-col gap-1 self-start rounded-2xl rounded-tl-md px-4 py-2.5 leading-relaxed"
-                // 1rem bubble base × the reader's text-size multiplier.
-                style={{ borderLeft: `3px solid ${speaker.color}`, opacity: pending ? 0.75 : 1, fontSize: `${scale}rem` }}
-              >
-                {/* One statement per line inside the bubble instead of a run-on paragraph. */}
-                {splitSentences(g.segments.map((s) => s.text).join(' ')).map((line, li) => (
-                  <p key={li} className="break-words">{line}</p>
-                ))}
-              </div>
+              {/* One bubble per paragraph — a break lands wherever the speaker
+                  paused ~2s or the block ran long, so a monologue is scannable.
+                  A whitespace-only interim would otherwise render an empty bubble. */}
+              {paragraphize(g.segments).filter((p) => p.text).map((p) => (
+                <div
+                  key={p.key}
+                  className="glass flex max-w-[85%] flex-col gap-1 self-start rounded-2xl rounded-tl-md px-4 py-2.5 leading-relaxed"
+                  // 1rem bubble base × the reader's text-size multiplier.
+                  style={{ borderLeft: `3px solid ${speaker.color}`, opacity: p.isFinal ? 1 : 0.75, fontSize: `${scale}rem` }}
+                >
+                  {/* One statement per line inside the bubble instead of a run-on paragraph. */}
+                  {splitSentences(p.text).map((line, li) => (
+                    <p key={li} className="break-words">{line}</p>
+                  ))}
+                </div>
+              ))}
             </div>
           )
         })}
@@ -81,25 +98,12 @@ export function ChatView({
 
 type Group = { key: string; speaker: number | null; name?: string; segments: Segment[] }
 
-const SILENCE_BREAK_MS = 2000
-const TIME_BREAK_MS = 30000
-
-// Merge consecutive segments from the same sender into one chat bubble,
-// but force a paragraph break on: speaker change, >2s silence, or >30s continuous.
 function groupBySpeaker(segments: Segment[]): Group[] {
   const groups: Group[] = []
   for (const s of segments) {
     const prev = groups[groups.length - 1]
     const sameSpeaker = prev && (s.sender ? prev.segments[0].sender === s.sender : prev.speaker === s.speaker)
-    let forceBreak = false
-    if (sameSpeaker && s.startMs != null) {
-      const lastSeg = prev.segments[prev.segments.length - 1]
-      const gap = lastSeg.endMs != null ? s.startMs - lastSeg.endMs : 0
-      if (gap >= SILENCE_BREAK_MS) forceBreak = true
-      const groupStart = prev.segments[0].startMs
-      if (groupStart != null && s.startMs - groupStart >= TIME_BREAK_MS) forceBreak = true
-    }
-    if (sameSpeaker && !forceBreak) {
+    if (sameSpeaker) {
       prev.segments.push(s)
     } else {
       groups.push({ key: String(s.id), speaker: s.speaker, name: s.name, segments: [s] })

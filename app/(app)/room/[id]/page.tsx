@@ -18,6 +18,8 @@ import { TranscriptView, type SpeakerOverrides } from '@/components/transcript/T
 import { ChatView } from '@/components/transcript/ChatView'
 import { TextSizeControl } from '@/components/transcript/TextSizeControl'
 import { useTextScale } from '@/lib/transcript/useTextScale'
+import { useThemeMode } from '@/lib/transcript/useThemeMode'
+import { ThemeToggle } from '@/components/ui/ThemeToggle'
 import { Waveform } from '@/components/transcript/Waveform'
 import { Select } from '@/components/ui/Select'
 import { ShortcutHelp, MOD } from '@/components/ui/ShortcutHelp'
@@ -89,6 +91,7 @@ function Lobby({ roomId, onJoin }: { roomId: string; onJoin: () => void }) {
   const [copied, setCopied] = useState(false)
   const [idCopied, setIdCopied] = useState(false)
   const [joinId, setJoinId] = useState('')
+  useThemeMode()
 
   // Build the invite from the origin + THIS room id (not window.location.href,
   // which can still read "/room/new" right after the redirect). Set after mount
@@ -108,14 +111,17 @@ function Lobby({ roomId, onJoin }: { roomId: string; onJoin: () => void }) {
 
   return (
     <main className="mx-auto max-w-lg px-6 py-20">
-      {/* Back out of the lobby without joining — otherwise the join screen is a
-          dead end (no nav chrome here). Prefer real history back; fall to dashboard. */}
-      <button
-        onClick={() => (window.history.length > 1 ? router.back() : router.push('/dashboard'))}
-        className="mb-6 flex items-center gap-1.5 text-sm text-black/50 transition-colors hover:text-ink"
-      >
-        <ArrowLeft size={16} /> Back
-      </button>
+      <div className="mb-6 flex items-center justify-between">
+        {/* Back out of the lobby without joining — otherwise the join screen is a
+            dead end (no nav chrome here). Prefer real history back; fall to dashboard. */}
+        <button
+          onClick={() => (window.history.length > 1 ? router.back() : router.push('/dashboard'))}
+          className="flex items-center gap-1.5 text-sm text-black/50 transition-colors hover:text-ink"
+        >
+          <ArrowLeft size={16} /> Back
+        </button>
+        <ThemeToggle label className="glass glass-interactive" />
+      </div>
       <p className="text-sm font-medium uppercase tracking-widest text-emerald-700">Live meeting</p>
       <h1 className="mt-2 font-[family-name:var(--font-serif)] text-3xl leading-tight sm:text-4xl">
         You&rsquo;re about to join
@@ -219,6 +225,7 @@ function Meeting({ roomId }: { roomId: string }) {
   const displayName = useDisplayName()
   const { keyterms } = useKeytermPrefs()
   const textScale = useTextScale() // reader text-size preference (localStorage)
+  const themeMode = useThemeMode() // light/dark reading surface (localStorage)
   const { start, stop, error } = useMicStream()
   // Desktop app only: native system-audio tap (macOS ScreenCaptureKit / Windows
   // WASAPI loopback). No-ops in the browser (start returns 0 → mic path).
@@ -465,7 +472,7 @@ function Meeting({ roomId }: { roomId: string }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [live, starting, onStart, onStop, onCopyTranscript, reader])
 
-  const me = speakerColor(mySlot < 0 ? 0 : mySlot, 'light')
+  const me = speakerColor(mySlot < 0 ? 0 : mySlot, themeMode.theme)
 
   return (
     // Lock the meeting to ONE viewport: header fixed, transcript is the only
@@ -473,7 +480,7 @@ function Meeting({ roomId }: { roomId: string }) {
     <main
       // Ask panel open on desktop → reserve its width as right-padding so the
       // meeting header/transcript reflow beside it (not under it). Mobile: sheet.
-      className="relative flex h-dvh flex-col overflow-hidden bg-[#faf9f7] text-[#16151a] sm:pr-[var(--ask-w,0px)] sm:transition-[padding] sm:duration-200"
+      className="relative flex h-dvh flex-col overflow-hidden bg-[color:var(--paper)] text-[color:var(--ink)] sm:pr-[var(--ask-w,0px)] sm:transition-[padding] sm:duration-200"
       style={askOpen ? ({ '--ask-w': `${panel.width}px` } as React.CSSProperties) : undefined}
     >
       <ShortcutHelp
@@ -516,6 +523,9 @@ function Meeting({ roomId }: { roomId: string }) {
               </span>
             </div>
           )}
+          {/* Reader hides the header, so mirror the theme toggle here — this is the
+              surface people read for the longest stretch. */}
+          {!lockMode.locked && <ThemeToggle className="glass" />}
           {!lockMode.locked && (
             <button
               onClick={() => setReader(false)}
@@ -607,6 +617,7 @@ function Meeting({ roomId }: { roomId: string }) {
           >
             ⇅ {['Off', 'Slow', 'Med', 'Fast'][speedIdx]}
           </button>
+          <ThemeToggle label className="glass glass-interactive" />
           {/* Reader mode: distraction-free full-viewport transcript (like /record). */}
           <button
             onClick={() => setReader((v) => !v)}
@@ -677,9 +688,9 @@ function Meeting({ roomId }: { roomId: string }) {
           under the header + above the dock without a second page scrollbar. */}
       <div className="min-h-0 flex-1">
         {view === 'chat' ? (
-          <ChatView segments={segments} theme="light" fill overrides={overrides} scale={textScale.scale} />
+          <ChatView segments={segments} fill overrides={overrides} scale={textScale.scale} />
         ) : (
-          <TranscriptView segments={segments} theme="light" readerMode={reader} autoScroll fade={!reader} fill overrides={overrides} scale={textScale.scale} scrollSpeed={SCROLL_SPEEDS[speedIdx]} />
+          <TranscriptView segments={segments} readerMode={reader} autoScroll fade={!reader} fill overrides={overrides} scale={textScale.scale} scrollSpeed={SCROLL_SPEEDS[speedIdx]} />
         )}
       </div>
 

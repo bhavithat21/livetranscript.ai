@@ -91,7 +91,7 @@ export default async function SessionDetailPage({ params }: { params: Promise<{ 
         </h2>
         {/* Solid warm reading surface (not glass) — max contrast for the payload. */}
         <div className="reader-surface rise-in rounded-2xl" style={{ animationDelay: '160ms' }}>
-          <TranscriptView segments={segments} theme="light" readerMode flow />
+          <TranscriptView segments={segments} readerMode flow />
         </div>
       </section>
     </main>

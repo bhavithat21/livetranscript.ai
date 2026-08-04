@@ -396,7 +396,6 @@ export default function RecordPage() {
       ) : (
         <TranscriptView
           segments={segments}
-          theme="light"
           readerMode={reader}
           autoScroll={recording}
           scale={textScale.scale}

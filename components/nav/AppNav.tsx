@@ -4,6 +4,7 @@ import { usePathname } from 'next/navigation'
 import { Menu } from 'lucide-react'
 import { Show, SignInButton, SignUpButton, UserButton } from '@clerk/nextjs'
 import { Wordmark } from './Wordmark'
+import { ThemeToggle } from '@/components/ui/ThemeToggle'
 
 // The global shell nav. Present on the marketing + library surfaces, and
 // deliberately ABSENT on the focused reading/doing screens (live record, meeting
@@ -54,6 +55,9 @@ export function AppNav({ clerkConfigured }: { clerkConfigured: boolean }) {
               Tour
             </button>
           </div>
+          {/* Stays OUTSIDE the md:flex group — the theme control is worth keeping
+              on phones, unlike the secondary links that collapse into the menu. */}
+          <ThemeToggle className="transition-colors hover:bg-black/5 hover:text-ink" />
           <Link href="/record" data-tour="record" className="btn-signal ml-1 px-4 text-sm">
             New transcript
           </Link>

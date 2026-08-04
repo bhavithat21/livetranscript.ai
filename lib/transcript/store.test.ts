@@ -4,6 +4,7 @@ import {
   applyCorrection,
   splitSentences,
   sanitizeSegments,
+  paragraphize,
   type Segment,
 } from './store'
 import type { TranscriptEvent } from '@/lib/transcription/types'
@@ -83,6 +84,76 @@ describe('splitSentences', () => {
   })
   it('returns [] for blank text', () => {
     expect(splitSentences('   ')).toEqual([])
+  })
+})
+
+describe('paragraphize', () => {
+  const seg = (id: number, text: string, startMs: number, endMs: number): Segment => ({
+    id,
+    speaker: 0,
+    text,
+    isFinal: true,
+    startMs,
+    endMs,
+  })
+
+  it('starts a new paragraph after a >= 2s pause', () => {
+    const p = paragraphize([seg(1, 'one', 0, 1000), seg(2, 'two', 3000, 4000)])
+    expect(p.map((x) => x.text)).toEqual(['one', 'two'])
+  })
+
+  it('keeps a continuous run in one paragraph', () => {
+    const p = paragraphize([seg(1, 'one', 0, 1000), seg(2, 'two', 1200, 2000)])
+    expect(p.map((x) => x.text)).toEqual(['one two'])
+  })
+
+  it('breaks a long block even with no pause', () => {
+    const long = 'word '.repeat(50).trim()
+    const p = paragraphize([seg(1, long, 0, 1000), seg(2, long, 1100, 2000)])
+    expect(p).toHaveLength(2)
+  })
+
+  it('treats a rewound clock (provider reconnect) as no pause, not a break', () => {
+    const p = paragraphize([seg(1, 'one', 9000, 10_000), seg(2, 'two', 0, 500)])
+    expect(p).toHaveLength(1)
+  })
+
+  it('runs text together when timings are absent', () => {
+    const p = paragraphize([
+      { id: 1, speaker: 0, text: 'one', isFinal: true },
+      { id: 2, speaker: 0, text: 'two', isFinal: true },
+    ])
+    expect(p.map((x) => x.text)).toEqual(['one two'])
+  })
+
+  it('hard-caps a single oversized segment, splitting on sentence boundaries', () => {
+    const sentence = 'This clause runs on and on without pause. '
+    const p = paragraphize([seg(1, sentence.repeat(20), 0, 60_000)])
+    expect(p.length).toBeGreaterThan(1)
+    for (const x of p) expect(x.text.length).toBeLessThanOrEqual(320)
+    // Sentences stay whole — no mid-sentence cut.
+    for (const x of p) expect(x.text).toMatch(/\.$/)
+    // Overflow chunks are flagged so TranscriptView doesn't double-count them.
+    expect(p[0].startsSegment).toBe(true)
+    expect(p.slice(1).every((x) => !x.startsSegment)).toBe(true)
+    expect(new Set(p.map((x) => x.key)).size).toBe(p.length) // keys stay unique
+  })
+
+  it('falls back to word boundaries for one sentence longer than the cap', () => {
+    const p = paragraphize([seg(1, 'word '.repeat(200).trim(), 0, 60_000)])
+    expect(p.length).toBeGreaterThan(1)
+    for (const x of p) expect(x.text.length).toBeLessThanOrEqual(320)
+    expect(p.map((x) => x.text).join(' ').split(/\s+/)).toHaveLength(200) // nothing dropped
+  })
+
+  it('keeps a single word longer than the cap intact rather than truncating', () => {
+    const giant = 'x'.repeat(400)
+    expect(paragraphize([seg(1, giant, 0, 1000)]).map((x) => x.text)).toEqual([giant])
+  })
+
+  it('marks a paragraph pending while any of its segments is interim', () => {
+    const p = paragraphize([seg(1, 'one', 0, 1000), { ...seg(2, 'two', 1200, 2000), isFinal: false }])
+    expect(p[0].isFinal).toBe(false)
   })
 })
 
