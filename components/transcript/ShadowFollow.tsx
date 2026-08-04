@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react'
 import { motion, useReducedMotion } from 'framer-motion'
 import { cn } from '@/lib/utils'
 import { bandWordCount, wordState, type ShadowWordState } from '@/lib/room/shadowAlign'
+import { useThemeMode } from '@/lib/transcript/useThemeMode'
 
 // Speech-shadowing follow-along, "growing trail" model. Shows the whole recent
 // passage and marks what's been SAID SO FAR with a continuous colored underline
@@ -20,6 +21,8 @@ interface ShadowFollowProps {
   activeIndex: number
   /** Override the adaptive band with a fixed word count (used by the demo). */
   windowSize?: number
+  /** Optional override; omit it to follow the app-wide theme. Defaulting this to
+   *  'light' rendered near-black words on the dark Follow-along overlay. */
   theme?: 'light' | 'dark'
   className?: string
 }
@@ -28,9 +31,11 @@ export function ShadowFollow({
   words,
   activeIndex,
   windowSize,
-  theme = 'light',
+  theme: themeProp,
   className,
 }: ShadowFollowProps) {
+  const globalTheme = useThemeMode().theme
+  const theme = themeProp ?? globalTheme
   const leadRef = useRef<HTMLSpanElement>(null)
   const reduce = useReducedMotion()
   // Adaptive band: light words ahead until ~a breath-sized phrase (~1.5s of
@@ -44,7 +49,14 @@ export function ShadowFollow({
   }, [activeIndex, reduce])
 
   return (
-    <div className={cn('flex flex-wrap gap-x-1 gap-y-1.5 leading-relaxed', className)}>
+    // key={theme} REMOUNTS the words when the theme flips. The word colors live in
+    // motion's `animate` prop, and with `initial={false}` motion latches its
+    // baseline on mount and never re-applied the color when theme changed from the
+    // server snapshot ('light') to the client's real value — leaving near-black
+    // words on the dark overlay while the plain-CSS borders were correctly light.
+    // Remounting re-seeds those baselines. A theme toggle is rare, so losing the
+    // in-flight trail animation for one frame is a fair trade.
+    <div key={theme} className={cn('flex flex-wrap gap-x-1 gap-y-1.5 leading-relaxed', className)}>
       {words.map((word, i) => {
         const state = wordState(i, activeIndex, w)
         return (

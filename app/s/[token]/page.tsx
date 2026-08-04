@@ -89,7 +89,7 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
         )}
 
         <div className="reader-surface mt-6 rounded-2xl">
-          <TranscriptView segments={segments} theme="light" readerMode flow />
+          <TranscriptView segments={segments} readerMode flow />
         </div>
       </article>
 

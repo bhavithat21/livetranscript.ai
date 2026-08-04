@@ -479,3 +479,121 @@ html.lt-desktop .overscroll-contain * {
 .lt-stealth *,
 .lt-stealth *::before,
 .lt-stealth *::after { animation-play-state: paused !important; }
+
+/* ── Dark mode (web) ───────────────────────────────────────────────────────
+   Toggled by useThemeMode, which puts `lt-dark` on <html>. Deliberately NOT
+   merged with the `.lt-desktop` block above: that one is a TRANSPARENT overlay
+   for the floating Tauri window, while this is a SOLID dark page for the
+   browser. They share a palette, not a background model — folding them together
+   would make the web app see-through. Every rule is scoped `:not(.lt-desktop)`
+   because the desktop shell is already dark and these later, equally-specific
+   `!important` rules would otherwise win and paint its overlay opaque.
+   Long meetings are read for hours, so the surface is a soft near-black rather
+   than pure #000 (less halation on white text) and body copy lands near #f0efed
+   for AA contrast. */
+html.lt-dark:not(.lt-desktop) {
+  --paper: #121216;
+  --ink: #f0efed;
+  --reader: #17171c;
+  --signal: #34d399;
+  --stop: #f87171;
+  --glass-bg: rgba(32, 32, 42, 0.62);
+  --glass-border: rgba(255, 255, 255, 0.10);
+  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  --panel-bg: rgba(23, 23, 28, 0.72);
+  --panel-line: rgba(255, 255, 255, 0.09);
+  /* Native scrollbars, form controls and caret follow the theme. */
+  color-scheme: dark;
+}
+html.lt-dark:not(.lt-desktop) body {
+  color: var(--ink);
+  background:
+    radial-gradient(1200px 600px at 15% -10%, rgba(16, 118, 110, 0.14), transparent 60%),
+    radial-gradient(1000px 500px at 100% 0%, rgba(180, 83, 9, 0.10), transparent 55%),
+    var(--paper);
+}
+/* Page shells that hard-code the light paper hex (the room + record surfaces). */
+html.lt-dark:not(.lt-desktop) .bg-\[\#faf9f7\] { background-color: var(--paper) !important; }
+html.lt-dark:not(.lt-desktop) .text-\[\#16151a\],
+html.lt-dark:not(.lt-desktop) .text-ink { color: var(--ink) !important; }
+/* Tailwind's black/NN text ramp inverts to a white ramp at matching weights. */
+html.lt-dark:not(.lt-desktop) .text-black\/70,
+html.lt-dark:not(.lt-desktop) .text-black\/75 { color: rgba(255, 255, 255, 0.80) !important; }
+html.lt-dark:not(.lt-desktop) .text-black\/65,
+html.lt-dark:not(.lt-desktop) .text-black\/60,
+html.lt-dark:not(.lt-desktop) .text-black\/55,
+html.lt-dark:not(.lt-desktop) .text-black\/50,
+html.lt-dark:not(.lt-desktop) .text-black\/45,
+html.lt-dark:not(.lt-desktop) .text-black\/40 { color: rgba(255, 255, 255, 0.62) !important; }
+html.lt-dark:not(.lt-desktop) .text-black\/80 { color: rgba(255, 255, 255, 0.88) !important; }
+html.lt-dark:not(.lt-desktop) .text-black\/35 { color: rgba(255, 255, 255, 0.55) !important; }
+/* The transcript empty-state sits at /30. On dark it needs 0.5 alpha to clear
+   AA (4.5:1) at 18px — 0.42 measured 4.1:1 and failed. */
+html.lt-dark:not(.lt-desktop) .text-black\/30 { color: rgba(255, 255, 255, 0.5) !important; }
+html.lt-dark:not(.lt-desktop) .border-black\/10,
+html.lt-dark:not(.lt-desktop) .border-black\/15 { border-color: rgba(255, 255, 255, 0.12) !important; }
+html.lt-dark:not(.lt-desktop) .hairline,
+html.lt-dark:not(.lt-desktop) .bg-black\/10 { background: rgba(255, 255, 255, 0.10) !important; }
+/* Emerald/amber accents were picked against paper; lighten for dark contrast. */
+html.lt-dark:not(.lt-desktop) .text-emerald-700,
+html.lt-dark:not(.lt-desktop) .text-emerald-800 { color: #34d399 !important; }
+html.lt-dark:not(.lt-desktop) .text-amber-700 { color: #fbbf24 !important; }
+html.lt-dark:not(.lt-desktop) .text-red-700 { color: #f87171 !important; }
+/* Near-white utility surfaces (tooltips, popovers, roster rows) flip dark. */
+html.lt-dark:not(.lt-desktop) .bg-white,
+html.lt-dark:not(.lt-desktop) .bg-white\/60,
+html.lt-dark:not(.lt-desktop) .bg-white\/70,
+html.lt-dark:not(.lt-desktop) .bg-white\/80 { background-color: #1c1c22 !important; }
+/* Faint dark tints (kbd chips, hover fills, subtle wells) must invert or they
+   vanish into the dark surface instead of reading as a raised element. The
+   arbitrary-value variants compile to their own class names, so `.bg-black\/5`
+   does NOT cover them — each has to be listed. */
+html.lt-dark:not(.lt-desktop) .bg-black\/5,
+html.lt-dark:not(.lt-desktop) .bg-black\/\[0\.02\],
+html.lt-dark:not(.lt-desktop) .bg-black\/\[0\.03\],
+html.lt-dark:not(.lt-desktop) .bg-black\/\[0\.04\] { background-color: rgba(255, 255, 255, 0.07) !important; }
+html.lt-dark:not(.lt-desktop) .bg-black\/\[0\.06\],
+html.lt-dark:not(.lt-desktop) .bg-black\/\[0\.07\] { background-color: rgba(255, 255, 255, 0.10) !important; }
+html.lt-dark:not(.lt-desktop) .border-black\/25 { border-color: rgba(255, 255, 255, 0.28) !important; }
+/* Tailwind emits divide-* as a border on the sibling combinator. */
+html.lt-dark:not(.lt-desktop) .divide-black\/5 > :not([hidden]) ~ :not([hidden]) {
+  border-color: rgba(255, 255, 255, 0.09) !important;
+}
+/* bg-black/25 and /40 are deliberate dimming scrims — they stay dark on purpose. */
+html.lt-dark:not(.lt-desktop) input,
+html.lt-dark:not(.lt-desktop) textarea,
+html.lt-dark:not(.lt-desktop) select {
+  background-color: rgba(255, 255, 255, 0.06) !important;
+  color: var(--ink) !important;
+  border-color: rgba(255, 255, 255, 0.14) !important;
+}
+/* macOS draws the <option> popup outside the webview and honors only
+   background/color — enough to stop a white menu flashing over a dark page. */
+html.lt-dark:not(.lt-desktop) option,
+html.lt-dark:not(.lt-desktop) optgroup { background: #17171c !important; color: var(--ink) !important; }
+html.lt-dark:not(.lt-desktop) .btn-ghost {
+  border-color: rgba(255, 255, 255, 0.20) !important;
+  color: rgba(255, 255, 255, 0.75) !important;
+}
+html.lt-dark:not(.lt-desktop) .btn-ghost:hover { background: rgba(255, 255, 255, 0.08) !important; }
+/* Active pills use bg-ink, which is near-WHITE in dark mode — that glares. Repaint
+   with the emerald signal so "active" reads as an accent. The Tailwind variant
+   compiles to a class literally named `data-[active=true]:bg-ink`, which a plain
+   `.bg-ink` selector does not match — hence the attribute + substring match. */
+html.lt-dark:not(.lt-desktop) .btn-ghost[data-active='true'],
+html.lt-dark:not(.lt-desktop) .bg-ink,
+html.lt-dark:not(.lt-desktop) [data-active='true'][class*='bg-ink'] {
+  background-color: #0f766e !important;
+  border-color: #0f766e !important;
+  color: #ffffff !important;
+}
+html.lt-dark:not(.lt-desktop) .glass-interactive:hover { background: rgba(48, 48, 62, 0.78); }
+html.lt-dark:not(.lt-desktop) .reader-surface {
+  background: var(--reader);
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+html.lt-dark:not(.lt-desktop) nav[aria-label='Main'] { background: rgba(18, 18, 26, 0.72) !important; }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  html.lt-dark:not(.lt-desktop) .glass { background: rgba(28, 28, 36, 0.96); }
+}

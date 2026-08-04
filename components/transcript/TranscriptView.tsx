@@ -3,8 +3,9 @@ import { memo, useEffect, useMemo, useRef } from 'react'
 import { speakerColor } from '@/lib/speakers/palette'
 import { colorMap, segmentSlot } from '@/lib/room/roomStore'
 import { cn } from '@/lib/utils'
-import { splitSentences, type Segment } from '@/lib/transcript/store'
+import { paragraphize, splitSentences, type Segment } from '@/lib/transcript/store'
 import { isTauri } from '@/lib/audio/useNativeCapture'
+import { useThemeMode } from '@/lib/transcript/useThemeMode'
 
 // Sentences for a segment; never empty so a blank/whitespace interim still holds
 // its place in the list (avoids a line vanishing then reappearing mid-speech).
@@ -20,7 +21,7 @@ export type SpeakerOverrides = Record<string, SpeakerOverride>
 
 export function TranscriptView({
   segments,
-  theme,
+  theme: themeProp,
   readerMode,
   emphasizeSpeaker = null,
   autoScroll = false,
@@ -32,7 +33,10 @@ export function TranscriptView({
   scrollSpeed = 0,
 }: {
   segments: Segment[]
-  theme: 'light' | 'dark'
+  // Optional override. Omit it and the view follows the app-wide theme — server
+  // components (session detail, public share) can't call the hook themselves, so
+  // deriving it here is what makes speaker colors correct on those pages too.
+  theme?: 'light' | 'dark'
   readerMode: boolean
   // Shadow Mode: this speaker's text renders big, others small + dim.
   emphasizeSpeaker?: number | null
@@ -55,6 +59,8 @@ export function TranscriptView({
   // reader can consume hands-free at a chosen pace instead of snapping to newest.
   scrollSpeed?: number
 }) {
+  const globalTheme = useThemeMode().theme
+  const theme = themeProp ?? globalTheme
   const scrollRef = useRef<HTMLDivElement>(null)
   // JUMP-FOLLOW (default, scrollSpeed=0): snap to the live edge as speech arrives,
   // but only when already near the bottom, so scrolling up to re-read isn't yanked
@@ -130,6 +136,27 @@ export function TranscriptView({
   // crashes the component (that was kicking everyone out of live meetings).
   const colors = useMemo(() => colorMap(segments), [segments])
 
+  // Ids of segments that open a new paragraph WITHIN a turn (the speaker paused
+  // ~2s, or the block ran long). Turn-opening segments are excluded — they already
+  // get the larger turn gap. Same rule the chat tab uses, so both views break in
+  // the same places. MUST stay above the early return (Rules of Hooks).
+  const paragraphStarts = useMemo(() => {
+    const ids = new Set<number>()
+    let turn: Segment[] = []
+    const flush = () => {
+      // startsSegment filters out mid-segment overflow chunks, whose first
+      // segment already opened the paragraph before them.
+      for (const p of paragraphize(turn).slice(1)) if (p.startsSegment) ids.add(p.segments[0].id)
+      turn = []
+    }
+    for (const s of segments) {
+      if (turn.length && turn[0].sender !== s.sender) flush()
+      turn.push(s)
+    }
+    flush()
+    return ids
+  }, [segments])
+
   if (segments.length === 0) {
     return (
       <div className="px-4 py-16 text-center text-black/30 sm:px-6">
@@ -188,6 +215,7 @@ export function TranscriptView({
               color={speaker.color}
               name={name}
               newTurn={newTurn}
+              newParagraph={paragraphStarts.has(s.id)}
               inkBody={inkBody}
               scale={scale}
               shadow={shadow}
@@ -207,6 +235,7 @@ const TranscriptRow = memo(function TranscriptRow({
   color,
   name,
   newTurn,
+  newParagraph,
   inkBody,
   scale,
   shadow,
@@ -216,6 +245,9 @@ const TranscriptRow = memo(function TranscriptRow({
   color: string
   name: string
   newTurn: boolean
+  // Opens a paragraph inside an ongoing turn — render with breathing room so a
+  // long monologue reads as blocks rather than one unbroken run.
+  newParagraph: boolean
   inkBody: string
   scale: number
   shadow: boolean
@@ -223,7 +255,7 @@ const TranscriptRow = memo(function TranscriptRow({
 }) {
   if (shadow) {
     return (
-      <div className={cn(newTurn ? 'mt-5' : 'mt-1')}>
+      <div className={cn(newTurn ? 'mt-5' : newParagraph ? 'mt-4' : 'mt-1')}>
         {newTurn && s.speaker != null && (
           <span
             className="mb-0.5 block font-[family-name:var(--font-serif)] text-sm font-semibold"
@@ -256,7 +288,7 @@ const TranscriptRow = memo(function TranscriptRow({
   }
 
   return (
-    <div className={cn(newTurn ? 'mt-6 first:mt-0' : 'mt-1')}>
+    <div className={cn(newTurn ? 'mt-6 first:mt-0' : newParagraph ? 'mt-4' : 'mt-1')}>
       {newTurn && s.speaker != null && (
         // Turn header: speaker identity carried by COLOR on the label; a thin
         // colored rule anchors the whole turn to that speaker.
