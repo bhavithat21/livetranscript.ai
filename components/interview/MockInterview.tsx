@@ -126,7 +126,7 @@ export function MockInterview({ blocked, visible = true, onActivity, onComplete 
           <button className="btn-signal" onClick={() => void finish()}>End test &amp; open feedback</button>
         </>}
         <button className="btn-ghost" disabled={blocked || answerRunning || !hasAcceptedRun(runs, instructions)} onClick={publish}>Apply to Live</button>
-        <button className="btn-ghost" disabled={blocked || answerRunning || !tuning.state.previous} onClick={() => { tuning.rollback(); setDraft(null); setNotice('Previous live instructions restored as a new revision.') }}>Rollback</button>
+        <button className="btn-ghost" disabled={blocked || answerRunning || !tuning.state.previous} onClick={() => { tuning.rollback(); setDraft(null); setNotice('Previous live instructions restored as a new revision.') }}>Roll back live profile</button>
         <button className="btn-ghost" disabled={answerRunning || blocked} onClick={() => setDraft(null)}>Reset draft</button>
       </div>
       {running && <p role="status" className="text-sm">{answerRunning ? 'Live copilot is answering the test input…' : 'Use the copilot panel to select a mode and ask the scenario question, or enable Auto for settled transcript questions. Completed requests appear below.'}</p>}
