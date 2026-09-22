@@ -16,6 +16,9 @@ export const PREVIEW_USER_ID = 'preview_user'
 // The owner id for the current request: a fixed stub in preview mode, else Clerk's.
 export async function currentUserId(): Promise<string | null> {
   if (PREVIEW_NO_AUTH) return PREVIEW_USER_ID
+  // Match the app shell/proxy configuration. Missing auth configuration must
+  // deny protected work, not throw because no Clerk middleware was installed.
+  if (!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) return null
   const { userId } = await auth()
   return userId
 }

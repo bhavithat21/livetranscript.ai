@@ -2,10 +2,27 @@
 export const REMOTE_SESSION_MS = 30 * 60_000
 export const REMOTE_TOKEN_MS = 5 * 60_000
 export const REMOTE_INPUT_MAX_BYTES = 8_192
+export const REMOTE_NOTE_MAX_CHARS = 2_000
+export const REMOTE_NOTE_HISTORY_LIMIT = 50
 export const REMOTE_ID_PATTERN = /^[a-f0-9]{32}$/
 export const REMOTE_CLIENT_PATTERN = /^[hc]_[a-f0-9]{24}$/
 
 export type RemoteRole = 'host' | 'controller'
+
+/** Notes never carry an identity or a command. The approved peer supplies the
+ * sender identity, and the UI renders the text without interpreting markup. */
+export type RemoteNoteMessage = { type: 'note'; seq: number; text: string }
+
+export function parseRemoteNote(value: unknown): RemoteNoteMessage | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const note = value as Record<string, unknown>
+  if (note.type !== 'note' || !Number.isSafeInteger(note.seq) || (note.seq as number) < 1 ||
+    Object.keys(note).some((key) => !['type', 'seq', 'text'].includes(key)) ||
+    typeof note.text !== 'string' || !note.text.trim() || note.text.length > REMOTE_NOTE_MAX_CHARS ||
+    /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/u.test(note.text) ||
+    new TextEncoder().encode(note.text).byteLength > 6_000) return null
+  return { type: 'note', seq: note.seq as number, text: note.text.trim() }
+}
 
 export type RemoteSession = {
   roomId: string

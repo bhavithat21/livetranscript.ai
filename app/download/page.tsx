@@ -54,24 +54,25 @@ export default function DownloadPage() {
       <section className="mx-auto max-w-4xl px-5 pt-6 sm:px-8" aria-labelledby="remote-preview-heading">
         <div className="glass rounded-2xl p-6">
           <h2 id="remote-preview-heading" className="font-[family-name:var(--font-serif)] text-xl">Remote assistance preview</h2>
-          <p className="mt-2 text-sm leading-relaxed text-black/60">Sharing and controlling laptop applications requires desktop version 0.1.8 or later. Preview installers are published on the release page after the Mac and Windows builds finish. Install a preview explicitly to try it; the stable updater stays on the current stable release.</p>
-          <a href="https://github.com/bhavithat21/livetranscript.ai/releases" className="btn-ghost mt-4 text-sm">View desktop preview releases</a>
+          <p className="mt-2 text-sm leading-relaxed text-black/60">Version 0.1.8 is available for testing approved laptop sharing and control. Both platform builds passed CI; real-device permissions and connections still need a smoke test. Install this preview explicitly; the stable updater stays on the current stable release.</p>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <a href="https://github.com/bhavithat21/livetranscript.ai/releases/download/v0.1.8/LiveTranscript_0.1.8_universal.dmg" className="btn-signal text-sm">Mac preview · 0.1.8</a>
+            <a href="https://github.com/bhavithat21/livetranscript.ai/releases/download/v0.1.8/LiveTranscript_0.1.8_x64-setup.exe" className="btn-ghost text-sm">Windows preview · 0.1.8</a>
+            <a href="https://github.com/bhavithat21/livetranscript.ai/releases/tag/v0.1.8" className="inline-flex min-h-11 items-center px-2 text-sm text-[color:var(--signal)] underline underline-offset-4">Release details</a>
+          </div>
         </div>
       </section>
 
-      {/* Beta honesty: these builds are unsigned, so the OS shows a first-launch
-          warning, and macOS system-audio needs a one-time Screen Recording grant. */}
+      {/* OS publisher signing is separate from updater signatures. */}
       <div className="mx-auto max-w-4xl px-5 pt-5 sm:px-8">
         <div className="rounded-xl border border-black/10 bg-black/[0.02] p-4 text-sm leading-relaxed text-black/60">
-          <span className="font-medium text-black/75">Beta build.</span> These
-          installers aren&rsquo;t code-signed yet, so on first launch macOS
-          (right-click → Open) and Windows (More info → Run anyway) will ask you
-          to confirm. On Mac, allow{' '}
-          <span className="font-medium text-black/75">Screen&nbsp;Recording</span>{' '}
-          when prompted — that&rsquo;s what lets the app hear a Zoom/Meet call
-          without using your microphone. Prefer no install?{' '}
-          <Link href="/record" className="text-[color:var(--signal)] hover:underline">
-            Use it in your browser
+          <span className="font-medium text-black/75">Preview installation.</span> The
+          0.1.8 Mac app is signed and notarized. The Windows preview has no publisher
+          signature and may show an installation warning. On Mac, screen sharing
+          and system audio require the relevant recording permissions; remote
+          keyboard and pointer control also requires Accessibility. Prefer no install?{' '}
+          <Link href="/copilot" className="text-[color:var(--signal)] hover:underline">
+            Open AI Copilot in your browser
           </Link>
           .
         </div>

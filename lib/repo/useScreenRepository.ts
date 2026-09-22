@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { AnswerPreferences } from '@/lib/copilot/answerPreferences'
 import {
   emptyScreenSnapshot, mergeScreenObservation, parseScreenObservation, screenContext,
 } from './screenEvidence'
@@ -17,7 +18,7 @@ export type RepoAnalysis = {
 
 // Reconstruction and raw frames are session-only. A capture is committed only
 // after validated extraction; failed captures can be retried without navigating.
-export function useScreenRepository(active: boolean, sharing: boolean, grabFrame: () => string | null) {
+export function useScreenRepository(active: boolean, sharing: boolean, grabFrame: () => string | null, preferences?: AnswerPreferences) {
   const [snapshot, setSnapshot] = useState(emptyScreenSnapshot)
   const [watching, setWatching] = useState(false)
   const [capturing, setCapturing] = useState(false)
@@ -29,6 +30,8 @@ export function useScreenRepository(active: boolean, sharing: boolean, grabFrame
   const captureController = useRef<AbortController | null>(null)
   const analysisController = useRef<AbortController | null>(null)
   const lastAcceptedFrame = useRef<string | null>(null)
+  const preferencesRef = useRef(preferences)
+  preferencesRef.current = preferences
 
   const captureImage = useCallback(async (image: string, force = false) => {
     if (captureController.current || (!force && image === lastAcceptedFrame.current)) return
@@ -118,7 +121,8 @@ export function useScreenRepository(active: boolean, sharing: boolean, grabFrame
     try {
       const response = await fetch('/api/copilot/repo-analyze', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question, context: context.slice(0, 115_000), transcript: transcript.slice(-16_000), task }),
+        body: JSON.stringify({ question, context: context.slice(0, 115_000), transcript: transcript.slice(-16_000), task,
+          preferences: preferencesRef.current ? { ...preferencesRef.current } : undefined }),
         signal: controller.signal,
       })
       if (!response.ok || !response.body) {

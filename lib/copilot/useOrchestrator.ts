@@ -1,5 +1,5 @@
 'use client'
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   extractCode,
   extractTests,
@@ -40,15 +40,22 @@ export function useOrchestrator(ask: AskFn) {
   const [problem, setProblem] = useState<ExtractedProblem | null>(null)
   const [testResult, setTestResult] = useState<TestRunResult | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const running = useRef(false)
+  const active = useRef<AbortController | null>(null)
   const retries = useRef(0)
+  useEffect(() => () => {
+    active.current?.abort()
+    active.current = null
+  }, [])
 
   const executeAndRetry = useCallback(async function executeAndRetry(
     content: string,
     prob: ExtractedProblem,
     instructions: string | null,
     askFn: AskFn,
+    controller: AbortController,
   ): Promise<void> {
+    const current = () => active.current === controller && !controller.signal.aborted
+    if (!current()) return
     const codeBlock = extractCode(content)
     const testsBlock = extractTests(content)
 
@@ -71,6 +78,9 @@ export function useOrchestrator(ask: AskFn) {
 
     setStage('executing')
     const result = await executeTests(codeBlock.code, testsBlock.tests, lang)
+    // Local runtimes may not support aborting execution. Discard an old result
+    // and never let it start another paid answer after Stop/reset/unmount.
+    if (!current()) return
     setTestResult(result)
 
     if (result.failed > 0 && retries.current < MAX_RETRIES) {
@@ -82,9 +92,8 @@ export function useOrchestrator(ask: AskFn) {
         .map(c => `- ${c.label}: ${c.error}`)
         .join('\n')
 
-      // Self-contained retry: askFn derives history from a stale `turns` snapshot,
-      // so the retry can't rely on the chat thread carrying the problem/solution.
-      // Restate the problem, the failing code, and the failing cases inline.
+      // Keep retries self-contained even if the user changed modes/context while
+      // tests were running. Include the exact code and observed failing cases.
       const retryContent = await askFn(
         [
           `The previous solution failed ${result.failed}/${result.total} tests.`,
@@ -99,19 +108,25 @@ export function useOrchestrator(ask: AskFn) {
         null,
         instructions,
       )
+      if (!current()) return
 
       if (retryContent) {
-        await executeAndRetry(retryContent, prob, instructions, askFn)
+        await executeAndRetry(retryContent, prob, instructions, askFn, controller)
         return
       }
+      setError('The assistant did not complete the retry. The last test result is still available.')
+      setStage('idle')
+      return
     }
 
     setStage('done')
   }, [])
 
   const process = useCallback(async (frame: string, instructions: string | null) => {
-    if (running.current) return
-    running.current = true
+    if (active.current) return
+    const controller = new AbortController()
+    active.current = controller
+    const current = () => active.current === controller && !controller.signal.aborted
     setError(null)
     setTestResult(null)
 
@@ -121,7 +136,9 @@ export function useOrchestrator(ask: AskFn) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ image: frame }),
+        signal: controller.signal,
       })
+      if (!current()) { void res.body?.cancel().catch(() => {}); return }
 
       if (!res.ok) {
         const msg = await res.json().catch(() => ({ error: 'Extract failed' }))
@@ -129,10 +146,10 @@ export function useOrchestrator(ask: AskFn) {
       }
 
       const extracted = await res.json()
+      if (!current()) return
 
       if ('noProblem' in extracted && extracted.noProblem) {
         setStage('idle')
-        running.current = false
         return
       }
 
@@ -163,28 +180,31 @@ export function useOrchestrator(ask: AskFn) {
         solveContext,
         instructions,
       )
+      if (!current()) return
 
       if (!content) {
-        setStage('done')
-        running.current = false
+        setStage('idle')
+        setError('The assistant did not complete a solution. Please retry.')
         return
       }
 
-      await executeAndRetry(content, prob, instructions, ask)
+      await executeAndRetry(content, prob, instructions, ask, controller)
     } catch (e) {
+      if (!current()) return
       setError(e instanceof Error ? e.message : 'Pipeline failed')
       setStage('idle')
     } finally {
-      running.current = false
+      if (active.current === controller) active.current = null
     }
   }, [ask, executeAndRetry])
 
   const reset = useCallback(() => {
+    active.current?.abort()
+    active.current = null
     setStage('idle')
     setProblem(null)
     setTestResult(null)
     setError(null)
-    running.current = false
     retries.current = 0
   }, [])
 

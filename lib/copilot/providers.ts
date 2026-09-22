@@ -43,6 +43,7 @@ export type AnswerParams = {
   // for Haiku/OpenAI, where these params 400.
   thinking?: ThinkingConfig
   effort?: Effort
+  signal?: AbortSignal
 }
 
 // Default output cap when a caller doesn't specify a per-mode budget.
@@ -51,21 +52,29 @@ const DEFAULT_MAX_TOKENS = 1500
 const BACKGROUND_PREFIX = 'YOUR BACKGROUND (ground the answer in this, do not invent beyond it):\n'
 const TRANSCRIPT_PREFIX = 'TRANSCRIPT (most recent):\n'
 
-function toReadable(iter: AsyncIterable<string>): ReadableStream<Uint8Array> {
+function toReadable(iter: AsyncIterable<string>, abort: () => void): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder()
+  let closed = false
   return new ReadableStream<Uint8Array>({
     async start(controller) {
       try {
-        for await (const text of iter) if (text) controller.enqueue(encoder.encode(text))
+        for await (const text of iter) {
+          if (closed) break
+          if (text) controller.enqueue(encoder.encode(text))
+        }
       } catch (e) {
-        // Error after headers already sent — log it and surface a short note in
-        // the stream so the panel shows something instead of an empty answer.
-        logError('copilot/providers/stream', e)
-        controller.enqueue(encoder.encode('\n\n_(assistant error — please retry)_'))
+        if (!closed) {
+          logError('copilot/providers/stream', e)
+          // A provider failure must reject the reader, not become ordinary answer
+          // text that the UI, code executor or Mock Lab calls a successful run.
+          closed = true
+          controller.error(new Error('Assistant response incomplete. Please retry.'))
+        }
       } finally {
-        controller.close()
+        if (!closed) { closed = true; controller.close() }
       }
     },
+    cancel() { closed = true; abort() },
   })
 }
 
@@ -93,7 +102,7 @@ async function* openaiTokens(p: AnswerParams, client: OpenAI): AsyncGenerator<st
       ...p.history,
       { role: 'user', content: userContent },
     ],
-  })
+  }, { signal: p.signal })
   for await (const chunk of stream) {
     const delta = chunk.choices[0]?.delta?.content
     if (delta) yield delta
@@ -142,7 +151,7 @@ async function* anthropicTokens(p: AnswerParams): AsyncGenerator<string> {
       ...p.history.map((h) => ({ role: h.role, content: h.content })),
       { role: 'user' as const, content: userBlocks },
     ],
-  } as Anthropic.MessageStreamParams)
+  } as Anthropic.MessageStreamParams, { signal: p.signal })
   for await (const event of stream) {
     if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
       yield event.delta.text
@@ -179,6 +188,7 @@ const COMMIT_CHARS = 64
 async function* withFallbackChain(p: AnswerParams): AsyncGenerator<string> {
   const candidates = [p.model, ...fallbackChain(p.model)]
   for (let i = 0; i < candidates.length; i++) {
+    p.signal?.throwIfAborted()
     const model = candidates[i]
     const isLast = i === candidates.length - 1
     let committed = false // have we painted anything yet?
@@ -201,6 +211,7 @@ async function* withFallbackChain(p: AnswerParams): AsyncGenerator<string> {
       if (!committed && buffer) yield buffer
       return
     } catch (e) {
+      p.signal?.throwIfAborted()
       // If we already committed output, we can't switch vendors mid-read → propagate
       // (toReadable notes it, client auto-retries). If we FAILED BEFORE committing —
       // or this is the last candidate — otherwise fail over to the next vendor.
@@ -281,11 +292,8 @@ async function* withSpeculativeDraft(p: AnswerParams): AsyncGenerator<string> {
     logError('copilot/providers/draft', e)
   }
 
-  // If the deep answer FAILED after we already showed a draft, keep the draft the
-  // user is reading rather than swapping it for an error note (which would yank a
-  // good answer out from under them). Stay in 'draft' phase and stop here — the
-  // draft IS the answer now. useAnswerFeed's auto-retry can still fetch a fresh one.
-  if (deepFailed && draftEmitted) return
+  // A draft is not a completed deep answer. Preserve any displayed draft, but
+  // propagate failure so callers show an incomplete state and can retry.
   if (deepFailed) {
     // No draft was shown — surface the deep error the normal way.
     yield* drainDeep()
@@ -316,5 +324,8 @@ function shouldDraft(p: AnswerParams): boolean {
 // fallback and (for slow smart-tier answers) a speculative fast draft. Returns a
 // ReadableStream of UTF-8 tokens for the HTTP response.
 export function streamAnswer(p: AnswerParams): ReadableStream<Uint8Array> {
-  return toReadable(shouldDraft(p) ? withSpeculativeDraft(p) : withFallbackChain(p))
+  const cancellation = new AbortController()
+  const signal = p.signal ? AbortSignal.any([p.signal, cancellation.signal]) : cancellation.signal
+  const params = { ...p, signal }
+  return toReadable(shouldDraft(params) ? withSpeculativeDraft(params) : withFallbackChain(params), () => cancellation.abort())
 }

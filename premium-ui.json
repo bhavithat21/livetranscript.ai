@@ -1,11 +1,35 @@
 {
   "profile": "product-admin",
   "canonicalMap": "UX-CONTRACT.md",
-  "scope": "Remote assistance and app identity feature; unrelated existing product screens are outside this audit.",
-  "sourceRoots": ["components/remote", "lib/appIdentity", "app/(app)/remote", "app/(app)/settings"],
-  "requiredCapabilities": ["Form", "Scrollbar", "Toast"],
-  "ownership": {},
-  "requiredCommands": ["lint", "typecheck", "test", "build"],
+  "scope": "Interview, Mock Lab, Feedback, practice, standalone copilot, settings and approved collaboration UI.",
+  "sourceRoots": [
+    "components/remote",
+    "lib/appIdentity",
+    "components/workspace",
+    "components/copilot",
+    "app/(app)/remote",
+    "app/(app)/settings",
+    "app/(app)/copilot",
+    "components/interview",
+    "components/practice",
+    "app/(app)/practice",
+    "components/settings"
+  ],
+  "requiredCapabilities": [
+    "Form",
+    "Scrollbar",
+    "Toast",
+    "Select/Listbox"
+  ],
+  "ownership": {
+    "Select/Listbox": "native"
+  },
+  "requiredCommands": [
+    "lint",
+    "typecheck",
+    "test",
+    "build"
+  ],
   "commands": {
     "lint": "pnpm lint",
     "typecheck": "pnpm exec tsc --noEmit",

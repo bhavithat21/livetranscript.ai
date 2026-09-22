@@ -25,11 +25,17 @@ export async function connectWithFallback(
       : [...makers].sort((a, b) => (a.name === preferred ? -1 : b.name === preferred ? 1 : 0))
   let lastErr: unknown
   for (const m of ordered) {
+    config.signal?.throwIfAborted()
     const provider = m.make()
     try {
       await provider.connect(config)
+      config.signal?.throwIfAborted()
       return { provider, name: m.name }
     } catch (e) {
+      // A failed handshake can still own a socket or timers. Retire it before
+      // attempting the next provider, including cancellation during startup.
+      try { await provider.disconnect() } catch { /* continue after cleanup failure */ }
+      config.signal?.throwIfAborted()
       lastErr = e
     }
   }

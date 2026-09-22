@@ -15,6 +15,16 @@ import { InterviewWorkspace } from './InterviewWorkspace'
 
 afterEach(() => { cleanup(); localStorage.clear() })
 describe('separate interview tabs', () => {
+  it('links to implemented tools and keeps mobile keyboard focus in the visible controls', () => {
+    render(<InterviewWorkspace ownerId="alice" />)
+    expect(screen.getByRole('link', { name: 'Transcripts' }).getAttribute('href')).toBe('/dashboard')
+    expect(screen.getByRole('link', { name: 'Repository' }).getAttribute('href')).toBe('/copilot?mode=repoInterview')
+    expect(screen.getByRole('link', { name: 'Remote Assist' }).getAttribute('href')).toBe('/remote')
+    const live = screen.getByRole('button', { name: 'Live Interview' })
+    fireEvent.keyDown(live, { key: 'ArrowRight' })
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Mock Interview' }))
+    expect(screen.getByRole('button', { name: 'Mock Interview' }).getAttribute('aria-pressed')).toBe('true')
+  })
   it('shows exactly three named tabs and supports keyboard navigation', () => {
     render(<InterviewWorkspace ownerId="alice" />)
     const live = screen.getByRole('tab', { name: 'Live Interview' })
@@ -41,7 +51,7 @@ describe('separate interview tabs', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Interview Feedback' }))
     expect(screen.getByText(/Live interview remains active/)).toBeTruthy()
     const event = new MouseEvent('click', { bubbles: true, cancelable: true })
-    fireEvent(screen.getByRole('link', { name: 'Library' }), event)
+    fireEvent(screen.getAllByRole('link', { name: 'Library' })[0], event)
     expect(event.defaultPrevented).toBe(true)
     expect(screen.getByRole('alert').textContent).toContain('Finish the active interview')
   })

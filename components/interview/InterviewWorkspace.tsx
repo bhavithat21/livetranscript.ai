@@ -1,6 +1,7 @@
 'use client'
 import { useCallback, useEffect, useState, useSyncExternalStore, type KeyboardEvent, type MouseEvent } from 'react'
-import { Activity, FileText, FlaskConical, GitBranch, MessageSquareText, Radio, RotateCcw, Settings2 } from 'lucide-react'
+import { Activity, FileText, FlaskConical, GitBranch, MessageSquareText, Radio, RotateCcw, Settings2, MonitorUp, Sparkles, GraduationCap } from 'lucide-react'
+import { ThemeToggle } from '@/components/ui/ThemeToggle'
 import { HomeMenu } from '@/components/nav/HomeMenu'
 import { createInterviewHistory } from '@/lib/interview/history'
 import type { InterviewSession } from '@/lib/interview/session'
@@ -51,7 +52,7 @@ function Workspace({ ownerId }: { ownerId: string }) {
     setNavigationError('Finish the active interview before leaving this workspace. Switching between Interview views is safe.')
   }
 
-  function tabKey(event: KeyboardEvent<HTMLButtonElement>, index: number) {
+  function tabKey(event: KeyboardEvent<HTMLButtonElement>, index: number, mobile = false) {
     let next = index
     if (event.key === 'ArrowDown' || event.key === 'ArrowRight') next = (index + 1) % TABS.length
     else if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') next = (index + TABS.length - 1) % TABS.length
@@ -59,7 +60,7 @@ function Workspace({ ownerId }: { ownerId: string }) {
     else if (event.key === 'End') next = TABS.length - 1
     else return
     event.preventDefault(); setTab(TABS[next].id)
-    document.getElementById(`interview-tab-${TABS[next].id}`)?.focus()
+    document.getElementById(`interview-${mobile ? 'mobile-' : ''}tab-${TABS[next].id}`)?.focus()
   }
 
   const current = TABS.find((item) => item.id === tab) ?? TABS[0]
@@ -78,8 +79,11 @@ function Workspace({ ownerId }: { ownerId: string }) {
         </div>
         <div className="mt-8 px-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-black/35">Tools</div>
         <nav aria-label="Interview tools" className="mt-2 space-y-1 text-sm">
-          <a href="/library" className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-black/50 transition hover:bg-black/[0.035] hover:text-ink"><FileText size={15} />Transcripts</a>
-          <a href="/repo-interview" className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-black/50 transition hover:bg-black/[0.035] hover:text-ink"><GitBranch size={15} />Repository</a>
+          <a href="/dashboard" className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-black/50 transition hover:bg-black/[0.035] hover:text-ink"><FileText size={15} />Transcripts</a>
+          <a href="/copilot?mode=repoInterview" className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-black/50 transition hover:bg-black/[0.035] hover:text-ink"><GitBranch size={15} />Repository</a>
+          <a href="/copilot" className="flex min-h-11 items-center gap-2.5 rounded-lg px-2.5 py-2 text-black/50 hover:bg-black/[0.035] hover:text-ink"><Sparkles size={15} />AI Copilot</a>
+          <a href="/practice" className="flex min-h-11 items-center gap-2.5 rounded-lg px-2.5 py-2 text-black/50 hover:bg-black/[0.035] hover:text-ink"><GraduationCap size={15} />Practice</a>
+          <a href="/remote" className="flex min-h-11 items-center gap-2.5 rounded-lg px-2.5 py-2 text-black/50 hover:bg-black/[0.035] hover:text-ink"><MonitorUp size={15} />Remote Assist</a>
         </nav>
         <div className="mt-auto space-y-3 px-2">
           <a href="/settings" className="flex items-center gap-2 text-xs font-medium text-black/45 hover:text-ink"><Settings2 size={14} />Settings</a>
@@ -90,23 +94,23 @@ function Workspace({ ownerId }: { ownerId: string }) {
       <section className="min-w-0 px-4 pb-20 pt-4 sm:px-6 lg:px-8 lg:pb-10 lg:pt-6 xl:px-10">
         <header className="mb-5 flex items-start justify-between gap-4">
           <div className="min-w-0">
-            
+            <div className="lg:hidden" onClickCapture={guardNavigation}><HomeMenu /></div>
             <div className="mt-5 lg:mt-0"><h1 className="text-xl font-semibold tracking-[-0.02em] sm:text-2xl">{current.short}</h1><p className="mt-1 text-sm text-black/45">{current.description}</p></div>
           </div>
-          <div className="hidden items-center gap-2 lg:flex"><ProfileStatus compact />{active && <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1.5 text-xs font-medium text-emerald-800"><Activity size={13} />Active</span>}</div>
+          <div className="flex items-center gap-2"><ThemeToggle /><div className="hidden lg:block"><ProfileStatus compact /></div>{active && <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1.5 text-xs font-medium text-emerald-800"><Activity size={13} />Active</span>}</div>
         </header>
 
-        <div role="tablist" aria-label="Interview modes" className="mb-5 grid grid-cols-3 rounded-xl bg-black/[0.035] p-1 lg:hidden">
-          {TABS.map((item, index) => <button key={item.id} aria-label={item.label} aria-pressed={tab === item.id} onKeyDown={(event) => tabKey(event, index)} onClick={() => setTab(item.id)} className={`min-h-10 rounded-lg px-2 text-sm font-medium transition-colors ${tab === item.id ? 'bg-white text-ink shadow-sm' : 'text-black/45'}`}>{item.short}</button>)}
+        <div role="group" aria-label="Interview views" className="mb-5 grid grid-cols-3 rounded-xl bg-black/[0.035] p-1 lg:hidden">
+          {TABS.map((item, index) => <button key={item.id} id={`interview-mobile-tab-${item.id}`} aria-controls={`interview-panel-${item.id}`} aria-label={item.label} aria-pressed={tab === item.id} onKeyDown={(event) => tabKey(event, index, true)} onClick={() => setTab(item.id)} className={`min-h-11 rounded-lg px-2 text-sm font-medium transition-colors ${tab === item.id ? 'bg-white text-ink shadow-sm' : 'text-black/45'}`}>{item.short}</button>)}
         </div>
 
         {active && ((liveActive && tab !== 'live') || (mockActive && tab !== 'mock')) && <div role="status" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-700/15 bg-emerald-50/50 px-4 py-3 text-sm"><span>{liveActive ? 'Live interview remains active. Audio capture continues while you review another view.' : 'Mock Lab is still running.'}</span><button className="inline-flex items-center gap-1.5 font-medium text-emerald-800" onClick={() => setTab(liveActive ? 'live' : 'mock')}><RotateCcw size={14} />Return</button></div>}
         {navigationError && <p role="alert" className="mb-4 text-sm text-[color:var(--stop)]">{navigationError}</p>}
         {history.error && <p role="alert" className="mb-4 rounded-xl border border-black/10 p-4 text-sm">{history.error}</p>}
 
-        <div id="interview-panel-live" role="tabpanel" aria-labelledby="interview-tab-live" hidden={tab !== 'live'}><LiveInterview visible={tab === 'live'} blocked={mockActive} onActivity={setLiveActive} onComplete={completed} /></div>
-        <div id="interview-panel-mock" role="tabpanel" aria-labelledby="interview-tab-mock" hidden={tab !== 'mock'}><MockInterview visible={tab === 'mock'} blocked={liveActive} onActivity={setMockActive} onComplete={completed} /></div>
-        <div id="interview-panel-feedback" role="tabpanel" aria-labelledby="interview-tab-feedback" hidden={tab !== 'feedback'}><InterviewFeedback sessions={history.sessions} selectedId={selectedId} onSelect={setSelectedId} store={store} /></div>
+        <div id="interview-panel-live" role="tabpanel" aria-label="Live Interview" hidden={tab !== 'live'}><LiveInterview visible={tab === 'live'} blocked={mockActive} onActivity={setLiveActive} onComplete={completed} /></div>
+        <div id="interview-panel-mock" role="tabpanel" aria-label="Mock Lab" hidden={tab !== 'mock'}><MockInterview visible={tab === 'mock'} blocked={liveActive} onActivity={setMockActive} onComplete={completed} /></div>
+        <div id="interview-panel-feedback" role="tabpanel" aria-label="Interview Feedback" hidden={tab !== 'feedback'}><InterviewFeedback sessions={history.sessions} selectedId={selectedId} onSelect={setSelectedId} store={store} /></div>
       </section>
     </div>
   </main>

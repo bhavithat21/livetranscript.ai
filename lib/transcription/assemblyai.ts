@@ -6,6 +6,7 @@ const FINAL_FLUSH_MS = 800
 
 export class AssemblyAIProvider implements TranscriptionProvider {
   private ws: WebSocket | null = null
+  private removeAbort: (() => void) | null = null
   private partialCb: (e: TranscriptEvent) => void = () => {}
   private finalCb: (e: TranscriptEvent) => void = () => {}
   private statusCb: (s: { error: string }) => void = () => {}
@@ -13,13 +14,16 @@ export class AssemblyAIProvider implements TranscriptionProvider {
   private onFinalFlush: (() => void) | null = null
 
   async connect(config: TranscriptionConfig): Promise<void> {
+    config.signal?.throwIfAborted()
     const res = await fetch('/api/token', {
       method: 'POST',
+      signal: config.signal,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ provider: 'assemblyai' }),
     })
     if (!res.ok) throw new Error('AssemblyAI token mint failed')
     const { token } = await res.json()
+    config.signal?.throwIfAborted()
 
     // speech_model explicit; keyterms_prompt is JSON (URLSearchParams url-encodes it).
     // mode=balanced is the primary latency/accuracy preset (our two-track correction pass
@@ -44,6 +48,22 @@ export class AssemblyAIProvider implements TranscriptionProvider {
         ws.close()
         reject(new Error('AssemblyAI WS timeout'))
       }, 10_000)
+      const abort = () => {
+        clearTimeout(timeout)
+        this.removeAbort?.()
+        this.removeAbort = null
+        this.onFinalFlush?.()
+        ws.onopen = null
+        ws.onmessage = null
+        ws.onerror = null
+        ws.onclose = null
+        ws.close()
+        if (this.ws === ws) this.ws = null
+        reject(config.signal?.reason ?? new DOMException('Transcription cancelled', 'AbortError'))
+      }
+      config.signal?.addEventListener('abort', abort, { once: true })
+      this.removeAbort = () => config.signal?.removeEventListener('abort', abort)
+      if (config.signal?.aborted) { abort(); return }
       ws.onopen = () => {
         clearTimeout(timeout)
         opened = true
@@ -60,7 +80,10 @@ export class AssemblyAIProvider implements TranscriptionProvider {
         this.statusCb({ error: 'Transcription connection lost' })
       }
       ws.onclose = () => {
-        if (!opened) return // connect-time close already rejected via onerror/timeout
+        clearTimeout(timeout)
+        this.removeAbort?.()
+        this.removeAbort = null
+        if (!opened) { reject(new Error('AssemblyAI connection closed before opening')); return }
         this.onFinalFlush?.() // unblock a pending disconnect flush
         this.statusCb({ error: 'Transcription connection closed' })
       }
@@ -107,6 +130,8 @@ export class AssemblyAIProvider implements TranscriptionProvider {
     this.statusCb = cb
   }
   async disconnect(): Promise<void> {
+    this.removeAbort?.()
+    this.removeAbort = null
     // Silence the drop signal — this is a graceful close, not a failure.
     this.statusCb = () => {}
     const ws = this.ws

@@ -1,7 +1,7 @@
 'use client'
-import { useEffect, useSyncExternalStore } from 'react'
+import { useEffect, useRef, useSyncExternalStore } from 'react'
 import { usePathname } from 'next/navigation'
-import { useAppIdentity } from './useAppIdentity'
+import { DEFAULT_APP_NAME, useAppIdentity } from './useAppIdentity'
 import { iconSource } from './icons'
 import { applyNativeIdentity } from './native'
 
@@ -15,18 +15,49 @@ export function useNativeIdentityMessage() { return useSyncExternalStore(subscri
 export function AppIdentityEffects() {
   const { name, icon } = useAppIdentity()
   const pathname = usePathname()
-  useEffect(() => { document.title = name }, [name, pathname])
+  const lastCustomName = useRef<string | null>(null)
+  const routeTitle = useRef(DEFAULT_APP_NAME)
+
+  useEffect(() => {
+    if (name === DEFAULT_APP_NAME) {
+      if (lastCustomName.current && document.title === lastCustomName.current) document.title = routeTitle.current
+      lastCustomName.current = null
+      return
+    }
+
+    // Next can stream route metadata after the pathname effect has run. Keep
+    // custom titles authoritative, but retain that metadata for an honest reset.
+    if (document.title !== name && document.title !== lastCustomName.current) routeTitle.current = document.title || DEFAULT_APP_NAME
+    lastCustomName.current = name
+    document.title = name
+    const observer = new MutationObserver((records) => {
+      const titleChanged = records.some((record) => record.target.nodeName === 'TITLE'
+        || record.target.parentNode?.nodeName === 'TITLE'
+        || [...record.addedNodes, ...record.removedNodes].some((node) => node.nodeName === 'TITLE'))
+      if (!titleChanged || document.title === name) return
+      routeTitle.current = document.title || DEFAULT_APP_NAME
+      document.title = name
+    })
+    observer.observe(document.head, { childList: true, characterData: true, subtree: true })
+    return () => observer.disconnect()
+  }, [name, pathname])
 
   useEffect(() => {
     document.querySelector('link[data-lt-app-icon]')?.remove()
-    if (icon.kind === 'preset' && icon.id === 'default') return
     const link = document.createElement('link')
     link.rel = 'icon'
-    link.type = icon.kind === 'custom' ? 'image/png' : 'image/svg+xml'
+    link.type = icon.kind === 'custom' || icon.id === 'default' ? 'image/png' : 'image/svg+xml'
     link.href = iconSource(icon)
     link.dataset.ltAppIcon = 'true'
     document.head.appendChild(link)
-    return () => link.remove()
+    // Keep the chosen favicon last if a later metadata chunk adds the framework
+    // favicon. The default is the same shipped PNG used by the native app.
+    const observer = new MutationObserver(() => {
+      const icons = document.head.querySelectorAll('link[rel~="icon"]')
+      if (icons.item(icons.length - 1) !== link) document.head.appendChild(link)
+    })
+    observer.observe(document.head, { childList: true })
+    return () => { observer.disconnect(); link.remove() }
   }, [icon, pathname])
 
   useEffect(() => {

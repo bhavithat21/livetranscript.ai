@@ -1,7 +1,8 @@
 // Shared protocol only. Keep provider SDKs and server configuration out of clients.
+import type { AnswerPreferences } from '@/lib/copilot/answerPreferences'
 export type RepoTask = 'plan' | 'debug' | 'review' | 'debrief'
 export type RepoAgentRole = 'requirements' | 'implementation' | 'debugger' | 'reviewer' | 'synthesis'
-export type RepoAgentInput = { question: string; context: string; transcript: string; task: RepoTask }
+export type RepoAgentInput = { question: string; context: string; transcript: string; task: RepoTask; preferences?: AnswerPreferences }
 export type RepoAgentEvent =
   | { type: 'agent'; role: RepoAgentRole; model: string; status: 'running' | 'done' | 'failed'; text?: string; elapsedMs?: number }
   | { type: 'delta'; text: string }

@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react'
 import { logError } from '@/lib/log'
 import { AnalyticsIdentity } from '@/components/AnalyticsIdentity'
 import { DisplayNameBridge } from '@/lib/auth/useDisplayName'
-import { filterPrivateAnalytics, isRemoteLocation } from '@/lib/analyticsPrivacy'
+import { filterPrivateAnalytics, isPrivateWorkspaceLocation } from '@/lib/analyticsPrivacy'
 
 // NEXT_PUBLIC_* is inlined at build time, so this is safe on the client and
 // matches the flag layout.tsx uses to decide whether to mount ClerkProvider.
@@ -56,8 +56,8 @@ export function Providers({ children }: { children: React.ReactNode }) {
   // it surface as an uncaught console error. Non-breaking by definition — the app
   // keeps running; we just record what slipped through (e.g. a realtime hiccup).
   useEffect(() => {
-    const onRejection = (e: PromiseRejectionEvent) => logError('unhandledrejection', isRemoteLocation(window.location.pathname) ? 'Remote session error' : e.reason)
-    const onError = (e: ErrorEvent) => logError('window.error', isRemoteLocation(window.location.pathname) ? 'Remote session error' : e.error ?? e.message)
+    const onRejection = (e: PromiseRejectionEvent) => logError('unhandledrejection', isPrivateWorkspaceLocation(window.location.pathname) ? 'Private workspace error' : e.reason)
+    const onError = (e: ErrorEvent) => logError('window.error', isPrivateWorkspaceLocation(window.location.pathname) ? 'Private workspace error' : e.error ?? e.message)
     window.addEventListener('unhandledrejection', onRejection)
     window.addEventListener('error', onError)
     return () => {

@@ -10,6 +10,6 @@ export async function GET() {
     service: 'livetranscript',
     version,
     commit: process.env.VERCEL_GIT_COMMIT_SHA || null,
-    features: ['repository-screenshots', 'repository-specialist-agents', 'remote-assistance', 'app-appearance'],
+    features: ['repository-screenshots', 'repository-specialist-agents', 'remote-assistance', 'app-appearance', 'standalone-ai-copilot', 'answer-preferences', 'interview-workspace', 'practice-coach'],
   }, { headers: { 'Cache-Control': 'no-store' } })
 }

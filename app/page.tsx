@@ -23,15 +23,14 @@ export default function Home() {
           style={{ animationDelay: '200ms' }}
         >
           Live captions with speaker labels, technical-jargon accuracy, and instant summaries.
-          Faster and more readable than the rest — with a distraction-free Reader Mode that colors
-          every speaker.
+          Read every speaker clearly, then work through questions, code and repository context in a dedicated AI workspace.
         </p>
         <div className="rise-in mt-10 flex flex-wrap items-center gap-4" style={{ animationDelay: '320ms' }}>
           <Link href="/record" className="btn-signal px-7 py-3 text-base">
             Start transcribing
           </Link>
-          <Link href="/room/new" className="btn-ghost px-7 py-3 font-medium">
-            Open a meeting
+          <Link href="/copilot" className="btn-ghost px-7 py-3 font-medium">
+            Open AI Copilot
           </Link>
           <span className="text-sm text-black/50">No install. Works in your browser.</span>
         </div>

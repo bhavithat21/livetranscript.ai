@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AppearanceSettings } from './AppearanceSettings'
 import { AppIdentityEffects } from './AppIdentityEffects'
-import type { AppIcon } from './icons'
+import { DEFAULT_ICON_DATA_URL, type AppIcon } from './icons'
 import { Wordmark } from '@/components/nav/Wordmark'
 
 const mocks = vi.hoisted(() => ({ prepare: vi.fn(), native: vi.fn(), pathname: '/settings' }))
@@ -16,6 +16,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocks.native.mockResolvedValue('browser')
   mocks.pathname = '/settings'
+  document.title = 'LiveTranscript'
 })
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
@@ -38,10 +39,44 @@ describe('appearance workflow', () => {
     expect((screen.getByLabelText('App name') as HTMLInputElement).value).toBe('Project Atlas')
     fireEvent.click(screen.getByRole('button', { name: 'Reset appearance' }))
     expect(document.title).toBe('LiveTranscript')
-    expect(document.querySelector('link[data-lt-app-icon]')).toBeNull()
+    expect(document.querySelector('link[data-lt-app-icon]')?.getAttribute('href')).toBe(DEFAULT_ICON_DATA_URL)
     expect(localStorage.getItem('lt.appName')).toBeNull()
     expect(localStorage.getItem('lt.appIcon')).toBeNull()
     await waitFor(() => expect(mocks.native).toHaveBeenLastCalledWith('LiveTranscript', { kind: 'preset', id: 'default' }))
+  })
+
+  it('keeps a custom title after delayed route metadata, and resets to the current route title', async () => {
+    const view = mount()
+    fireEvent.change(screen.getByLabelText('App name'), { target: { value: 'Workspace Notes' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save name' }))
+    mocks.pathname = '/remote'
+    view.rerender(<><AppIdentityEffects /><AppearanceSettings /><Wordmark /></>)
+    await act(async () => { document.title = 'Remote assist — LiveTranscript' })
+    expect(document.title).toBe('Workspace Notes')
+
+    // Renaming twice must not mistake the previous custom name for route metadata.
+    fireEvent.change(screen.getByLabelText('App name'), { target: { value: 'Atlas workspace' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save name' }))
+    expect(document.title).toBe('Atlas workspace')
+    fireEvent.click(screen.getByRole('button', { name: 'Reset appearance' }))
+    expect(document.title).toBe('Remote assist — LiveTranscript')
+    await act(async () => { document.title = 'Settings — LiveTranscript' })
+    expect(document.title).toBe('Settings — LiveTranscript')
+  })
+
+  it('keeps the shipped default favicon active when later metadata adds a framework icon', async () => {
+    mount()
+    const lateIcon = document.createElement('link')
+    lateIcon.rel = 'icon'
+    lateIcon.href = '/favicon.ico'
+    try {
+      await act(async () => { document.head.appendChild(lateIcon) })
+      const icons = document.head.querySelectorAll('link[rel~="icon"]')
+      expect(icons.item(icons.length - 1).getAttribute('href')).toBe(DEFAULT_ICON_DATA_URL)
+      expect(screen.getByLabelText('Current appearance').querySelector('img')?.getAttribute('src')).toBe(DEFAULT_ICON_DATA_URL)
+    } finally {
+      lateIcon.remove()
+    }
   })
 
   it('keeps invalid names and uploads from overwriting the saved appearance and focuses the correction', async () => {
