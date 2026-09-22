@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import ReactMarkdown from 'react-markdown'
 import { notFound } from 'next/navigation'
 import { getSession } from '../../session-actions'
 import { NoSessionContextError } from '@/lib/db/errors'
@@ -30,6 +31,7 @@ export default async function SessionDetailPage({ params }: { params: Promise<{ 
   const segments = (row.segments as Segment[]) ?? []
   const summary = row.summary as Summary
   const text = transcriptText(segments)
+  const isInterviewReport = summary?.summary.startsWith('# Interview feedback\n') ?? false
 
   return (
     <main className="mx-auto max-w-3xl px-4 pb-24 pt-10 sm:px-6">
@@ -51,12 +53,18 @@ export default async function SessionDetailPage({ params }: { params: Promise<{ 
 
       {summary?.summary && (
         <section className="reader-surface rise-in mt-4 rounded-2xl p-6" style={{ animationDelay: '80ms' }}>
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-black/40">Summary</h2>
-          {/* Serif standfirst lead — treats the summary as editorial, not a form field. */}
-          <p className="font-[family-name:var(--font-serif)] text-xl leading-relaxed text-ink">
-            {summary.summary}
-          </p>
-          {summary.keyPoints && summary.keyPoints.length > 0 && (
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-black/40">{isInterviewReport ? 'Interview feedback' : 'Summary'}</h2>
+          {isInterviewReport ? (
+            <div className="space-y-3 text-sm leading-relaxed [&_h1]:hidden [&_h2]:mt-6 [&_h2]:font-serif [&_h2]:text-xl [&_h3]:mt-4 [&_h3]:font-semibold [&_p]:my-2 [&_ul]:list-disc [&_ul]:pl-5">
+              {/* No raw-HTML plugin: candidate text remains escaped. */}
+              <ReactMarkdown>{summary.summary}</ReactMarkdown>
+            </div>
+          ) : (
+            <p className="font-[family-name:var(--font-serif)] text-xl leading-relaxed text-ink">
+              {summary.summary}
+            </p>
+          )}
+          {!isInterviewReport && summary.keyPoints && summary.keyPoints.length > 0 && (
             <div className="mt-5">
               <h3 className="mb-1.5 text-sm font-semibold uppercase tracking-wide text-black/40">Key points</h3>
               <ul className="space-y-1 text-black/80">
@@ -69,7 +77,7 @@ export default async function SessionDetailPage({ params }: { params: Promise<{ 
               </ul>
             </div>
           )}
-          {summary.actionItems && summary.actionItems.length > 0 && (
+          {!isInterviewReport && summary.actionItems && summary.actionItems.length > 0 && (
             <div className="mt-5">
               <h3 className="mb-1.5 text-sm font-semibold uppercase tracking-wide text-black/40">Action items</h3>
               <ul className="space-y-1.5 text-black/80">
