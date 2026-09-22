@@ -151,10 +151,15 @@ export function useProactive(
   // soon after an answer is likely a CONTINUATION of the same multi-part question, so
   // we re-answer the whole GROUP rather than treating the new part as isolated.
   const lastAnsweredAtRef = useRef(0)
+  // Exact normalized group last sent to the answer pipeline. The merge window is
+  // allowed to re-fire only when the question group actually CHANGES (for example
+  // a new follow-up sentence is appended). A static transcript must never loop.
+  const lastFiredGroupKeyRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (!enabled) {
       pendingRef.current = null
+      lastFiredGroupKeyRef.current = null
       return
     }
     // Fire an answer for the current question GROUP (all contiguous parts, so a
@@ -162,7 +167,14 @@ export function useProactive(
     const fire = () => {
       const group = latestQuestionGroup(getRef.current()) ?? latestQuestion(getRef.current())
       if (!group) return
-      askedRef.current.push(normalizeKey(group))
+      const groupKey = normalizeKey(group)
+      // Critical loop guard: after an async answer completes, the same static
+      // transcript is still "within the merge window". Without this check the old
+      // logic would answer the identical completed question every poll. Only a
+      // genuinely changed/extended group may fire again.
+      if (lastFiredGroupKeyRef.current === groupKey) return
+      lastFiredGroupKeyRef.current = groupKey
+      askedRef.current.push(groupKey)
       pendingRef.current = null
       lastAnsweredAtRef.current = Date.now()
       inFlightRef.current = true
