@@ -1,88 +1,99 @@
 # Interview workspace
 
-Route: `/interview`. Accessible from the desktop/mobile AppNav and HomeMenu.
-The existing `/record`, room, saved-session and copilot flows are unchanged.
+Route: `/interview`. Three accessible tabs: Live Interview, Mock Interview and
+Interview Feedback. Navigation is available through AppNav and HomeMenu.
 
-## Three separate tabs
+## Mock is a live-system calibration environment
 
-- **Live Interview** reuses native/browser audio capture and streaming ASR. Choose
-  call audio, microphone, or two separate channels. Explicit recording permission
-  is required. Open the existing copilot when appropriate. End capture to create
-  a completed interview and switch to Feedback. Both audio channels are stopped
-  and disconnected on exit; pending starts are cancelled when they resolve.
-- **Mock Interview** asks one AI-generated question at a time, with follow-ups
-  grounded in submitted answers. Configure role, seniority, behavioral/coding/
-  system-design/mixed round, 3/5/8 questions and optional job context. Type or
-  dictate answers. AI answers/hints are not supplied during the practice. A
-  failed/cancelled question request preserves prior answers and can be retried.
-  Finish early or submit the final answer to review. Code is text only; this mock
-  does not execute tests or simulate a complete coding IDE.
-- **Interview Feedback** reviews either mode, with answer-level evidence,
-  strengths, gaps and next exercises. Reports explicitly distinguish absent
-  candidate audio from weak performance, do not infer speaker identities from
-  diarization numbers, and do not claim numerical scores or hiring probabilities.
-  Import transcripts, export Markdown reports/transcripts, or explicitly delete
-  a session with an inline confirmation.
+Mock is NOT a separate candidate-practice interviewer. It mounts the same
+`CopilotPanel` used by Live and calls the same `useCopilot` transport and
+`/api/copilot/answer` endpoint. This keeps mode routing, model selection,
+provider fallback, per-mode uploaded context and answer generation on the real
+application path. No fake answer generator or expected-answer injection is used.
 
-Tabs are real accessible tab/tabpanel controls with arrow/Home/End navigation.
-All panels remain mounted so switching tabs does not tear down recording or lose
-mock drafts. A live and a mock interview cannot run concurrently. An active
-session indicator remains visible on the other tabs. The workspace navigation
-blocks accidental app-page exits while a session is active, and beforeunload
-warns on full-page exit. Browser Back and OS process termination cannot be fully
-prevented; unfinished sessions are not crash-recovery drafts.
+1. Load or paste a scenario transcript/interviewer question. Optionally dictate
+   interviewer input through the existing ASR microphone path.
+2. Supply held-out expected behavior and draft calibration instructions.
+3. Open the actual copilot, select a mode and ask the test question, or enable
+   its Auto mode for settled transcript questions. Standard answers are recorded
+   as test results with request-to-first-text and completion latency.
+4. Annotate a completed response as Pass or Needs work, with improvement notes.
+5. Change instructions and replay. Reset copilot for a clean conversation when
+   comparing configurations; all context/history/screen conditions must match
+   for meaningful comparisons. A single test is not a statistical benchmark.
+6. Apply to Live requires at least one manually passed, completed result with
+   exactly the current draft instructions. Applying updates a versioned profile
+   used by subsequent Live Interview requests. Rollback restores the preceding
+   instructions as another revision. No automatic promotion is performed.
+7. End the test to save its report in the separate Feedback tab. Export accepted
+   examples as JSONL for a user-managed regression/training dataset.
 
-## Data, authentication and provider requirements
+Expected behavior is NEVER sent to the answering model; it is included only in
+human review, explicit system-feedback requests and exports. Draft calibration
+is an isolated React context; switching tabs does not publish it. Per-request
+snapshots pin the instructions used by each observation. Cancelled requests do
+not count as successful tests. Failed and empty responses cannot be passed or
+published. Stream supersession/unmount is guarded against stale output.
 
-The page and POST `/api/interview` use the app's existing `currentUserId` auth.
-The API rejects cross-origin requests, invalid JSON, invalid action/config/turn
-shapes and oversized bodies before calling an AI provider. It uses the existing
-smart-tier/provider selection plus the existing fast fallback model and server
-credentials. No new dependency, database migration, provider account or public
-client credential is introduced. Missing provider configuration returns 503;
-provider failures are retriable and raw provider exceptions are not logged.
+Calibration is a bounded, separate server field, appended without replacing the
+fixed mode/grounding rules or truncating existing mode instructions. It changes
+response preferences, not model weights. No provider fine-tuning job is started.
+The profile currently applies to `/interview` Live (not the separate `/record`
+route). The Repository Interview multi-agent path bypasses ordinary copilot
+answers and is explicitly outside this calibration scope.
 
-Completed sessions are account-scoped **device-local** history, not database
-records or cloud sync. The latest 20 are retained, with an explicit footer
-explaining retention and exports. Browser storage is not encrypted; anyone with
-access to the browser profile may read it. Storage failure retains new work in
-memory and displays a warning; unreadable stored data is not overwritten. A new
-account receives a fresh store. Deleted sessions are never resurrected by a late
-review response. Raw audio is not saved by the workspace; the ASR and AI
-providers receive data needed for the requested processing. Their retention
-policies are not changed by this feature.
+## Live and feedback
 
-`lib/analyticsPrivacy.ts` excludes the interview page/API and associated referrer
-URLs from analytics, in addition to existing replay restrictions. No transcript,
-answer, role context or provider response is added to analytics/logging here.
+Live supports separate call/system audio and candidate microphone capture,
+permission confirmation, a timer, transcripts, export and End -> Feedback.
+Browser/native capture and the existing copilot continue to be reused.
+Live feedback evaluates captured candidate answers only when identifiable.
+Tuning reports use kind `tuning` and feedback subject `copilot`: they evaluate
+system output, failures, observed latency and proposed instruction changes,
+never candidate performance. Older kind `mock` candidate-practice sessions
+remain readable and retain their original feedback semantics.
 
-Feedback generation is explicit, not automatic on capture stop. For a transcript
-longer than 40,000 characters, only the beginning and end are reviewed. The UI,
-export and model input explicitly identify this as partial coverage; the full
-transcript remains in device history (up to its validated size limit). Call-only
-recordings do not establish that the candidate's answers were captured. Arrival
-order between separate ASR channels is approximate, not precise word alignment.
+The new Feedback system-evaluation rubric distinguishes human annotations from
+verified correctness. Text-only output is not proof code was executed. Timing
+is measured in the browser from answer-request start; ASR and pre-request
+orchestration are excluded. Missing screenshots, retrieval documents and chat
+history are disclosed. Reports include bounded scenario/output excerpts with
+explicit truncation markers, and the 40,000-character review window still
+labels partial coverage.
+
+Tabs remain mounted. Switching away from Mock hides but preserves its panel;
+ending closes it and cancels pending responses. Live and Mock cannot be active
+concurrently. Workspace link exits and beforeunload are guarded; browser Back
+and OS process termination are not fully preventable. Unfinished tests are
+in-memory, not crash-recovery drafts. Review test annotations before ending.
+
+## Data and security
+
+API and page authentication remain enabled. Interview and answer endpoints
+reject cross-origin browser requests. Calibration text is limited to 1,500
+characters; mode instructions retain their separate 4,000-character allowance.
+No public secrets, new provider accounts or dependencies are introduced.
+
+Completed sessions: latest 20, account-scoped browser-local history. Test run
+list: latest 20, in memory until report completion. Applied profiles and one
+rollback snapshot: account-scoped localStorage, with same-tab/cross-tab updates.
+These are NOT cloud sync and are not encrypted. Browser storage failure is
+surfaced; the active profile can remain in memory but may be lost on reload.
+Anyone with browser-profile access can read local data. Explicit exports may
+contain private scenarios and generated responses; do not publish them blindly.
+Raw audio is not saved here. Providers receive data needed for requested work.
+Interview content remains excluded from client analytics and session replay;
+server usage events contain dimensions/counts, not calibration text or answers.
 
 ## Verification
 
-Run the existing repository gates:
+Required automated gates: TypeScript, full Vitest suite, ESLint, production
+build and existing detection evaluation. Added regressions cover shared request
+routing, expected-answer isolation, calibration snapshots, manual acceptance,
+publication/rollback, account isolation, system-feedback subject validation,
+malformed input, response failure and transcript/report limits.
 
-```
-pnpm exec tsc --noEmit
-pnpm test
-pnpm lint
-pnpm build
-```
-
-Tests cover input/prompt boundaries, excerpt disclosure, malformed storage,
-account isolation, quota fallback, retention, pinned feedback and deletion races.
-API and component/recorder regression tests cover auth, errors, cancellation and
-session-preserving tab navigation. These do not establish real model accuracy.
-
-Manual release checks still required: authenticated ASR + AI requests with actual
-provider credentials; two-channel browser audio permissions; ending during a
-pending permission prompt; revoked sharing; no-device/failure paths; macOS and
-Windows native capture; switching tabs during capture/dictation/review; retrying
-provider errors; 320px keyboard navigation and light/dark themes; storage-denied
-and quota-full browsers; export and deletion. No desktop-native source or
-installer settings are changed by this feature.
+Actual authenticated provider accuracy, browser microphone/system permissions,
+macOS/Windows hardware capture, and visual keyboard/mobile/light/dark behavior
+remain distinct verification tasks. Production release verification must match
+the deployed commit via `/api/health`, not merely see a successful preview build.

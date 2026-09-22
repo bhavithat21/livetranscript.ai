@@ -1,162 +1,150 @@
 'use client'
-import { useEffect, useRef, useState } from 'react'
-import { Mic, Send, Square } from 'lucide-react'
-import { DEFAULT_CONFIG, ROUNDS, mockTranscript, type InterviewConfig, type InterviewSession, type InterviewTurn } from '@/lib/interview/session'
-import { requestInterview, downloadInterview } from '@/lib/interview/client'
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
+import { CopilotPanel } from '@/components/copilot/CopilotPanel'
+import { Markdown } from '@/components/copilot/Markdown'
+import { usePanelWidth } from '@/lib/copilot/usePanelWidth'
+import { CopilotCalibrationContext, useInterviewTuning } from '@/lib/interview/TuningContext'
+import { MAX_CALIBRATION, hasAcceptedRun, tuningSession, type CopilotObservation, type TuningRun } from '@/lib/interview/tuning'
 import { captureText, useInterviewRecorder } from '@/lib/interview/useInterviewRecorder'
+import type { InterviewSession } from '@/lib/interview/session'
 
-export function MockInterview({ blocked, onActivity, onComplete }: {
-  blocked: boolean; onActivity: (active: boolean) => void; onComplete: (session: InterviewSession) => void
+const SCENARIOS = [
+  { name: 'Coding', text: 'Interviewer: Implement a per-user sliding-window rate limiter. Explain the data structure, concurrency concerns, complexity and boundary tests.' },
+  { name: 'System design', text: 'Interviewer: Design a reliable notification service. Clarify scale, explain retry and deduplication behavior, and discuss trade-offs.' },
+  { name: 'Behavioral grounding', text: 'Interviewer: Tell me about a time you disagreed with a technical decision. Use only experience supplied in your profile; ask for missing details rather than inventing them.' },
+]
+
+export function MockInterview({ blocked, visible = true, onActivity, onComplete }: {
+  blocked: boolean; visible?: boolean; onActivity: (active: boolean) => void; onComplete: (session: InterviewSession) => void
 }) {
-  const [config, setConfig] = useState<InterviewConfig>(DEFAULT_CONFIG)
-  const [started, setStarted] = useState(false)
-  const [turns, setTurns] = useState<InterviewTurn[]>([])
-  const [question, setQuestion] = useState<string | null>(null)
-  const [answer, setAnswer] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [dictating, setDictating] = useState(false)
-  const [dictationBusy, setDictationBusy] = useState(false)
-  const [elapsed, setElapsed] = useState(0)
+  const tuning = useInterviewTuning()
+  const panel = usePanelWidth()
   const microphone = useInterviewRecorder()
-  const controller = useRef<AbortController | null>(null)
-  const operation = useRef(0)
-  const lock = useRef(false)
+  const [scenario, setScenario] = useState(SCENARIOS[0].text)
+  const [expected, setExpected] = useState('')
+  const [draft, setDraft] = useState<string | null>(null)
+  const instructions = draft ?? tuning.state.active.instructions
+  const [running, setRunning] = useState(false)
+  const [answerRunning, setAnswerRunning] = useState(false)
+  const [runs, setRuns] = useState<TuningRun[]>([])
+  const [micOn, setMicOn] = useState(false)
+  const [micBusy, setMicBusy] = useState(false)
+  const [panelKey, setPanelKey] = useState(0)
+  const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const collecting = useRef(false)
+  const startedAt = useRef(0)
+  const lifecycle = useRef(0)
   const micLock = useRef(false)
-  const identity = useRef({ id: '', startedAt: 0 })
+  const stopping = useRef(false)
+  useEffect(() => () => { collecting.current = false; lifecycle.current += 1 }, [])
+  const transcript = useCallback(() => [scenario, micOn ? captureText(microphone.getSegments()) : ''].filter(Boolean).join('\n\n'), [scenario, micOn, microphone.getSegments])
+  const observe = useCallback((result: CopilotObservation) => {
+    if (!collecting.current) return
+    setRuns((previous) => [...previous, { ...result, expected, verdict: 'unreviewed', notes: '' }].slice(-20) as TuningRun[])
+  }, [expected])
+  const observeRunning = useCallback((value: boolean) => { if (collecting.current) setAnswerRunning(value) }, [])
 
-  useEffect(() => () => { operation.current += 1; controller.current?.abort() }, [])
-  useEffect(() => {
-    if (!started) return
-    const timer = setInterval(() => setElapsed(Math.floor((Date.now() - identity.current.startedAt) / 1000)), 1000)
-    return () => clearInterval(timer)
-  }, [started])
-
-  async function askNext(history: InterviewTurn[], settings: InterviewConfig) {
-    const token = ++operation.current
-    const abort = new AbortController()
-    controller.current?.abort()
-    controller.current = abort
-    lock.current = true
-    setBusy(true)
-    setError(null)
-    try {
-      const next = await requestInterview({ action: 'question', config: settings, turns: history }, abort.signal)
-      if (operation.current !== token) return
-      setQuestion(next)
-    } catch (e) {
-      if (!abort.signal.aborted && operation.current === token) setError(e instanceof Error ? e.message : 'Could not load the next question. Retry without losing your answers.')
-    } finally {
-      if (operation.current === token) { lock.current = false; setBusy(false); controller.current = null }
-    }
-  }
   function begin() {
-    if (lock.current || started || blocked || !config.role.trim()) return
-    identity.current = { id: crypto.randomUUID(), startedAt: Date.now() }
-    setElapsed(0)
-    setTurns([])
-    setQuestion(null)
-    setAnswer('')
-    setStarted(true)
-    onActivity(true)
-    void askNext([], config)
-  }
-  function cancelQuestion() {
-    operation.current += 1
-    controller.current?.abort()
-    controller.current = null
-    lock.current = false
-    setBusy(false)
-  }
-  function complete(history: InterviewTurn[]) {
-    cancelQuestion()
-    if (history.length === 0) {
-      setStarted(false)
-      onActivity(false)
-      setQuestion(null)
-      setAnswer('')
-      return
-    }
-    try {
-      onComplete({
-        id: identity.current.id, kind: 'mock', title: `${config.round} mock — ${config.role}`.slice(0, 200),
-        createdAt: identity.current.startedAt,
-        durationSeconds: Math.max(0, Math.round((Date.now() - identity.current.startedAt) / 1000)),
-        transcript: mockTranscript(history), turns: history,
-        captureNote: `Mock interview for ${config.level} ${config.role}; ${config.round} round. ${history.length} of ${config.questionCount} planned questions answered. Interviewer questions are AI-generated; only text explicitly submitted under Candidate is the candidate's answer. Dictated text may contain ASR errors. No code was executed as part of this mock.`,
-      })
-      setStarted(false)
-      onActivity(false)
-      setQuestion(null)
-      setAnswer('')
-    } catch (e) { setError(e instanceof Error ? e.message : 'Could not save this mock. Export your answers before leaving.') }
-  }
-  function submit() {
-    if (lock.current || !question || !answer.trim() || dictating || dictationBusy) return
-    const nextTurns = [...turns, { question, answer: answer.trim() }]
-    setTurns(nextTurns)
-    setQuestion(null)
-    setAnswer('')
-    if (nextTurns.length >= config.questionCount) complete(nextTurns)
-    else void askNext(nextTurns, config)
-  }
-  function finishEarly() {
-    if (dictating || dictationBusy) return
-    const submitted = question && answer.trim() ? [...turns, { question, answer: answer.trim() }] : turns
-    setTurns(submitted)
-    complete(submitted)
-  }
-  async function toggleDictation() {
-    if (micLock.current) return
-    micLock.current = true
-    setDictationBusy(true)
+    if (blocked || collecting.current || !scenario.trim()) return
+    collecting.current = true
+    lifecycle.current += 1
+    startedAt.current = Date.now()
+    setRuns([])
     setError(null)
+    setNotice(null)
+    setRunning(true)
+    onActivity(true)
+  }
+  async function toggleMic() {
+    if (micLock.current || !collecting.current) return
+    micLock.current = true
+    setMicBusy(true)
+    const token = lifecycle.current
     try {
-      if (dictating) {
+      if (micOn) {
         const rows = await microphone.stop()
-        const spoken = captureText(rows)
-        setAnswer((previous) => [previous.trim(), spoken].filter(Boolean).join('\n\n').slice(0, 12_000))
-        if (answer.length + spoken.length > 12_000) setError('The answer reached the 12,000-character limit. Review the text; excess dictation was not appended.')
-        setDictating(false)
+        if (token !== lifecycle.current) return
+        const words = captureText(rows)
+        setScenario((previous) => [previous, words && `Interviewer (dictated): ${words}`].filter(Boolean).join('\n\n').slice(-40_000))
+        setMicOn(false)
       } else {
-        setDictating(true)
+        setMicOn(true)
         await microphone.start('mic')
       }
     } catch (e) {
       await microphone.stop()
-      setDictating(false)
-      setError(e instanceof Error ? e.message : 'Microphone capture failed. You can type your answer instead.')
-    } finally { micLock.current = false; setDictationBusy(false) }
+      if (token === lifecycle.current) { setMicOn(false); setError(e instanceof Error ? e.message : 'Microphone failed. Use a pasted scenario instead.') }
+    } finally {
+      micLock.current = false
+      if (token === lifecycle.current) setMicBusy(false)
+    }
+  }
+  async function finish() {
+    if (!collecting.current || stopping.current) return
+    stopping.current = true
+    collecting.current = false
+    lifecycle.current += 1
+    setRunning(false) // unmounting the production panel cancels its pending answer
+    setAnswerRunning(false)
+    try {
+      await microphone.stop()
+      if (runs.length) onComplete(tuningSession(runs, startedAt.current))
+      else setNotice('Test ended without a completed copilot request. Nothing was scored or saved.')
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not save this report. Export the test examples before leaving.') }
+    finally { stopping.current = false; setMicOn(false); setMicBusy(false); onActivity(false) }
+  }
+  function updateRun(id: string, update: Partial<Pick<TuningRun, 'verdict' | 'notes'>>) {
+    setRuns((previous) => previous.map((run) => run.id === id ? { ...run, ...update } : run))
+  }
+  function publish() {
+    if (blocked || answerRunning || !hasAcceptedRun(runs, instructions)) return
+    tuning.publish(instructions)
+    setNotice('Applied to Live Interview on this browser. New copilot requests use this profile; model weights were not changed.')
+  }
+  function exportExamples() {
+    const accepted = runs.filter((run) => run.verdict === 'pass' && run.status === 'complete')
+    const text = accepted.map((run) => JSON.stringify({ version: 1, question: run.question, scenario: run.transcript, mode: run.mode, instructions: run.instructions, calibration: run.calibration, response: run.answer, expected: run.expected, humanNotes: run.notes, firstTokenMs: run.firstTokenMs, totalMs: run.totalMs })).join('\n')
+    const url = URL.createObjectURL(new Blob([text], { type: 'application/x-ndjson' }))
+    const link = document.createElement('a')
+    link.href = url; link.download = 'copilot-tuning-examples.jsonl'; link.click()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 
-  return (
+  return <div className="space-y-5 sm:pr-[var(--mock-panel-w,0px)]" style={running && visible ? { '--mock-panel-w': `${panel.width}px` } as CSSProperties : undefined}>
     <section className="reader-surface space-y-5 rounded-2xl p-5 sm:p-6">
-      <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="font-[family-name:var(--font-serif)] text-2xl">Mock Interview</h2><p className="mt-2 text-sm text-black/60">An AI interviewer asks one question at a time and follows up on your answers. Coaching appears after you finish.</p></div>{started && <span role="status" className="rounded-full bg-black/5 px-3 py-2 text-sm tabular-nums">{turns.length}/{config.questionCount} answered · {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}</span>}</div>
-      <fieldset disabled={started} className="grid gap-4 sm:grid-cols-2 disabled:opacity-70">
-        <label className="space-y-1 text-sm">Target role<input value={config.role} maxLength={200} onChange={(e) => setConfig({ ...config, role: e.target.value })} className="w-full rounded-xl border border-black/15 bg-transparent p-3" /></label>
-        <label className="space-y-1 text-sm">Experience level<select value={config.level} onChange={(e) => setConfig({ ...config, level: e.target.value as InterviewConfig['level'] })} className="w-full rounded-xl border border-black/15 bg-transparent p-3">{(['junior', 'mid', 'senior', 'staff'] as const).map((level) => <option key={level} value={level}>{level}</option>)}</select></label>
-        <label className="space-y-1 text-sm">Round<select value={config.round} onChange={(e) => setConfig({ ...config, round: e.target.value as InterviewConfig['round'] })} className="w-full rounded-xl border border-black/15 bg-transparent p-3">{ROUNDS.map((round) => <option key={round} value={round}>{round}</option>)}</select></label>
-        <label className="space-y-1 text-sm">Questions<select value={config.questionCount} onChange={(e) => setConfig({ ...config, questionCount: Number(e.target.value) })} className="w-full rounded-xl border border-black/15 bg-transparent p-3">{[3, 5, 8].map((count) => <option key={count} value={count}>{count} questions</option>)}</select></label>
-        <label className="space-y-1 text-sm sm:col-span-2">Optional job description / topics to practice<textarea rows={3} maxLength={10_000} value={config.context} onChange={(e) => setConfig({ ...config, context: e.target.value })} className="w-full rounded-xl border border-black/15 bg-transparent p-3" placeholder="Paste role requirements or topics. Do not include secrets or confidential code." /></label>
-      </fieldset>
-      {!started ? <button className="btn-signal" disabled={blocked || !config.role.trim()} onClick={begin}>Start mock interview</button> : <>
-        <div className="rounded-2xl border border-black/10 p-4 sm:p-5" aria-busy={busy}>
-          <h3 className="text-sm font-semibold">Question {Math.min(turns.length + 1, config.questionCount)} of {config.questionCount}</h3>
-          <p className="mt-3 whitespace-pre-wrap text-lg leading-relaxed" aria-live="polite">{busy ? 'Preparing the next question…' : question ?? 'The next question is not loaded. Retry below.'}</p>
-          {busy ? <button className="btn-ghost mt-4" onClick={cancelQuestion}>Cancel question request</button> : !question && turns.length < config.questionCount && <button className="btn-ghost mt-4" onClick={() => void askNext(turns, config)}>Retry next question</button>}
-        </div>
-        <label className="block space-y-2 text-sm">Your answer<textarea className="w-full rounded-xl border border-black/15 bg-transparent p-3 text-base leading-relaxed" rows={7} maxLength={12_000} disabled={!question || busy || dictating || dictationBusy} value={answer} onChange={(e) => setAnswer(e.target.value)} placeholder="Explain your approach and reasoning. You can type code here; this mode does not execute it." /></label>
-        {dictating && <div className="rounded-xl bg-black/5 p-4"><p className="text-sm font-medium">{dictationBusy ? 'Connecting microphone…' : microphone.phase === 'recording' ? 'Dictating — stop to append this to your answer' : 'Microphone stopped — append captured words below'}</p><p className="mt-2 whitespace-pre-wrap text-sm">{captureText(microphone.segments) || 'Speak your answer.'}</p></div>}
-        <div className="flex flex-wrap gap-2">
-          <button className="btn-signal gap-2" disabled={busy || !question || !answer.trim() || dictating || dictationBusy} onClick={submit}><Send size={16} />{turns.length + 1 >= config.questionCount ? 'Submit & open feedback' : 'Submit answer'}</button>
-          <button className="btn-ghost gap-2" disabled={!question || busy || dictationBusy} onClick={() => void toggleDictation()}>{dictating ? <Square size={16} /> : <Mic size={16} />}{dictating ? 'Stop & append dictation' : 'Dictate answer'}</button>
-          <button className="btn-ghost" disabled={dictating || dictationBusy} onClick={finishEarly}>{turns.length || answer.trim() ? 'Finish early & review' : 'End mock'}</button>
-          <button className="btn-ghost" disabled={!turns.length && !answer.trim()} onClick={() => downloadInterview('mock-interview-answers', mockTranscript(question && answer.trim() ? [...turns, { question, answer }] : turns))}>Export answers</button>
-        </div>
-      </>}
-      {blocked && !started && <p role="status" className="text-sm">End the live interview before starting a mock.</p>}
-      {(error || microphone.error) && <p role="alert" className="text-sm text-[color:var(--stop)]">{error || microphone.error}</p>}
-      {turns.length > 0 && <details className="rounded-xl border border-black/10 p-4"><summary className="cursor-pointer text-sm font-medium">Submitted answers ({turns.length})</summary><div className="mt-4 space-y-5">{turns.map((turn, i) => <article key={i}><h4 className="font-medium">{i + 1}. {turn.question}</h4><p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-black/70">{turn.answer}</p></article>)}</div></details>}
+      <div><h2 className="font-[family-name:var(--font-serif)] text-2xl">Mock Interview · Live-system tuning</h2><p className="mt-2 text-sm leading-relaxed text-black/60">Simulate interviewer input, inspect the actual live copilot, and refine its responses. This tests the system, not your interview performance.</p></div>
+      <p className="rounded-xl bg-black/5 p-3 text-sm">Live profile: revision {tuning.state.active.revision}. Draft instructions are isolated until you review a successful test and choose Apply to Live.</p>
+      <div className="flex flex-wrap gap-2">{SCENARIOS.map((item) => <button key={item.name} className="btn-ghost text-sm" disabled={answerRunning || micOn || blocked} onClick={() => setScenario(item.text)}>Load {item.name.toLowerCase()} scenario</button>)}</div>
+      <label className="block space-y-2 text-sm">Scenario transcript / interviewer question<textarea rows={5} maxLength={40_000} value={scenario} disabled={answerRunning || micOn || blocked} onChange={(e) => setScenario(e.target.value)} className="w-full rounded-xl border border-black/15 bg-transparent p-3" /></label>
+      <label className="block space-y-2 text-sm">Expected behavior or reference answer (not sent to the answering model)<textarea rows={3} maxLength={2000} value={expected} disabled={answerRunning || blocked} onChange={(e) => setExpected(e.target.value)} className="w-full rounded-xl border border-black/15 bg-transparent p-3" placeholder="Describe what a correct, useful response must contain." /></label>
+      <label className="block space-y-2 text-sm">Draft live calibration instructions<textarea rows={4} maxLength={MAX_CALIBRATION} value={instructions} disabled={answerRunning || blocked} onChange={(e) => setDraft(e.target.value)} className="w-full rounded-xl border border-black/15 bg-transparent p-3" placeholder="For example: Start with a direct answer. State assumptions. Keep the opening under 80 words. Never invent resume facts." /></label>
+      <div className="flex flex-wrap gap-2">
+        {!running ? <button className="btn-signal" disabled={blocked || !scenario.trim()} onClick={begin}>Open live copilot for mock test</button> : <>
+          <button className="btn-ghost" disabled={micBusy || answerRunning} onClick={() => void toggleMic()}>{micOn ? 'Stop & append interviewer speech' : 'Dictate interviewer input'}</button>
+          <button className="btn-ghost" disabled={answerRunning} onClick={() => setPanelKey((key) => key + 1)}>Reset copilot for clean replay</button>
+          <button className="btn-signal" onClick={() => void finish()}>End test &amp; open feedback</button>
+        </>}
+        <button className="btn-ghost" disabled={blocked || answerRunning || !hasAcceptedRun(runs, instructions)} onClick={publish}>Apply to Live</button>
+        <button className="btn-ghost" disabled={blocked || answerRunning || !tuning.state.previous} onClick={() => { tuning.rollback(); setDraft(null); setNotice('Previous live instructions restored as a new revision.') }}>Roll back live profile</button>
+        <button className="btn-ghost" disabled={answerRunning || blocked} onClick={() => setDraft(null)}>Load current live instructions</button>
+      </div>
+      {running && <p role="status" className="text-sm">{answerRunning ? 'Live copilot is answering the test input…' : 'Use the copilot panel to select a mode and ask the scenario question, or enable Auto for settled transcript questions. Completed requests appear below.'}</p>}
+      {micOn && <p className="whitespace-pre-wrap text-sm">{micBusy ? 'Connecting microphone…' : captureText(microphone.segments) || 'Speak an interviewer question.'}</p>}
+      <p className="text-xs leading-relaxed text-black/60">The same CopilotPanel, mode routing, uploaded context, and answer endpoint are used in Live and Mock. Configure the mode and grounding in that panel. Calibration applies to standard copilot answers; the separate Repository Interview multi-agent pipeline is not calibrated here. Clean replay resets conversation state, not saved documents. Prompt tuning is not model-weight training.</p>
+      {blocked && <p role="status" className="text-sm">End the live interview before running tests or applying calibration changes.</p>}
+      {notice && <p role="status" className="text-sm">{notice}</p>}
+      {(error || tuning.error || microphone.error) && <p role="alert" className="text-sm text-[color:var(--stop)]">{error || tuning.error || microphone.error}</p>}
     </section>
-  )
+    {runs.length > 0 && <section className="reader-surface space-y-4 rounded-2xl p-5"><div className="flex flex-wrap items-center justify-between gap-3"><h3 className="font-semibold">Copilot test results ({runs.length}/20 retained)</h3><button className="btn-ghost" disabled={!runs.some((run) => run.verdict === 'pass' && run.status === 'complete')} onClick={exportExamples}>Export accepted examples</button></div><p className="text-xs text-black/60">Times measure request start to first text and completion, excluding ASR and pre-request orchestration. Review correctness yourself; Pass is your annotation, not an automated guarantee.</p>{runs.map((run) => <article key={run.id} className="space-y-3 rounded-xl border border-black/15 p-4">
+      <h4 className="font-medium">{run.question}</h4><p className="text-xs text-black/60">{run.mode} · {run.status} · First text: {run.firstTokenMs === null ? 'not observed' : `${Math.round(run.firstTokenMs)} ms`} · Completion: {Math.round(run.totalMs)} ms</p>
+      {run.expected && <p className="whitespace-pre-wrap text-sm"><strong>Expected:</strong> {run.expected}</p>}
+      <div className="max-h-80 overflow-auto break-words"><Markdown>{run.answer || run.error || 'No output'}</Markdown></div>
+      {run.error && <p className="text-sm text-[color:var(--stop)]">{run.error}</p>}
+      <label className="block space-y-1 text-sm">Review result<select value={run.verdict} onChange={(e) => updateRun(run.id, { verdict: e.target.value as TuningRun['verdict'] })} className="w-full rounded-xl border border-black/15 bg-transparent p-3"><option value="unreviewed">Not reviewed</option><option value="pass" disabled={run.status !== 'complete'}>Pass — useful and correct for this test</option><option value="needs-work">Needs work</option></select></label>
+      <label className="block space-y-1 text-sm">System improvement notes<textarea rows={2} maxLength={2000} value={run.notes} onChange={(e) => updateRun(run.id, { notes: e.target.value })} className="w-full rounded-xl border border-black/15 bg-transparent p-3" /></label>
+      <details className="text-xs"><summary className="cursor-pointer">Calibration used for this request</summary><pre className="mt-2 whitespace-pre-wrap">{run.calibration || '(Live defaults; no calibration override)'}</pre></details>
+    </article>)}</section>}
+    {running && <div hidden={!visible}><CopilotCalibrationContext.Provider value={{ instructions, revision: tuning.state.active.revision, onResult: observe, onRunning: observeRunning }}><CopilotPanel key={panelKey} getTranscript={transcript} onClose={() => void finish()} width={panel.width} onResizeStart={panel.onResizeStart} /></CopilotCalibrationContext.Provider></div>}
+  </div>
 }
