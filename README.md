@@ -8,6 +8,7 @@ Speak or capture a call and watch the words appear the moment they're said, with
 
 ## Features
 
+- **Standalone AI Copilot** — [open the AI workspace](https://livetranscript.ai/copilot) without creating a meeting. Type questions, optionally listen, choose keywords/concise/detailed answers and tone, and ask for possible follow-ups. See [the workspace and product test guide](docs/copilot-workspace.md).
 - **Live transcription** — low-latency streaming captions from your microphone or system/tab audio.
 - **Meeting rooms** — up to 5 speakers, each on their own device; transcripts sync in real time and every speaker gets a distinct color.
 - **Follow-along** — repeat a passage aloud and a growing highlight trail tracks where you are, driven by your own voice (zero added latency — local alignment, no per-word model call).
@@ -17,6 +18,8 @@ Speak or capture a call and watch the words appear the moment they're said, with
 - **Share** — expiring public links to any saved transcript.
 - **Mobile-responsive** across phone → desktop.
 - **Repository interview assistance** — capture browser IDE screenshots or import a folder, retain observed source with explicit gaps, track interviewer questions, and get file navigation, code traces, patch suggestions and independent specialist review. See [the screenshot guide](docs/repo-interview-screenshots.md).
+- **Remote assistance** — explicit laptop-owner approval, view-only by default, separately enabled input control and emergency stop. [Desktop preview 0.1.8](https://github.com/bhavithat21/livetranscript.ai/releases/tag/v0.1.8) includes Mac and Windows installers; [device testing remains required](docs/remote-assistance.md).
+- **App appearance** — custom name, presets or a custom icon, with platform-specific limits stated in Settings. [Branding guide](docs/desktop-appearance.md).
 
 ## Tech Stack
 
@@ -73,7 +76,7 @@ Copy `.env.example` to `.env.local` and provide your own values. **Never commit 
 
 ```
 app/            Next.js App Router routes
-  (app)/        authenticated surfaces: record, room/[id], dashboard, session/[id], settings
+  (app)/        authenticated surfaces: copilot, record, remote, room/[id], dashboard, session/[id], settings
   s/[token]/    public shared-transcript view
   api/          token minting, correction, summaries, realtime auth
 components/      UI — transcript views, room panels, nav, site chrome

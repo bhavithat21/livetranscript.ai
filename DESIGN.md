@@ -51,6 +51,11 @@ The signature is Fraunces with teal accents and glass chrome. Avoid neon dashboa
 oversized decorative cards, and low-contrast text over the shared screen. Remote
 control and appearance extend the existing Settings/Library patterns.
 
+The standalone AI workspace adds a setup rail beside a bounded reading column.
+Audio context is an optional top rail. On small screens, setup collapses so the
+question composer remains the primary action. Reading surfaces stay solid;
+Focus mode is a visual preference and carries no invisibility guarantee.
+
 The UI is currently English. System font fallbacks render user-supplied names and
 technical content; this is not a claim of fully localized product flows. No market
 or jurisdiction is inferred from the language.
@@ -148,3 +153,13 @@ Never describe an untested connection as live or an unmeasured latency as instan
 
 Other existing screens have not undergone a full UI migration. The focused audit
 scope is recorded in `premium-ui.json`.
+
+## Interview reference integration
+
+The supplied product reference informs a quiet sidebar, compact sans-serif
+workspace titles, bordered answer/result cards, and a transcript rail. Live,
+Mock Lab and Feedback share one shell; existing paper/ink/teal runtime tokens
+remain canonical across light and dark themes. Mock controls remain in document
+flow on small screens. Factual session summaries replace illustrative percentages.
+Settings uses the same compact navigation with Profile, AI answers, Audio and
+Appearance sections backed by real preferences.

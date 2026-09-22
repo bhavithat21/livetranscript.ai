@@ -68,3 +68,63 @@ describe('interview capture lifecycle', () => {
     expect(liveTranscript([row], [mic])).toBe('Call / speaker 1: Question?\nCandidate microphone: Answer [Unfinalized transcription; verify]')
   })
 })
+
+it('returns from Stop while a permission dialog is still pending and ignores its later grant', async () => {
+  let resolve!: (rate: number) => void
+  mocks.browserStart.mockReturnValue(new Promise<number>((done) => { resolve = done }))
+  const { result } = renderHook(() => useInterviewRecorder())
+  let starting!: Promise<void>
+  act(() => { starting = result.current.start('mic') })
+  await act(async () => { await result.current.stop() })
+  expect(result.current.phase).toBe('idle')
+  expect(mocks.browserStop).toHaveBeenCalledTimes(1)
+  expect(mocks.connect).not.toHaveBeenCalled()
+  await act(async () => { resolve(16_000); await starting })
+  expect(mocks.connect).not.toHaveBeenCalled()
+})
+
+it('aborts startup ASR and retires a stale provider without affecting a replacement recording', async () => {
+  let resolve!: (value: unknown) => void
+  mocks.connect.mockReturnValueOnce(new Promise((done) => { resolve = done }))
+  const { result } = renderHook(() => useInterviewRecorder())
+  let starting!: Promise<void>
+  await act(async () => { starting = result.current.start('mic'); await Promise.resolve() })
+  const signal = mocks.connect.mock.calls[0][0].signal as AbortSignal
+  await act(async () => { await result.current.stop() })
+  expect(signal.aborted).toBe(true)
+  await act(async () => result.current.start('mic'))
+  const replacementEmit = emit
+  const stopCount = mocks.browserStop.mock.calls.length
+  const oldDisconnect = vi.fn().mockResolvedValue(undefined)
+  await act(async () => { resolve({ name: 'Old', provider: { disconnect: oldDisconnect } }); await starting })
+  expect(oldDisconnect).toHaveBeenCalledTimes(1)
+  expect(result.current.phase).toBe('recording')
+  expect(mocks.browserStop).toHaveBeenCalledTimes(stopCount)
+  act(() => replacementEmit({ ...event, text: 'New recording' }))
+  expect(captureText(result.current.getSegments())).toBe('New recording')
+})
+
+it('stops and flushes the established provider when browser sharing ends', async () => {
+  const { result } = renderHook(() => useInterviewRecorder())
+  await act(async () => result.current.start('system'))
+  const options = mocks.browserStart.mock.calls[0][2]
+  mocks.disconnect.mockImplementation(async () => { emit(event) })
+  await act(async () => options.onEnded())
+  expect(result.current.phase).toBe('idle')
+  expect(captureText(result.current.getSegments())).toBe('Final answer')
+  expect(mocks.nativeStop).toHaveBeenCalled()
+})
+
+it('cancels startup immediately on unmount and ignores a late provider', async () => {
+  let resolve!: (value: unknown) => void
+  mocks.connect.mockReturnValueOnce(new Promise((done) => { resolve = done }))
+  const { result, unmount } = renderHook(() => useInterviewRecorder())
+  let starting!: Promise<void>
+  await act(async () => { starting = result.current.start('mic'); await Promise.resolve() })
+  const signal = mocks.connect.mock.calls[0][0].signal as AbortSignal
+  unmount()
+  expect(signal.aborted).toBe(true)
+  const oldDisconnect = vi.fn().mockResolvedValue(undefined)
+  await act(async () => { resolve({ name: 'Late', provider: { disconnect: oldDisconnect } }); await starting })
+  expect(oldDisconnect).toHaveBeenCalledTimes(1)
+})

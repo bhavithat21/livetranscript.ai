@@ -383,3 +383,99 @@ describe('browser controller', () => {
     expect(h.client.snapshot.status).toBe('ended')
   })
 })
+
+describe('visible notes on an approved connection', () => {
+  it('exchanges notes with the pinned participant in view-only mode without native input', async () => {
+    const host = setup()
+    const helper = setup('controller')
+    expect(host.client.sendNote('Too early')).toBe(false)
+    await host.client.createHost('1')
+    expect(host.client.sendNote('Still awaiting approval')).toBe(false)
+    await host.client.stop()
+    const hostChannels = await host.ready()
+    const helperChannels = await helper.ready()
+    expect(helper.client.sendNote('Before the host has finished connecting')).toBe(false)
+    helperChannels.control.receive(hostChannels.control.sentJSON().findLast((message) => message.type === 'permission'))
+
+    expect(helper.client.snapshot.controlEnabled).toBe(false)
+    expect(helper.client.sendNote('Check the empty-input case.')).toBe(true)
+    const helperNote = helperChannels.control.sentJSON().findLast((message) => message.type === 'note')
+    hostChannels.control.receive(helperNote)
+    expect(host.client.snapshot.notes).toEqual(helper.client.snapshot.notes)
+    expect(host.client.snapshot.notes[0]).toMatchObject({ sender: 'controller', senderName: 'Helper BBBBBB', text: 'Check the empty-input case.' })
+
+    expect(host.client.sendNote('I will add that test.')).toBe(true)
+    helperChannels.control.receive(hostChannels.control.sentJSON().findLast((message) => message.type === 'note'))
+    expect(host.client.snapshot.notes).toEqual(helper.client.snapshot.notes)
+    expect(helper.client.snapshot.notes[1]).toMatchObject({ sender: 'host', senderName: 'Host AAAAAA' })
+    expect(host.native.input).not.toHaveBeenCalled()
+    expect(host.native.setControl).not.toHaveBeenCalled()
+    expect(helper.native.input).not.toHaveBeenCalled()
+  })
+
+  it('rejects forged, malformed and repeated notes without consuming valid sequence numbers', async () => {
+    const h = setup()
+    const { control } = await h.ready()
+    control.receive({ type: 'note', seq: 50, text: 'forged', sender: 'Host AAAAAA' })
+    control.receive({ type: 'note', seq: 40, text: 'x'.repeat(2_001) })
+    control.receive({ type: 'note', seq: 1, text: 'first' })
+    control.receive({ type: 'note', seq: 1, text: 'replay' })
+    control.receive({ type: 'note', seq: 2, text: 'second' })
+    expect(h.client.snapshot.notes.map((note) => note.text)).toEqual(['first', 'second'])
+    expect(h.client.snapshot.notes.every((note) => note.senderName === 'Helper BBBBBB')).toBe(true)
+  })
+
+  it('bounds incoming/outgoing note rates and preserves native heartbeat processing', async () => {
+    const h = setup()
+    const { control } = await h.ready()
+    for (let seq = 1; seq <= 5; seq++) {
+      expect(h.client.sendNote(`host note ${seq}`)).toBe(true)
+      control.receive({ type: 'note', seq, text: `helper note ${seq}` })
+    }
+    expect(h.client.sendNote('Too many notes')).toBe(false)
+    control.receive({ type: 'note', seq: 6, text: 'Flood note' })
+    expect(h.client.snapshot.notes).toHaveLength(10)
+    control.receive({ type: 'ping', seq: 1 })
+    await flush()
+    expect(h.native.heartbeat).toHaveBeenCalledWith(lease.leaseId)
+    expect(h.client.snapshot.status).toBe('connected')
+    vi.setSystemTime(Date.now() + 10_000)
+    expect(h.client.sendNote('The next note')).toBe(true)
+    control.receive({ type: 'note', seq: 7, text: 'Next helper note' })
+    expect(h.client.snapshot.notes.at(-1)?.text).toBe('Next helper note')
+  })
+
+  it('keeps only fifty notes, clears locally without resetting replay protection, and clears on stop', async () => {
+    const h = setup()
+    const { control } = await h.ready()
+    for (let seq = 1; seq <= 55; seq++) {
+      vi.setSystemTime(Date.now() + 2_001)
+      control.receive({ type: 'note', seq, text: `note ${seq}` })
+    }
+    expect(h.client.snapshot.notes).toHaveLength(50)
+    expect(h.client.snapshot.notes[0].text).toBe('note 6')
+    const messagesSent = control.send.mock.calls.length
+    h.client.clearNotes()
+    expect(h.client.snapshot.notes).toEqual([])
+    expect(control.send.mock.calls.length).toBe(messagesSent)
+    control.receive({ type: 'note', seq: 55, text: 'replay after clear' })
+    expect(h.client.snapshot.notes).toEqual([])
+    expect(h.client.sendNote('A fresh local note')).toBe(true)
+    await h.client.stop()
+    expect(h.client.snapshot.notes).toEqual([])
+    expect(h.client.sendNote('After stop')).toBe(false)
+  })
+
+  it('does not append unsent notes when the transport is congested or closed', async () => {
+    const h = setup()
+    const { control } = await h.ready()
+    control.bufferedAmount = 100_000
+    expect(h.client.sendNote('Retain this draft')).toBe(false)
+    expect(h.client.snapshot.notes).toEqual([])
+    control.bufferedAmount = 0
+    expect(h.client.sendNote('Retry')).toBe(true)
+    expect(control.sentJSON().findLast((message) => message.type === 'note').seq).toBe(1)
+    control.close()
+    expect(h.client.snapshot.notes).toEqual([])
+  })
+})

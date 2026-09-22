@@ -1,6 +1,6 @@
 'use client'
 import Link from 'next/link'
-import { Home, LayoutGrid, Mic, MonitorUp, Settings, Users } from 'lucide-react'
+import { Home, LayoutGrid, Mic, MonitorUp, Settings, Sparkles, Users } from 'lucide-react'
 import { Wordmark } from './Wordmark'
 
 // Compact navigation for the FOCUSED pages (record / room / session) where the
@@ -10,8 +10,10 @@ import { Wordmark } from './Wordmark'
 const LINKS = [
   { href: '/', label: 'Home', icon: Home },
   { href: '/dashboard', label: 'Library', icon: LayoutGrid },
+  { href: '/copilot', label: 'AI Copilot', icon: Sparkles },
   { href: '/record', label: 'New transcript', icon: Mic },
   { href: '/interview', label: 'Interviews', icon: Mic },
+  { href: '/practice', label: 'Practice', icon: Sparkles },
   { href: '/room/new', label: 'New meeting', icon: Users },
   { href: '/remote', label: 'Remote assist', icon: MonitorUp },
   { href: '/settings', label: 'Settings', icon: Settings },

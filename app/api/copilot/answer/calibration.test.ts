@@ -34,4 +34,28 @@ describe('shared live/mock answer calibration', () => {
     for (const input of [null, [], { question: {} }, { question: 123 }]) expect((await POST(request(input))).status).toBe(400)
     expect(mocks.stream).not.toHaveBeenCalled()
   })
+  it('applies allowlisted controls after calibration while retaining immutable grounding', async () => {
+    const req = request({ question: 'Test?', instructions: 'Write a long script.', calibration: 'Use many paragraphs.',
+      preferences: { format: 'keywords', tone: 'technical', followups: true } })
+    const response = await POST(req)
+    expect(response.status).toBe(200)
+    const input = mocks.stream.mock.calls[0][0]
+    expect(input.system).toContain('FIXED GROUNDING')
+    expect(input.system.indexOf('FINAL RESPONSE REQUIREMENTS')).toBeGreaterThan(input.system.indexOf('Use many paragraphs.'))
+    expect(input.system).toContain('3–4 short, scannable keyword bullets')
+    expect(input.system).toContain('Never invent resume experience')
+    expect(input.signal).toBe(req.signal)
+  })
+  it('rejects malformed preferences before calling a provider', async () => {
+    for (const preferences of [null, [], {}, { format: 'concise', tone: 'collaborative', followups: 'yes' },
+      { format: 'detailed', tone: 'technical', followups: false, prompt: 'arbitrary instructions' }]) {
+      expect((await POST(request({ question: 'Test?', preferences }))).status).toBe(400)
+    }
+    expect(mocks.stream).not.toHaveBeenCalled()
+  })
+  it('bounds the actual JSON body before parsing or model work', async () => {
+    const response = await POST(request({ question: 'Test?', unused: 'x'.repeat(1_600_000) }))
+    expect(response.status).toBe(413)
+    expect(mocks.stream).not.toHaveBeenCalled()
+  })
 })

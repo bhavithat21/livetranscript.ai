@@ -9,6 +9,7 @@ const FINAL_FLUSH_MS = 800
 
 export class DeepgramProvider implements TranscriptionProvider {
   private ws: WebSocket | null = null
+  private removeAbort: (() => void) | null = null
   private partialCb: (e: TranscriptEvent) => void = () => {}
   private finalCb: (e: TranscriptEvent) => void = () => {}
   private statusCb: (s: { error: string }) => void = () => {}
@@ -17,13 +18,16 @@ export class DeepgramProvider implements TranscriptionProvider {
   private onFinalFlush: (() => void) | null = null
 
   async connect(config: TranscriptionConfig): Promise<void> {
+    config.signal?.throwIfAborted()
     const res = await fetch('/api/token', {
       method: 'POST',
+      signal: config.signal,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ provider: 'deepgram' }),
     })
     if (!res.ok) throw new Error('Deepgram token mint failed')
     const { token } = await res.json()
+    config.signal?.throwIfAborted()
 
     const params = new URLSearchParams({
       model: 'nova-3',
@@ -56,6 +60,23 @@ export class DeepgramProvider implements TranscriptionProvider {
         ws.close()
         reject(new Error('Deepgram WS timeout'))
       }, 10_000)
+      const abort = () => {
+        clearTimeout(timeout)
+        this.removeAbort?.()
+        this.removeAbort = null
+        this.stopKeepAlive()
+        this.onFinalFlush?.()
+        ws.onopen = null
+        ws.onmessage = null
+        ws.onerror = null
+        ws.onclose = null
+        ws.close()
+        if (this.ws === ws) this.ws = null
+        reject(config.signal?.reason ?? new DOMException('Transcription cancelled', 'AbortError'))
+      }
+      config.signal?.addEventListener('abort', abort, { once: true })
+      this.removeAbort = () => config.signal?.removeEventListener('abort', abort)
+      if (config.signal?.aborted) { abort(); return }
       ws.onopen = () => {
         clearTimeout(timeout)
         opened = true
@@ -76,7 +97,10 @@ export class DeepgramProvider implements TranscriptionProvider {
         this.statusCb({ error: 'Transcription connection lost' })
       }
       ws.onclose = () => {
-        if (!opened) return // connect-time close already rejected via onerror/timeout
+        clearTimeout(timeout)
+        this.removeAbort?.()
+        this.removeAbort = null
+        if (!opened) { reject(new Error('Deepgram connection closed before opening')); return }
         this.stopKeepAlive()
         this.onFinalFlush?.() // unblock a pending disconnect flush
         this.statusCb({ error: 'Transcription connection closed' })
@@ -122,6 +146,8 @@ export class DeepgramProvider implements TranscriptionProvider {
     this.statusCb = cb
   }
   async disconnect(): Promise<void> {
+    this.removeAbort?.()
+    this.removeAbort = null
     this.stopKeepAlive()
     // Silence the drop signal — this is a graceful close, not a failure.
     this.statusCb = () => {}

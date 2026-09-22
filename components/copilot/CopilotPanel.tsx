@@ -1,6 +1,6 @@
 'use client'
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
-import { Check, Eye, EyeOff, Lock, Monitor, MonitorOff, MoreHorizontal, Play, Send, Sparkles, X } from 'lucide-react'
+import { useCallback, useEffect, useId, useRef, useState, type CSSProperties } from 'react'
+import { Check, Eye, EyeOff, FileText, Lock, Monitor, MonitorOff, MoreHorizontal, Play, Send, SlidersHorizontal, Sparkles, Square, X } from 'lucide-react'
 import { useLockMode } from '@/lib/desktop/useLockMode'
 import { LeverSwitch } from '@/components/ui/LeverSwitch'
 import { useAppIdentity } from '@/lib/desktop/useAppIdentity'
@@ -35,6 +35,8 @@ import { useRepoInterview } from '@/lib/repo/useRepoInterview'
 import { RepoInterviewPanel } from './RepoInterviewPanel'
 import { useScreenRepository, type RepoTask } from '@/lib/repo/useScreenRepository'
 import { ScreenRepositoryControls, RepoAnalysisView } from './ScreenRepositoryPanel'
+import { useResponsePreferences } from '@/lib/copilot/useResponsePreferences'
+import { ResponsePreferencesControls, WorkspaceEmptyState, WorkspaceModeNavigation } from './CopilotWorkspaceUi'
 
 // Ask-your-transcript side panel. Grounded, streaming answers from the live
 // transcript. Matches the app's editorial-glass language: glass surface, emerald
@@ -60,31 +62,43 @@ function usesScreen(mode: CopilotMode): boolean {
 export function CopilotPanel({
   getTranscript,
   onClose,
-  width,
+  width = 440,
   onResizeStart,
+  variant = 'drawer',
+  initialMode = 'general',
 }: {
   getTranscript: () => string
-  onClose: () => void
+  onClose?: () => void
   // Width + drag handler come from the PAGE (usePanelWidth) so the transcript can
   // reserve the same space — the panel sits BESIDE the transcript, not over it.
-  width: number
-  onResizeStart: (e: React.PointerEvent) => void
+  width?: number
+  onResizeStart?: (e: React.PointerEvent) => void
+  variant?: 'drawer' | 'workspace'
+  initialMode?: CopilotMode
 }) {
-  const { turns, streaming, error, ask, clear } = useCopilot(getTranscript)
+  const workspace = variant === 'workspace'
+  const responsePreferences = useResponsePreferences()
+  const { turns, streaming, error, ask, clear, stop } = useCopilot(getTranscript, responsePreferences.preferences)
   const screen = useScreenStream()
   const [input, setInput] = useState('')
-  const [mode, setMode] = useState<CopilotMode>('general')
+  const [mode, setMode] = useState<CopilotMode>(initialMode)
   const repo = useRepoInterview(getTranscript, mode === 'repoInterview')
-  const screenRepo = useScreenRepository(mode === 'repoInterview', screen.sharing, screen.grabCodeFrame)
+  const screenRepo = useScreenRepository(mode === 'repoInterview', screen.sharing, screen.grabCodeFrame, responsePreferences.preferences)
   const context = useModeContext(mode) // per-mode uploaded documents + answer instructions
   const profile = useCandidateProfile() // resume + JD: global, always-injected grounding
   const router = useOrchestrationRouter() // auto mode-routing + live web search for a question
-  const feed = useAnswerFeed()
+  const feed = useAnswerFeed(responsePreferences.preferences)
   const me = useMeContext() // opt-in mic stream: "what I said" as AI context, never in transcript
   const [showContextEditor, setShowContextEditor] = useState(false)
   const orchestrator = useOrchestrator(ask)
   const [auto, setAuto] = useState(false)
-  const [stealth, setStealth] = useState(false)
+  const [focusMode, setFocusMode] = useState(false)
+  const [showAnswerPreferences, setShowAnswerPreferences] = useState(false)
+  const [mobileSetupOpen, setMobileSetupOpen] = useState(false)
+  const [preparing, setPreparing] = useState(false)
+  const [preparingCaptured, setPreparingCaptured] = useState(false)
+  const [preparationError, setPreparationError] = useState<string | null>(null)
+  const [questionNotice, setQuestionNotice] = useState<string | null>(null)
   const [moreOpen, setMoreOpen] = useState(false) // overflow sheet for secondary controls
   const [view, setView] = useState<'chat' | 'answers'>('chat')
   const [repoRequestError, setRepoRequestError] = useState<string | null>(null)
@@ -104,6 +118,16 @@ export function CopilotPanel({
     setAutoTestTurn(orchestrator.testResult ? turns.length - 1 : null)
   }
   const scrollRef = useRef<HTMLDivElement>(null)
+  const composerRef = useRef<HTMLTextAreaElement>(null)
+  const questionRefs = useRef(new Map<number, HTMLDivElement>())
+  const submissionRef = useRef(false)
+  const capturedRequestRef = useRef<symbol | null>(null)
+  const preparationGeneration = useRef(0)
+  const composerId = useId()
+  const contextId = useId()
+  const responseId = useId()
+  const [lastSubmitted, setLastSubmitted] = useState<string | null>(null)
+  const followsAnswer = useRef(true)
   const repoAnswerBusy = useRef(false)
   const typedRepoQuestion = input.trim()
   const repoTaskTarget = typedRepoQuestion
@@ -119,12 +143,14 @@ export function CopilotPanel({
 
   const answerRepoQuestion = useCallback(async (question: string, id?: string, task: RepoTask = 'plan', automatic = false) => {
     if (repoAnswerBusy.current) return
+    const generation = preparationGeneration.current
     repoAnswerBusy.current = true
     setRepoRequestError(null)
     if (!automatic) screenRepo.setDisplayId(null)
     if (id) repo.mark(id, 'answering', question)
     try {
       const uploaded = context.count > 0 ? await context.retrieve(question) : null
+      if (generation !== preparationGeneration.current) return false
       const evidence = [
         context.instructions && `User answer preferences: ${context.instructions}`,
         uploaded && `Uploaded context: ${uploaded}`,
@@ -135,9 +161,11 @@ export function CopilotPanel({
       ].filter(Boolean).join('\n\n')
       const ok = await screenRepo.analyze(question, evidence, getTranscript(), task, id)
       if (id) repo.mark(id, ok ? 'answered' : 'failed', question)
+      return ok
     } catch (error) {
       if (id) repo.mark(id, 'failed', question)
       setRepoRequestError(error instanceof Error ? error.message : 'Could not prepare repository context. Retry this question.')
+      return false
     } finally {
       repoAnswerBusy.current = false
     }
@@ -166,10 +194,19 @@ export function CopilotPanel({
   // gate (the user explicitly asked, so answer even if the classifier is unsure).
   const answerQuestion = useCallback(
     (q: string, viaButton = false) => {
+      if (capturedRequestRef.current) return Promise.resolve()
+      const request = Symbol('captured question')
+      capturedRequestRef.current = request
+      const generation = preparationGeneration.current
+      const current = () => capturedRequestRef.current === request && generation === preparationGeneration.current
+      setPreparingCaptured(true)
+      setPreparationError(null)
       setView('answers')
       return (async () => {
+        try {
         if (mode === 'repoInterview') { await answerRepoQuestion(q); return }
         const routed = await router.route(q)
+        if (!current()) return
         if (!viaButton && routed.classification && !routed.classification.isQuestion) return
         const answerMode: CopilotMode = routed.classification?.mode ?? mode
         if (answerMode !== mode) setMode(answerMode)
@@ -183,6 +220,7 @@ export function CopilotPanel({
             : sameMode && context.count > 0
               ? await context.retrieve(q)
               : null
+        if (!current()) return
         const parts = [
           routed.webContext && `LIVE WEB RESULTS (current facts — prefer these for anything time-sensitive):\n${routed.webContext}`,
           profile.contextBlock(),
@@ -191,7 +229,16 @@ export function CopilotPanel({
         ].filter(Boolean)
         const ctx = parts.length ? parts.join('\n\n') : null
         const image = screen.sharing && usesScreen(answerMode) ? screen.grabFrame() : null
+        setPreparingCaptured(false)
         await feed.answer(q, answerMode, ctx, image, context.instructions || null, getTranscript())
+        } catch (cause) {
+          if (current()) setPreparationError(cause instanceof Error ? cause.message : 'Could not prepare this question. Try Answer last question again.')
+        } finally {
+          if (capturedRequestRef.current === request) {
+            capturedRequestRef.current = null
+            setPreparingCaptured(false)
+          }
+        }
       })()
     },
     [mode, context, profile, me, screen, router, feed, getTranscript, answerRepoQuestion],
@@ -201,7 +248,13 @@ export function CopilotPanel({
   // NOW (user controls timing instead of waiting for the auto settle). Null if none.
   const answerLatest = useCallback(() => {
     const q = latestQuestion(getTranscript())
-    if (q) void answerQuestion(q, true)
+    if (q) {
+      setQuestionNotice(null)
+      void answerQuestion(q, true)
+    } else {
+      setQuestionNotice('No question has been captured yet. Type a question below, or start listening and try again.')
+      composerRef.current?.focus()
+    }
   }, [answerQuestion, getTranscript])
 
   // Proactive: while auto is on, a settled (complete) heard question is answered
@@ -223,7 +276,7 @@ export function CopilotPanel({
   // changed since the last auto grab can still get image=null. Full fix needs a
   // force/ignore-gate option on grabFrame.
   useAutoCapture(
-    mode === 'coding' && screen.sharing && orchestrator.stage === 'idle' && !input.trim(),
+    auto && mode === 'coding' && screen.sharing && orchestrator.stage === 'idle' && !input.trim(),
     screen.grabFrame,
     (frame) => {
       if (streaming) return
@@ -232,47 +285,99 @@ export function CopilotPanel({
   )
 
   // Tear the screen stream down when the panel closes.
-  useEffect(() => () => { screen.stop(); me.stopListening() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => {
+    preparationGeneration.current += 1
+    capturedRequestRef.current = null
+    screen.stop()
+    me.stopListening()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Follow the newest tokens as the answer streams in.
   useEffect(() => {
     const el = scrollRef.current
-    if (el) el.scrollTop = el.scrollHeight
+    if (el && followsAnswer.current) el.scrollTop = el.scrollHeight
   }, [turns])
+
+  useEffect(() => {
+    const el = composerRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(240, Math.max(workspace ? 96 : 64, el.scrollHeight))}px`
+  }, [input, workspace])
 
   // Only this tab's thread — switching modes shows its own Q&A, not a shared one.
   const visibleTurns = turns.map((t, i) => ({ t, i })).filter(({ t }) => t.mode === mode)
 
   const submit = async (q: string) => {
-    if (!q.trim()) return
-    if (mode === 'repoInterview') {
-      if (screenRepo.analysis?.running) return
-      setInput('')
-      await answerRepoQuestion(q)
-      return
+    if (!q.trim() || submissionRef.current || capturedRequestRef.current || streaming || screenRepo.analysis?.running) return
+    submissionRef.current = true
+    const generation = ++preparationGeneration.current
+    setPreparing(true)
+    setPreparationError(null)
+    setQuestionNotice(null)
+    try {
+      if (mode === 'repoInterview') {
+        const answered = await answerRepoQuestion(q)
+        if (answered && generation === preparationGeneration.current) setInput((current) => current === q ? '' : current)
+        return
+      }
+      setView('chat')
+      followsAnswer.current = true
+      const image = screen.sharing && usesScreen(mode) ? screen.grabFrame() : null
+      const retrieved =
+        mode === 'behavioral' && context.storyCount > 0
+          ? await context.retrieveStories(q, 2).then((stories) => stories.length
+            ? stories.map((story) => `STORY — ${story.title}\n${story.fullText}`).join('\n\n---\n\n')
+            : null)
+          : context.count > 0 ? await context.retrieve(q) : null
+      if (generation !== preparationGeneration.current) return
+      const merged = [profile.contextBlock(), retrieved, me.getMeContext()].filter(Boolean).join('\n\n') || null
+      setLastSubmitted(q)
+      setInput((current) => current === q ? '' : current)
+      setPreparing(false)
+      await ask(q, mode, image, merged, context.instructions || null)
+    } catch (cause) {
+      if (generation === preparationGeneration.current) {
+        setPreparationError(cause instanceof Error ? cause.message : 'Could not prepare this question. Your draft is still below; try again.')
+      }
+    } finally {
+      if (generation === preparationGeneration.current) {
+        setPreparing(false)
+        submissionRef.current = false
+      }
     }
-    if (streaming) return
-    setInput('')
-    // Attach a screen frame only when sharing is on AND this mode reasons about
-    // the screen (coding / system design) — never for general/behavioral.
-    const image = screen.sharing && usesScreen(mode) ? screen.grabFrame() : null
-    // Behavioral + story book → the 2 best unspent stories for this question;
-    // otherwise per-chunk RAG from this mode's uploaded documents.
-    const retrieved =
-      mode === 'behavioral' && context.storyCount > 0
-        ? await context.retrieveStories(q, 2).then((ss) =>
-            ss.length ? ss.map((s) => `STORY — ${s.title}\n${s.fullText}`).join('\n\n---\n\n') : null,
-          )
-        : context.count > 0
-          ? await context.retrieve(q)
-          : null
-    // Always-on candidate profile (resume + JD) prepended to any retrieved chunk,
-    // so every manual answer is grounded in the candidate's real background.
-    const merged = [
-      profile.contextBlock(),
-      retrieved,
-    ].filter(Boolean).join('\n\n') || null
-    ask(q, mode, image, merged, context.instructions || null)
+  }
+
+  const stopAnswer = () => {
+    preparationGeneration.current += 1
+    submissionRef.current = false
+    capturedRequestRef.current = null
+    setPreparing(false)
+    setPreparingCaptured(false)
+    setAuto(false)
+    if (screenRepo.analysis?.running) screenRepo.stopAnalysis()
+    feed.stop()
+    orchestrator.reset()
+    stop()
+  }
+
+  const choosePrompt = (prompt: string) => {
+    setInput(prompt)
+    setView('chat')
+    composerRef.current?.focus()
+  }
+
+  const changeMode = (next: CopilotMode) => {
+    if (preparing || preparingCaptured) {
+      preparationGeneration.current += 1
+      submissionRef.current = false
+      capturedRequestRef.current = null
+      setPreparing(false)
+      setPreparingCaptured(false)
+    }
+    setMode(next)
+    setPreparationError(null)
+    setQuestionNotice(null)
   }
 
   // Post-interview review: summarize the session's questions (with auto-routed mode)
@@ -294,318 +399,166 @@ export function CopilotPanel({
     }
   }
 
+  const busy = preparing || preparingCaptured || streaming || !!screenRepo.analysis?.running || feed.entries.some((entry) => entry.streaming) || (orchestrator.stage !== 'idle' && orchestrator.stage !== 'done')
+  const contextSummary = [
+    profile.hasProfile && 'Background added',
+    context.docs.length > 0 && `${context.docs.length} document${context.docs.length === 1 ? '' : 's'}`,
+    context.instructions && 'Instructions set',
+  ].filter(Boolean).join(' · ') || 'Resume, job description and notes'
+  const questions = visibleTurns.filter(({ t }) => t.role === 'user')
+
   return (
     <aside
-      // Full-width on mobile; on ≥sm the width follows the drag-resized value
-      // (--panel-w), so the drawer is user-resizable and the preference sticks.
-      className={`copilot-panel relative flex h-full w-full flex-col overflow-hidden border-l border-black/10 bg-[color:var(--paper)] shadow-[-16px_0_40px_rgba(0,0,0,0.08)] sm:w-[var(--panel-w)]${stealth ? ' lt-stealth' : ''}`}
-      style={{ '--panel-w': `${width}px` } as CSSProperties}
+      aria-label={workspace ? 'AI Copilot workspace' : 'Assistant panel'}
+      className={`${workspace ? 'reader-surface copilot-workspace relative flex w-full min-w-0 flex-col rounded-3xl' : 'glass copilot-panel relative flex h-full w-full flex-col overflow-hidden border-l border-black/10 sm:w-[var(--panel-w)] sm:rounded-l-3xl'}${focusMode ? ' lt-stealth' : ''}`}
+      style={workspace ? undefined : { '--panel-w': `${width}px` } as CSSProperties}
     >
-      {/* Left-edge resize handle (desktop only). Drag to widen/narrow the panel.
-          A slim visible grabber marks it without changing the mouse cursor. */}
-      <div
-        onPointerDown={onResizeStart}
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize assistant panel"
-        title="Drag to resize"
-        className="absolute inset-y-0 left-0 z-10 hidden w-1.5 touch-none bg-black/10 hover:bg-emerald-700/30 sm:block"
-      />
-      {/* Header — calm + low-chrome. Only the TWO in-interview essentials stay
-          always-visible (Auto-answer, Stealth); everything set-up-once (Mic, Screen,
-          Lock, Clear) lives in the ⋯ overflow sheet. Fewer competing targets = less
-          to scan under interview stress. Active secondary controls surface a small
-          dot on the ⋯ so nothing "on" is hidden. */}
-      <header className="relative flex items-center gap-2 border-b border-black/10 px-4 py-3">
-        <Sparkles size={16} className="shrink-0 text-[color:var(--signal)]" />
-        <span className="text-sm font-semibold tracking-[-0.01em]">Interview Copilot</span>
+      {!workspace && onResizeStart && <div onPointerDown={onResizeStart} role="separator" aria-orientation="vertical" aria-label="Resize assistant panel" title="Drag to resize"
+        className="absolute inset-y-0 left-0 z-10 hidden w-1.5 touch-none bg-black/10 hover:bg-emerald-700/30 sm:block" />}
+      <header className="relative flex flex-wrap items-center gap-2 border-b border-black/10 px-4 py-3">
+        <Sparkles size={16} aria-hidden className="shrink-0 text-[color:var(--signal)]" />
+        <span className="font-[family-name:var(--font-serif)] text-base font-semibold">{workspace ? 'Questions & answers' : 'Ask'}</span>
         <div className="ml-auto flex items-center gap-1">
-          {/* 1 — Auto-answer: the primary live control. */}
-          <div
-            data-active={auto}
-            title={auto ? 'Auto-answer is ON — questions heard are answered automatically' : 'Auto-answer questions from the meeting'}
-            className="flex items-center gap-1.5 rounded-full px-2 py-1.5 text-xs font-medium text-ink/70 data-[active=true]:text-emerald-800"
-          >
-            Auto
-            <LeverSwitch checked={auto} onChange={setAuto} label="Auto-answer questions" />
+          <div data-active={auto} title="Answer captured questions automatically. Listening and screen sharing are controlled separately."
+            className="flex min-h-11 items-center gap-1.5 rounded-full px-2 text-xs font-medium text-black/70 data-[active=true]:text-emerald-800">
+            Auto <LeverSwitch checked={auto} onChange={setAuto} label="Auto-answer questions" />
           </div>
-          {/* 2 — Stealth: the safety toggle you hit when sharing screen. Solid ink
-              contrast in both states so the icon is never faint on the translucent
-              panel (was text-black/50 → near-invisible; active white-on-white). */}
-          <div
-            title={stealth ? 'Stealth on — dim, monochrome, motionless. Flip to return to normal.' : 'Stealth reading mode — dim + motionless for a shared screen'}
-            className="flex items-center gap-1.5 rounded-full px-2 py-1.5 text-ink/70"
-          >
-            {stealth ? <EyeOff size={16} strokeWidth={2} /> : <Eye size={16} strokeWidth={2} />}
-            <LeverSwitch checked={stealth} onChange={setStealth} label="Stealth reading mode" />
+          <div title="Focus changes contrast and motion. It does not hide the app from screen sharing or monitoring."
+            className="flex min-h-11 items-center gap-1.5 rounded-full px-2 text-xs text-black/70">
+            {focusMode ? <EyeOff size={15} aria-hidden /> : <Eye size={15} aria-hidden />}
+            <span className={workspace ? 'hidden sm:inline' : 'sr-only'}>Focus</span>
+            <LeverSwitch checked={focusMode} onChange={setFocusMode} label="Focus reading mode" />
           </div>
-          {/* 3 — overflow: Mic, Screen, Lock, Clear. A dot marks any active one. */}
-          <button
-            onClick={() => setMoreOpen((v) => !v)}
-            data-active={moreOpen}
-            aria-label="More controls"
-            aria-expanded={moreOpen}
-            className="relative flex h-9 w-9 items-center justify-center rounded-full text-ink/70 transition-[background-color,color] duration-100 hover:bg-black/[0.06] data-[active=true]:bg-black/10"
-          >
-            <MoreHorizontal size={18} strokeWidth={2} />
-            {(me.listening || screen.sharing) && !moreOpen && (
-              <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-emerald-700 ring-1 ring-white" aria-hidden />
-            )}
+          <button type="button" onClick={() => setMoreOpen((value) => !value)} data-active={moreOpen} aria-label="More controls" aria-expanded={moreOpen}
+            className="relative flex h-11 w-11 items-center justify-center rounded-full text-black/70 hover:bg-black/[0.06] data-[active=true]:bg-black/10">
+            <MoreHorizontal size={18} aria-hidden />
+            {(me.listening || screen.sharing) && !moreOpen && <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-emerald-700" aria-hidden />}
           </button>
-          {/* Close — always reachable. */}
-          <button
-            onClick={onClose}
-            aria-label="Close assistant"
-            className="flex h-9 w-9 items-center justify-center rounded-full text-black/40 hover:bg-black/5"
-          >
-            <X size={16} />
-          </button>
+          {!workspace && onClose && <button type="button" onClick={onClose} aria-label="Close assistant" className="flex h-11 w-11 items-center justify-center rounded-full text-black/50 hover:bg-black/5"><X size={16} aria-hidden /></button>}
         </div>
-
-        {/* Overflow sheet — anchored under the ⋯. Secondary controls, roomy targets,
-            each with a label so nothing is a mystery glyph. */}
-        {moreOpen && (
-          <>
-            {/* click-away scrim */}
-            <button className="fixed inset-0 z-20 cursor-default" aria-hidden tabIndex={-1} onClick={() => setMoreOpen(false)} />
-            {/* Solid surface (NOT the translucent --panel-bg) so the menu + its
-                icons read cleanly over whatever's behind the panel. */}
-            <div className="absolute right-3 top-full z-30 mt-1 w-52 overflow-hidden rounded-2xl border border-black/10 bg-white p-1 shadow-xl">
-              <SheetItem
-                active={me.listening}
-                toggle
-                icon={me.listening ? <Mic size={15} /> : <MicOff size={15} />}
-                label={me.listening ? 'Mic on (your voice → AI)' : 'Add your voice as context'}
-                onClick={() => (me.listening ? me.stopListening() : me.startListening())}
-              />
-              <SheetItem
-                active={screen.sharing}
-                toggle
-                icon={screen.sharing ? <Monitor size={15} /> : <MonitorOff size={15} />}
-                label={screen.sharing ? 'Sharing your screen' : 'Let the AI see your screen'}
-                onClick={() => (screen.sharing ? screen.stop() : screen.start())}
-              />
-              {lockMode.available && !lockMode.locked && (
-                <SheetItem
-                  active={false}
-                  icon={<Lock size={15} />}
-                  label="Lock (click-through)"
-                  onClick={() => { lockMode.enable(); setMoreOpen(false) }}
-                />
-              )}
-              {turns.length > 0 && (
-                <SheetItem
-                  active={false}
-                  icon={<X size={15} />}
-                  label="Clear this chat"
-                  onClick={() => { clear(); setMoreOpen(false) }}
-                />
-              )}
-              {/* Compact name presets share the canonical Settings preference. */}
-              {identity.available && (
-                <div className="mt-1 border-t border-black/10 px-3 py-2">
-                  <label htmlFor="copilot-app-name" className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-black/45">
-                    App name
-                  </label>
-                  <select
-                    id="copilot-app-name"
-                    value={identity.current}
-                    onChange={(e) => identity.setIdentity(e.target.value)}
-                    className="mt-1 w-full rounded-lg border border-black/15 bg-white px-2 py-1.5 text-xs text-ink outline-none focus:border-emerald-700"
-                  >
-                    {identity.presets.map((p) => (
-                      <option key={p.id} value={p.id}>{p.label}</option>
-                    ))}
-                  </select>
-                  <p className="mt-1 text-[10px] leading-tight text-black/40">
-                    Updates the header and window title. Choose a custom name and icon in Settings.
-                  </p>
-                </div>
-              )}
-            </div>
-          </>
-        )}
+        {moreOpen && <>
+          <button type="button" className="fixed inset-0 z-20 cursor-default" aria-hidden tabIndex={-1} onClick={() => setMoreOpen(false)} />
+          <div className="absolute right-3 top-full z-30 mt-1 w-64 max-w-[calc(100vw-2rem)] rounded-2xl border border-black/10 bg-white p-1 shadow-xl" onKeyDown={(event) => { if (event.key === 'Escape') setMoreOpen(false) }}>
+            <SheetItem active={me.listening} toggle icon={me.listening ? <Mic size={15} /> : <MicOff size={15} />}
+              label={me.listening ? 'Stop your voice context' : 'Add your voice as context'} onClick={() => me.listening ? me.stopListening() : me.startListening()} />
+            <SheetItem active={screen.sharing} toggle icon={screen.sharing ? <Monitor size={15} /> : <MonitorOff size={15} />}
+              label={screen.sharing ? 'Stop sharing screen with AI' : 'Share screen with AI'} onClick={() => screen.sharing ? screen.stop() : screen.start()} />
+            {lockMode.available && !lockMode.locked && <SheetItem active={false} icon={<Lock size={15} />} label="Lock (click-through)" onClick={() => { lockMode.enable(); setMoreOpen(false) }} />}
+            {turns.length > 0 && <SheetItem active={false} icon={<X size={15} />} label="Clear all chat modes" onClick={() => { clear(); setMoreOpen(false) }} />}
+            {identity.available && <div className="mt-1 border-t border-black/10 px-3 py-2">
+              <label htmlFor={`${composerId}-app-name`} className="text-xs font-medium text-black/60">App name</label>
+              <select id={`${composerId}-app-name`} value={identity.current} onChange={(event) => identity.setIdentity(event.target.value)} className="mt-1 min-h-11 w-full rounded-lg border border-black/15 bg-white px-2 py-2 text-xs text-ink">
+                {identity.presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}
+              </select>
+              <p className="mt-1 text-[11px] leading-relaxed text-black/50">Updates the header and window title. Custom name and icon are in Settings.</p>
+            </div>}
+            <p className="border-t border-black/10 px-3 py-2 text-[11px] leading-relaxed text-black/55">Focus and appearance settings change how the app looks. They do not guarantee invisibility to recording or monitoring.</p>
+          </div>
+        </>}
       </header>
+      {focusMode && <p className="border-b border-black/10 px-4 py-2 text-xs text-black/55">Focus mode reduces motion and changes contrast. It does not hide this window.</p>}
+      {workspace && <button type="button" onClick={() => setMobileSetupOpen((value) => !value)} aria-expanded={mobileSetupOpen} aria-controls={`${responseId}-setup`}
+        className="flex min-h-12 items-center gap-2 border-b border-black/10 px-4 text-left text-sm text-black/70 hover:bg-black/5 lg:hidden">
+        <SlidersHorizontal size={16} aria-hidden /><span>{MODE_PROFILES[mode].label} · {responsePreferences.preferences.format}</span><ChevronDown size={15} aria-hidden className={`ml-auto ${mobileSetupOpen ? 'rotate-180' : ''}`} />
+      </button>}
 
-      {/* Mode selector — per-domain answer styling (coding / system design /
-          behavioral) on the same transcript grounding. */}
-      <div className="flex gap-1 overflow-x-auto border-b border-black/[0.07] px-3 py-2">
-        {MODE_ORDER.map((m) => (
-          <button
-            key={m}
-            onClick={() => setMode(m)}
-            data-active={mode === m}
-            title={MODE_PROFILES[m].hint}
-            className="shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-medium text-black/50 transition-colors hover:bg-black/5 data-[active=true]:bg-black/[0.07] data-[active=true]:text-ink"
-          >
-            {MODE_PROFILES[m].label}
-          </button>
-        ))}
-      </div>
-
-      {/* Chat vs Answers: the Answers feed holds auto-generated Q&A (proactive),
-          paged prev/next — a separate view from the chat thread. */}
-      {mode !== 'repoInterview' && <div className="flex items-center gap-1 border-b border-black/10 px-3 py-1.5 text-xs">
-        <button
-          onClick={() => setView('chat')}
-          data-active={view === 'chat'}
-          className="rounded-full px-2.5 py-1 text-black/55 data-[active=true]:bg-ink data-[active=true]:text-white"
-        >
-          Chat
-        </button>
-        <button
-          onClick={() => setView('answers')}
-          data-active={view === 'answers'}
-          className="rounded-full px-2.5 py-1 text-black/55 data-[active=true]:bg-ink data-[active=true]:text-white"
-        >
-          Answers{feed.count > 0 ? ` (${feed.count})` : ''}
-        </button>
-      </div>}
-
-      {/* Context — upload documents + set instructions for how THIS mode's chat
-          should answer. Separate per mode (coding/system design/behavioral/general
-          each keep their own); chunked, embedded, and stored on this device. */}
-      <div className="panel-section px-4 py-2">
-        <div className="flex items-center gap-2 text-xs">
-          <span className="text-black/55">
-            {context.storyCount > 0
-              ? `Story bank: ${context.storyCount} stories${context.instructions ? ' · instructions set' : ''}`
-              : context.docs.length > 0 || context.instructions
-                ? `Context: ${context.docs.length} doc${context.docs.length === 1 ? '' : 's'}${context.instructions ? ' · instructions set' : ''}`
-                : 'No context yet — answers stay generic'}
-          </span>
-          {/* New round: re-arm every story so the next questions can reuse the bank
-              from scratch (stories are spent-once within a round). */}
-          {context.storyCount > 0 && (
-            <button
-              onClick={context.resetSpent}
-              title="Start a fresh round — all stories become available again"
-              className="rounded-full px-2 py-0.5 text-emerald-800 hover:bg-emerald-700/10"
-            >
-              New round
+      <div className={workspace ? 'grid min-w-0 lg:grid-cols-[17rem_minmax(0,1fr)]' : 'contents'}>
+        <div id={`${responseId}-setup`} className={workspace ? `${mobileSetupOpen ? 'block' : 'hidden'} border-b border-black/10 lg:block lg:border-b-0 lg:border-r` : 'contents'}>
+          {workspace ? <WorkspaceModeNavigation mode={mode} onChange={changeMode} /> : <div aria-label="Interview focus" className="flex gap-1 overflow-x-auto border-b border-black/10 px-3 py-2">
+            {MODE_ORDER.map((item) => <button key={item} type="button" onClick={() => changeMode(item)} aria-pressed={mode === item} data-active={mode === item} title={MODE_PROFILES[item].hint}
+              className="min-h-11 shrink-0 rounded-full px-3 text-xs text-black/55 hover:bg-black/5 data-[active=true]:bg-ink data-[active=true]:text-white">{MODE_PROFILES[item].label}</button>)}
+          </div>}
+          {workspace ? <div className="border-t border-black/10"><ResponsePreferencesControls {...responsePreferences} /></div> : <div className="border-b border-black/10 px-4 py-1">
+            <button type="button" onClick={() => setShowAnswerPreferences((value) => !value)} aria-expanded={showAnswerPreferences} aria-controls={responseId} className="flex min-h-11 w-full items-center gap-2 text-xs text-black/60 hover:text-ink">
+              <SlidersHorizontal size={14} aria-hidden />Answer style <span className="ml-auto capitalize">{responsePreferences.preferences.format}</span><ChevronDown size={13} aria-hidden />
             </button>
-          )}
-          <button
-            onClick={() => setShowContextEditor((v) => !v)}
-            className="ml-auto rounded-full px-2 py-0.5 text-emerald-800 hover:bg-emerald-700/10"
-          >
-            {showContextEditor ? 'Hide' : context.docs.length > 0 || context.instructions ? 'Edit' : 'Add context'}
-          </button>
-          {(context.docs.length > 0 || context.instructions) && (
-            <button onClick={context.clear} className="rounded-full px-2 py-0.5 text-black/45 hover:bg-black/5">
-              Clear
+            {showAnswerPreferences && <div id={responseId}><ResponsePreferencesControls {...responsePreferences} compact /></div>}
+          </div>}
+          <div className={workspace ? 'border-t border-black/10 px-4 py-4' : 'panel-section px-4 py-2'}>
+            <button type="button" onClick={() => setShowContextEditor((value) => !value)} aria-expanded={showContextEditor} aria-controls={contextId}
+              className="flex min-h-11 w-full items-center gap-2 rounded-xl text-left text-sm font-medium text-ink hover:text-[color:var(--signal)]">
+              <FileText size={16} aria-hidden />{showContextEditor ? 'Close context' : 'Your context'}<ChevronDown size={14} aria-hidden className={`ml-auto ${showContextEditor ? 'rotate-180' : ''}`} />
             </button>
-          )}
-        </div>
-        {showContextEditor && <ContextEditor context={context} profile={profile} />}
-      </div>
-
-      {mode === 'repoInterview' && <div className="max-h-[50%] shrink-0 overflow-y-auto">
-        <ScreenRepositoryControls repo={screenRepo} sharing={screen.sharing} startSharing={screen.start}
-          question={repoTaskQuestion}
-          onAnalyze={(task) => void answerRepoQuestion(repoTaskQuestion, repoTaskTarget.questionId, task)} />
-        <RepoInterviewPanel repo={repo} answering={!!screenRepo.analysis?.running} onSelect={screenRepo.showQuestion} onAnswer={(question, id) => void answerRepoQuestion(question, id)} />
-        {repoRequestError && <p role="alert" className="border-b border-black/10 px-4 py-2 text-xs text-[color:var(--stop)]">{repoRequestError}</p>}
-      </div>}
-
-      {/* Sharing remains visible, including the repository watch schedule. */}
-      {screen.sharing && (
-        <div className="flex items-center gap-2 border-b border-emerald-700/15 bg-emerald-700/5 px-4 py-1.5 text-xs text-emerald-800">
-          <span className="live-dot" aria-hidden />
-          {mode === 'repoInterview' ? (screenRepo.watching ? 'IDE capture active — changed views sent every 8 seconds.' : 'IDE shared — use Capture code to read a view.') : 'Screen shared with the assistant.'}
-        </div>
-      )}
-      {screen.error && <p className="border-b border-black/10 px-4 py-1.5 text-xs text-[color:var(--stop)]">{screen.error}</p>}
-
-      {/* Orchestrator pipeline status (coding mode only) */}
-      {mode === 'coding' && orchestrator.stage !== 'idle' && orchestrator.stage !== 'done' && (
-        <OrchestratorStatus stage={orchestrator.stage} />
-      )}
-      {mode === 'coding' && orchestrator.problem && (
-        <ExtractedProblemBar problem={orchestrator.problem} onDismiss={orchestrator.reset} />
-      )}
-      {mode === 'coding' && orchestrator.error && (
-        <p className="border-b border-black/10 px-4 py-1.5 text-xs text-[color:var(--stop)]">{orchestrator.error}</p>
-      )}
-
-      {mode === 'repoInterview' ? <RepoAnalysisView repo={screenRepo} onRetry={(question, task, questionId) => void answerRepoQuestion(
-        question,
-        questionId,
-        task,
-      )} /> : view === 'answers' ? (
-        <AnswersView feed={feed} auto={auto} review={review} onReview={runReview} onAnswerLatest={answerLatest} />
-      ) : (
-      <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4">
-        {visibleTurns.length === 0 && !error && (
-          <div className="pt-6 text-center">
-            <p className="font-[family-name:var(--font-serif)] text-lg text-black/40">
-              Ask anything about what&rsquo;s being said.
-            </p>
-            <div className="mt-4 flex flex-col gap-2">
-              {QUICK_ACTIONS.map((a) => (
-                <button
-                  key={a}
-                  onClick={() => submit(a)}
-                  className="glass glass-interactive rounded-full px-3 py-2 text-sm text-black/70 hover:text-ink"
-                >
-                  {a}
-                </button>
-              ))}
-            </div>
+            <p className="text-xs leading-relaxed text-black/55">{contextSummary}</p>
+            {context.storyCount > 0 && <div className="mt-2 flex items-center gap-2 text-xs text-black/55"><span>{context.storyCount} stories</span><button type="button" onClick={context.resetSpent} className="min-h-11 px-2 text-emerald-800 hover:underline">New round</button></div>}
           </div>
-        )}
+          {workspace && questions.length > 0 && <section aria-label="Recent questions" className="border-t border-black/10 px-4 py-4">
+            <h2 className="text-xs font-semibold text-ink">Recent questions <span className="font-normal text-black/50">({questions.length})</span></h2>
+            <ol className="mt-2 space-y-1">{questions.slice(-8).map(({ t, i }) => <li key={i}><button type="button" onClick={() => {
+              setView('chat'); requestAnimationFrame(() => questionRefs.current.get(i)?.scrollIntoView({ block: 'center' }))
+            }} className="min-h-11 w-full rounded-lg px-2 py-2 text-left text-xs leading-relaxed text-black/60 hover:bg-black/5">{t.content.length > 110 ? `${t.content.slice(0, 110)}…` : t.content}</button></li>)}</ol>
+            {questions.length > 8 && <p className="mt-2 text-[11px] text-black/50">Latest 8 shown. Earlier questions remain in the conversation.</p>}
+          </section>}
+        </div>
 
-        {visibleTurns.map(({ t, i }) =>
-          t.role === 'user' ? (
-            <div key={i} className="flex justify-end">
-              <div className="max-w-[85%] rounded-2xl rounded-tr-md bg-ink px-3.5 py-2 text-sm text-white">
-                {t.content}
-              </div>
+        <div className={workspace ? 'flex min-w-0 flex-col' : 'contents'}>
+          {mode !== 'repoInterview' && <div className="flex flex-wrap items-center gap-1 border-b border-black/10 px-4 py-2 text-xs">
+            <button type="button" onClick={() => setView('chat')} aria-pressed={view === 'chat'} data-active={view === 'chat'} className="min-h-11 rounded-full px-3 text-black/60 hover:bg-black/5 data-[active=true]:bg-ink data-[active=true]:text-white">{workspace ? 'Conversation' : 'Chat'}</button>
+            <button type="button" onClick={() => setView('answers')} aria-pressed={view === 'answers'} data-active={view === 'answers'} className="min-h-11 rounded-full px-3 text-black/60 hover:bg-black/5 data-[active=true]:bg-ink data-[active=true]:text-white">{workspace ? 'Captured questions' : 'Answers'}{feed.count > 0 ? ` (${feed.count})` : ''}</button>
+            {workspace && usesScreen(mode) && <button type="button" onClick={() => screen.sharing ? screen.stop() : screen.start()} className="ml-auto flex min-h-11 items-center gap-1.5 rounded-full px-3 text-emerald-800 hover:bg-emerald-700/10"><Monitor size={14} aria-hidden />{screen.sharing ? 'Stop sharing' : 'Share screen'}</button>}
+          </div>}
+          {showContextEditor && <section id={contextId} aria-label="Your context" className={`border-b border-black/10 px-4 py-4 ${workspace ? 'sm:px-6' : 'max-h-[45%] shrink-0 overflow-y-auto'}`}>
+            <div className="mx-auto max-w-3xl">
+              <div className="mb-3 flex items-center gap-2"><h2 className="font-[family-name:var(--font-serif)] text-lg">Your context</h2><button type="button" onClick={() => setShowContextEditor(false)} aria-label="Close context editor" className="ml-auto flex h-11 w-11 items-center justify-center rounded-full text-black/50 hover:bg-black/5"><X size={16} aria-hidden /></button></div>
+              <p className="mb-4 text-xs leading-relaxed text-black/55">Background and documents are saved on this device. Relevant context is sent to the AI when you ask a question.</p>
+              <ContextEditor key={mode} context={context} profile={profile} />
+              {(context.docs.length > 0 || context.instructions) && <button type="button" onClick={context.clear} className="mt-4 min-h-11 text-xs text-black/55 hover:text-[color:var(--stop)]">Clear {MODE_PROFILES[mode].label.toLowerCase()} documents and instructions</button>}
             </div>
-          ) : (
-            <AssistantTurn
-              key={i}
-              content={t.content}
-              streaming={streaming && i === turns.length - 1}
-              // Auto-run the tests once a TYPED coding answer finishes (local
-              // languages only — remote code egresses, so that stays click-to-run).
-              // This closes the gap where only the screen-capture path self-verified.
-              autoRun={mode === 'coding' && i === turns.length - 1}
-              autoTestResult={
-                mode === 'coding' && i === autoTestTurn && orchestrator.testResult
-                  ? orchestrator.testResult
-                  : undefined
-              }
-            />
-          ),
-        )}
+          </section>}
+          {mode === 'repoInterview' && <div className={workspace ? 'shrink-0' : 'max-h-[50%] shrink-0 overflow-y-auto'}>
+            <ScreenRepositoryControls repo={screenRepo} sharing={screen.sharing} startSharing={screen.start} question={repoTaskQuestion}
+              onAnalyze={(task) => void answerRepoQuestion(repoTaskQuestion, repoTaskTarget.questionId, task)} />
+            <RepoInterviewPanel repo={repo} answering={!!screenRepo.analysis?.running} onSelect={screenRepo.showQuestion} onAnswer={(question, id) => void answerRepoQuestion(question, id)} />
+            {repoRequestError && <p role="alert" className="border-b border-black/10 px-4 py-2 text-xs text-[color:var(--stop)]">{repoRequestError}</p>}
+          </div>}
+          {screen.sharing && <div role="status" className="flex flex-wrap items-center gap-2 border-b border-emerald-700/15 bg-emerald-700/5 px-4 py-2 text-xs text-emerald-800">
+            <Monitor size={14} aria-hidden /><span className="flex-1">{mode === 'repoInterview' ? (screenRepo.watching ? 'IDE capture active. Changed views sent every 8 seconds.' : 'IDE shared. Use Capture code to read a view.') : auto && mode === 'coding' ? 'Screen shared. Changed coding problems are analyzed automatically.' : 'Screen shared with AI. Captured when you ask in Coding or System design.'}</span>
+            <button type="button" onClick={screen.stop} className="min-h-11 rounded-full px-2 font-medium hover:bg-emerald-700/10">Stop sharing</button>
+          </div>}
+          {screen.error && <p role="alert" className="px-4 py-2 text-xs text-[color:var(--stop)]">{screen.error}</p>}
+          {mode === 'coding' && orchestrator.stage !== 'idle' && orchestrator.stage !== 'done' && <OrchestratorStatus stage={orchestrator.stage} />}
+          {mode === 'coding' && orchestrator.problem && <ExtractedProblemBar problem={orchestrator.problem} onDismiss={orchestrator.reset} />}
+          {mode === 'coding' && orchestrator.error && <p role="alert" className="px-4 py-2 text-xs text-[color:var(--stop)]">{orchestrator.error}</p>}
 
-        {error && <p className="text-sm text-[color:var(--stop)]">{error}</p>}
+          {mode === 'repoInterview' ? <RepoAnalysisView repo={screenRepo} onRetry={(question, task, questionId) => void answerRepoQuestion(question, questionId, task)} /> : view === 'answers' ?
+            <AnswersView feed={feed} auto={auto} review={review} onReview={runReview} onAnswerLatest={answerLatest} /> :
+            <div ref={scrollRef} onScroll={(event) => { const el = event.currentTarget; followsAnswer.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80 }}
+              className={workspace ? 'min-h-80 flex-1 px-4 py-4 sm:px-7' : 'min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4'}>
+              <div className={workspace ? 'mx-auto max-w-3xl space-y-6' : 'space-y-4'}>
+                {visibleTurns.length === 0 && !error && (workspace ? <WorkspaceEmptyState mode={mode} onChoose={choosePrompt} onAddContext={() => setShowContextEditor(true)} /> : <div className="pt-6 text-center">
+                  <p className="font-[family-name:var(--font-serif)] text-lg text-black/50">Ask a question, or use the live transcript.</p>
+                  <div className="mt-4 flex flex-col gap-2">{QUICK_ACTIONS.map((action) => <button key={action} type="button" onClick={() => choosePrompt(action)} className="glass glass-interactive min-h-11 rounded-full px-3 py-2 text-sm text-black/70 hover:text-ink">{action}</button>)}</div>
+                </div>)}
+                {visibleTurns.map(({ t, i }) => t.role === 'user' ? <div key={i} ref={(node) => { if (node) questionRefs.current.set(i, node); else questionRefs.current.delete(i) }} className={workspace ? 'border-b border-black/10 pb-4 pt-3' : 'flex justify-end'}>
+                  {workspace && <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-[color:var(--signal)]">Your question</p>}
+                  <div className={workspace ? 'whitespace-pre-wrap break-words text-base font-medium leading-relaxed text-ink' : 'max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-tr-md bg-ink px-3.5 py-2 text-sm text-white'}>{t.content}</div>
+                </div> : <AssistantTurn key={i} content={t.content} streaming={streaming && i === turns.length - 1} autoRun={mode === 'coding' && i === turns.length - 1}
+                  autoTestResult={mode === 'coding' && i === autoTestTurn && orchestrator.testResult ? orchestrator.testResult : undefined} />)}
+                {error && <div role="alert" className="rounded-xl border border-[color:var(--stop)]/20 px-4 py-3 text-sm text-[color:var(--stop)]"><p>{error}</p>{lastSubmitted && <button type="button" disabled={busy} onClick={() => choosePrompt(lastSubmitted)} className="mt-2 min-h-11 underline underline-offset-4 disabled:opacity-50">Restore question to retry</button>}</div>}
+              </div>
+            </div>}
+
+          <form noValidate onSubmit={(event) => { event.preventDefault(); void submit(input) }} className={`border-t border-black/10 ${workspace ? 'px-4 py-4 sm:px-7' : 'p-3'}`}>
+            <div className={workspace ? 'mx-auto max-w-3xl' : ''}>
+              {questionNotice && <p role="status" className="mb-2 text-xs leading-relaxed text-black/60">{questionNotice}</p>}
+              {preparationError && <p id={`${composerId}-error`} role="alert" className="mb-2 text-xs text-[color:var(--stop)]">{preparationError}</p>}
+              <label htmlFor={composerId} className="mb-2 block text-xs font-semibold text-ink">{mode === 'repoInterview' ? 'Repository question' : 'Your question'}</label>
+              <div className="rounded-2xl border border-black/15 bg-white/70 p-2 focus-within:border-emerald-700/50">
+                <textarea ref={composerRef} id={composerId} value={input} onChange={(event) => setInput(event.target.value)} rows={workspace ? 4 : 2}
+                  aria-describedby={`${composerId}-help${preparationError ? ` ${composerId}-error` : ''}`} aria-invalid={!!preparationError}
+                  onKeyDown={(event) => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.nativeEvent.isComposing) { event.preventDefault(); void submit(input) } }}
+                  placeholder={workspace && mode === 'general' ? 'Type a question, paste code, or describe what you want to understand…' : `${MODE_PROFILES[mode].hint}…`}
+                  className="block min-h-16 w-full resize-none border-0 bg-transparent px-2 py-1.5 text-sm leading-relaxed text-ink outline-none" />
+                <div className="flex flex-wrap items-center gap-2 px-1 pt-1">
+                  <p id={`${composerId}-help`} className="min-w-0 flex-1 text-[11px] leading-relaxed text-black/50">{preparing || preparingCaptured ? 'Preparing context…' : streaming ? 'Generating answer…' : 'Enter for a new line · Ctrl / ⌘ + Enter to send'}</p>
+                  {busy ? <button type="button" onClick={stopAnswer} className="btn-ghost flex min-h-11 items-center gap-2 px-3 text-xs"><Square size={13} aria-hidden />Stop generating</button> : <button type="submit" disabled={!input.trim()} aria-label="Send question" className="btn-signal flex min-h-11 min-w-11 items-center justify-center gap-2 px-4 text-sm disabled:opacity-40"><Send size={15} aria-hidden /><span className={workspace ? '' : 'sr-only'}>Ask AI</span></button>}
+                </div>
+              </div>
+              {workspace && <p className="mt-2 text-[11px] leading-relaxed text-black/50">Answers use your question and any context you provide. Check suggestions against the original code and your own experience.</p>}
+            </div>
+          </form>
+        </div>
       </div>
-      )}
-
-      <form
-        onSubmit={(e) => {
-          e.preventDefault()
-          submit(input)
-        }}
-        className="flex items-center gap-2 border-t border-black/10 p-3"
-      >
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder={MODE_PROFILES[mode].hint + '…'}
-          className="min-w-0 flex-1 rounded-full border border-black/15 bg-white/70 px-4 py-2.5 text-sm outline-none focus:border-emerald-700"
-        />
-        <button
-          type="submit"
-          disabled={!input.trim() || (mode === 'repoInterview' ? !!screenRepo.analysis?.running : streaming)}
-          aria-label="Send"
-          className="btn-signal flex h-11 w-11 shrink-0 items-center justify-center p-0 disabled:opacity-40"
-        >
-          <Send size={16} />
-        </button>
-      </form>
     </aside>
   )
 }
@@ -627,6 +580,7 @@ function ContextEditor({
   // Documents list collapses so a long list of uploads doesn't push the composer
   // off-screen. Default open only when there's nothing yet (nudge to add).
   const [docsOpen, setDocsOpen] = useState(true)
+  const fieldId = useId()
 
   // Keep external changes (mode switches / Clear) in sync without an Effect that
   // synchronously sets state. A user's unsaved draft remains intact because the
@@ -659,7 +613,7 @@ function ContextEditor({
       {/* Resume + JD — GLOBAL, always-injected grounding (all modes). Set once. */}
       <div>
         <div className="flex items-center gap-2">
-          <label className="text-[11px] font-medium uppercase tracking-wide text-black/40">
+          <label htmlFor={`${fieldId}-resume`} className="text-[11px] font-medium uppercase tracking-wide text-black/40">
             Your background <span className="normal-case text-black/30">· grounds every mode</span>
           </label>
           {profile.hasProfile && (
@@ -669,31 +623,36 @@ function ContextEditor({
           )}
         </div>
         <textarea
+          id={`${fieldId}-resume`}
+          aria-label="Resume and background"
           value={profile.resume}
           onChange={(e) => profile.setResume(e.target.value)}
           rows={3}
           placeholder="Paste your resume — the AI grounds behavioral stories, coding language, and design domain in your real background…"
-          className="mt-1 w-full rounded-lg border border-black/15 bg-white/80 p-2 text-xs outline-none focus:border-emerald-700"
+          className="mt-1 w-full resize-none rounded-lg border border-black/15 bg-white/80 p-2 text-sm outline-none focus:border-emerald-700"
         />
+        <label htmlFor={`${fieldId}-jd`} className="mt-3 block text-[11px] font-medium uppercase tracking-wide text-black/50">Job description</label>
         <textarea
+          id={`${fieldId}-jd`}
           value={profile.jd}
           onChange={(e) => profile.setJd(e.target.value)}
           rows={2}
           placeholder="…and paste the job description (optional) to tune answers to the role."
-          className="mt-1.5 w-full rounded-lg border border-black/15 bg-white/80 p-2 text-xs outline-none focus:border-emerald-700"
+          className="mt-1.5 w-full resize-none rounded-lg border border-black/15 bg-white/80 p-2 text-sm outline-none focus:border-emerald-700"
         />
         {profile.savedNote && <p className="mt-1 text-[11px] text-[color:var(--stop)]">{profile.savedNote}</p>}
       </div>
 
       <div>
-        <label className="text-[11px] font-medium uppercase tracking-wide text-black/40">Instructions</label>
+        <label htmlFor={`${fieldId}-instructions`} className="text-[11px] font-medium uppercase tracking-wide text-black/40">Instructions</label>
         <textarea
+          id={`${fieldId}-instructions`}
           value={instructionsDraft}
           onChange={(e) => setInstructionsDraft(e.target.value)}
           onBlur={saveInstructions}
           rows={3}
           placeholder="How should this chat answer? e.g. &quot;Cite the section number&quot;, &quot;Keep answers under 3 sentences&quot;…"
-          className="mt-1 w-full rounded-lg border border-black/15 bg-white/80 p-2 text-xs outline-none focus:border-emerald-700"
+          className="mt-1 w-full resize-none rounded-lg border border-black/15 bg-white/80 p-2 text-sm outline-none focus:border-emerald-700"
         />
         {/* Explicit Save (autosave on blur still runs) so it's clear the
             instructions are stored, and mobile/keyboard users have a real control. */}
@@ -757,6 +716,7 @@ function ContextEditor({
           <input
             ref={fileInputRef}
             type="file"
+            aria-label="Upload context documents"
             accept=".txt,.md,.html,.htm,text/plain,text/markdown,text/html"
             multiple
             onChange={(e) => onFiles(e.target.files)}
@@ -765,12 +725,14 @@ function ContextEditor({
           <span className="text-[11px] text-black/40">.txt / .md / .html story book · stored on this device</span>
         </div>
         <div className="mt-2">
+          <label htmlFor={`${fieldId}-paste`} className="mb-1 block text-xs font-medium text-black/60">Paste a document</label>
           <textarea
+            id={`${fieldId}-paste`}
             value={pasteText}
             onChange={(e) => setPasteText(e.target.value)}
             rows={3}
             placeholder="…or paste text to add as a document"
-            className="w-full rounded-lg border border-black/15 bg-white/80 p-2 text-xs outline-none focus:border-emerald-700"
+            className="w-full resize-none rounded-lg border border-black/15 bg-white/80 p-2 text-sm outline-none focus:border-emerald-700"
           />
           <button
             onClick={addPaste}
@@ -913,7 +875,7 @@ function AnswersView({
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-4 overflow-y-auto px-4 py-8 text-center">
         <p className="font-[family-name:var(--font-serif)] text-lg text-black/40">
-          {auto ? 'Listening… answers to questions will appear here.' : 'Turn on Auto to auto-answer questions — or answer the last question now.'}
+          {auto ? 'Auto is ready. Questions from your transcript will appear here when you start listening.' : 'Captured questions appear here. Start listening, then answer a question manually or turn on Auto.'}
         </p>
         {/* Manual Answer: answer the latest heard question on demand, without waiting
             for the auto settle (or with Auto off entirely). */}
@@ -1010,7 +972,7 @@ function AnswersView({
           </p>
         )}
         {e?.failed && !e.streaming && (
-          <p className="text-xs text-[color:var(--stop)]">Couldn&rsquo;t reach the assistant after several tries. Tap Retry above.</p>
+          <p role="alert" className="text-xs text-[color:var(--stop)]">{e.error || 'Could not finish this answer. Tap Retry above.'}</p>
         )}
       </div>
     </div>

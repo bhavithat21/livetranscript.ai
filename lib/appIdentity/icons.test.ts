@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { DEFAULT_ICON, parseStoredIcon, prepareCustomIcon, validateIconFile } from './icons'
+import { readFileSync } from 'node:fs'
+import { DEFAULT_ICON, DEFAULT_ICON_DATA_URL, iconSource, parseStoredIcon, prepareCustomIcon, validateIconFile } from './icons'
 
 function pngHeader(width = 256, height = 256) {
   const bytes = new Uint8Array(24)
@@ -13,6 +14,12 @@ function dataUrl(bytes: Uint8Array) { return `data:image/png;base64,${btoa(Strin
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('local icon validation', () => {
+  it('uses the shipped native PNG byte-for-byte for the default browser icon', () => {
+    const shipped = readFileSync('src-tauri/icons/128x128.png')
+    expect(Buffer.from(DEFAULT_ICON_DATA_URL.split(',')[1], 'base64')).toEqual(shipped)
+    expect(iconSource(DEFAULT_ICON)).toBe(DEFAULT_ICON_DATA_URL)
+  })
+
   it('checks image signatures and dimensions before invoking a browser decoder', () => {
     expect(() => validateIconFile(pngHeader(), 'image/png')).not.toThrow()
     expect(() => validateIconFile(pngHeader(12000, 12000), 'image/png')).toThrow(/4096/)

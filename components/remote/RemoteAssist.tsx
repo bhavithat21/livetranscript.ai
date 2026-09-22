@@ -9,6 +9,7 @@ import { RemoteSessionClient, initialRemoteSnapshot, type RemoteSnapshot } from 
 import { getRemoteCapabilities, getRemoteDisplays, type RemoteDisplay } from '@/lib/remote/native'
 import { parseRemoteInvitation } from '@/lib/remote/invite'
 import { RemoteScreen, type RemoteScreenHandle } from './RemoteScreen'
+import { RemoteNotes } from './RemoteNotes'
 
 const ACTIVE = new Set(['creating', 'waiting', 'connecting', 'connected'])
 const STATUS: Record<RemoteSnapshot['status'], string> = {
@@ -115,7 +116,7 @@ export function RemoteAssist() {
         <header className="mb-9 flex items-center justify-between gap-4">
           <HomeMenu />
           <div className="flex items-center gap-2">
-            <Link href="/settings" className="btn-ghost text-sm">Appearance</Link>
+            <Link href="/settings#appearance" className="btn-ghost text-sm">Appearance</Link>
             <ThemeToggle />
           </div>
         </header>
@@ -191,8 +192,10 @@ export function RemoteAssist() {
           </section>
         )}
 
+        {connected && <RemoteNotes client={screenClient} snapshot={snapshot} />}
+
         {active && !snapshot.relayConfigured && <p className="mt-4 text-xs leading-relaxed text-black/60">Direct connection mode. Some office or mobile networks need a relay; if the devices cannot connect, try another network. Relay configuration is available in the setup guide.</p>}
-        <footer className="mt-8 flex flex-wrap gap-x-6 gap-y-2 text-xs text-black/60"><span>One display · one approved helper · up to 30 minutes</span><Link href="/settings" className="underline underline-offset-4">Change app name and icon</Link></footer>
+        <footer className="mt-8 flex flex-wrap gap-x-6 gap-y-2 text-xs text-black/60"><span>One display · one approved helper · up to 30 minutes</span><Link href="/settings#appearance" className="underline underline-offset-4">Change app name and icon</Link></footer>
       </div>
     </main>
   )

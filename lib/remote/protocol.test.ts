@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createRemoteInputGate, isRemoteKey, parseRemoteInput } from './protocol'
+import { createRemoteInputGate, isRemoteKey, parseRemoteInput, parseRemoteNote } from './protocol'
 
 describe('remote native input boundary', () => {
   it('accepts normalized corners, bounded scroll, and explicit button/key states', () => {
@@ -48,5 +48,24 @@ describe('remote native input boundary', () => {
   it('accepts Unicode scalar keys but refuses lone surrogates and unknown multi-character names', () => {
     for (const value of [' ', 'é', '日', '😀', 'F12', 'PageDown']) expect(isRemoteKey(value)).toBe(true)
     for (const value of ['', '\ud800', 'F13', 'exec', 'Dead', '\u007f']) expect(isRemoteKey(value)).toBe(false)
+  })
+})
+
+describe('remote note boundary', () => {
+  it('preserves readable code, multiline text and Unicode as ordinary text', () => {
+    const text = '日本語: examine the empty-input case.\n\tconst total = a < b ? a : b;'
+    expect(parseRemoteNote({ type: 'note', seq: 1, text: `  ${text}  ` })).toEqual({ type: 'note', seq: 1, text })
+    expect(parseRemoteNote({ type: 'note', seq: 2, text: '日'.repeat(2_000) })?.text.length).toBe(2_000)
+  })
+
+  it('rejects sender spoofing, command fields, replay-invalid sequences and unbounded text', () => {
+    for (const value of [
+      null, [], {}, { type: 'note', seq: 0, text: 'hello' }, { type: 'note', seq: 1.5, text: 'hello' },
+      { type: 'note', seq: '1', text: 'hello' }, { type: 'note', seq: 1, text: '' },
+      { type: 'note', seq: 1, text: ' \n\t ' }, { type: 'note', seq: 1, text: 'x'.repeat(2_001) },
+      { type: 'note', seq: 1, text: 'hello\0there' }, { type: 'note', seq: 1, text: '\u001b[31m' },
+      { type: 'note', seq: 1, text: 'hello', sender: 'Host' },
+      { type: 'note', seq: 1, text: 'hello', command: 'execute' },
+    ]) expect(parseRemoteNote(value)).toBeNull()
   })
 })

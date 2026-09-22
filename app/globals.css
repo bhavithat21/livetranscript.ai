@@ -72,6 +72,20 @@ body {
   background-attachment: fixed;
 }
 
+/* The standalone copilot has its own calm work surface and optional audio rail.
+   Desktop fits the viewport; compact screens keep normal document scrolling. */
+.ai-workspace { background: var(--paper); }
+.ai-workspace-header, .ai-workspace-audio { background: var(--reader); }
+.ai-workspace-notice { background: var(--reader); }
+.ai-workspace-body { min-height: 36rem; }
+@media (min-width: 1024px) {
+  .ai-workspace { height: calc(100dvh - var(--titlebar-h, 0px)); min-height: 0; }
+  .ai-workspace-body { min-height: 0; }
+}
+html.lt-desktop .ai-workspace-header,
+html.lt-desktop .ai-workspace-audio,
+html.lt-desktop .ai-workspace-notice { background: rgba(20, 20, 28, 0.95); }
+
 /* ═══════════════════════════════════════════════════════════════════════════════
    Desktop (Tauri) overlay theme — "always-on-top dark glass panel"
    ═══════════════════════════════════════════════════════════════════════════════
@@ -485,6 +499,7 @@ html.lt-desktop .overscroll-contain * {
 /* Raise load-bearing text; the reader must stay legible at low luminance. */
 .lt-stealth .text-ink { color: #e4e4e7 !important; }
 .lt-stealth .text-black\/70,
+.lt-stealth .text-black\/60,
 .lt-stealth .text-black\/55,
 .lt-stealth .text-black\/50,
 .lt-stealth .text-black\/45,
@@ -494,6 +509,7 @@ html.lt-desktop .overscroll-contain * {
 .lt-stealth .text-amber-700 { color: #a1a1aa !important; }
 /* Surfaces that were near-white flip dark so the panel reads as one dim plane. */
 .lt-stealth .bg-white,
+.lt-stealth .bg-white\/60,
 .lt-stealth .bg-white\/70,
 .lt-stealth .bg-white\/80 { background: #18181b !important; }
 /* Kill any decorative motion inside the panel. */
@@ -619,4 +635,11 @@ html.lt-dark:not(.lt-desktop) .reader-surface {
 html.lt-dark:not(.lt-desktop) nav[aria-label='Main'] { background: rgba(18, 18, 26, 0.72) !important; }
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   html.lt-dark:not(.lt-desktop) .glass { background: rgba(28, 28, 36, 0.96); }
+}
+
+/* Focus reading uses the same accessible form colors in light and dark shells. */
+.lt-stealth textarea, .lt-stealth input, .lt-stealth select {
+  background-color: #18181b !important;
+  color: #e4e4e7 !important;
+  border-color: rgba(255, 255, 255, .2) !important;
 }

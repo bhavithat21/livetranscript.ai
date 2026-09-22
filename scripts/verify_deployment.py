@@ -59,44 +59,45 @@ def main():
         actual = health.get('commit') or ''
         if not check('Exact release', isinstance(actual, str) and actual.lower().startswith(args.commit.lower()), actual or 'No release SHA returned'):
             return 1
-        expected = {'repository-screenshots', 'repository-specialist-agents'}
-        if not check('Repository feature identifiers', expected.issubset(set(health.get('features', []))), health.get('features', [])):
+        expected = {'repository-screenshots', 'repository-specialist-agents', 'remote-assistance', 'app-appearance', 'standalone-ai-copilot', 'answer-preferences', 'interview-workspace', 'practice-coach'}
+        if not check('Product feature identifiers', expected.issubset(set(health.get('features', []))), health.get('features', [])):
             return 1
         status, _, _ = fetch('/')
         if not check('Home page', status == 200, f'HTTP {status}'):
             return 1
-        current_url = base + '/record'
-        protected = False
-        target_path = ''
-        for _ in range(6):
-            status, headers, _ = fetch(current_url, document=True)
-            if status not in (302, 303, 307, 308):
-                break
-            redirect = urllib.parse.urljoin(current_url, headers.get('Location', ''))
-            target = urllib.parse.urlsplit(redirect)
-            target_path = target.path
-            if target.username or target.password:
-                break
-            same_origin = target.scheme == origin.scheme and target.netloc == origin.netloc
-            if same_origin and (target.path == '/sign-in' or target.path.startswith('/sign-in/')):
-                protected = True
-                break
-            # Development Clerk instances initialize an anonymous browser cookie
-            # before returning to the app. Follow only that exact flow, retaining
-            # cookies and never printing handshake tokens or query parameters.
-            clerk_handshake = (
-                target.scheme == 'https'
-                and (target.hostname or '').endswith('.clerk.accounts.dev')
-                and target.port in (None, 443)
-                and target.path == '/v1/client/handshake'
-                and headers.get('X-Clerk-Auth-Status') == 'handshake'
-                and urllib.parse.parse_qs(target.query).get('redirect_url') == [base + '/record']
-            )
-            if not (same_origin and target.path == '/record') and not clerk_handshake:
-                break
-            current_url = redirect
-        if not check('Signed-out recording page requires sign-in', protected, f'HTTP {status}; redirect path {target_path}'):
-            return 1
+        for protected_path in ('/record', '/copilot', '/remote', '/interview', '/practice'):
+            current_url = base + protected_path
+            protected = False
+            target_path = ''
+            for _ in range(6):
+                status, headers, _ = fetch(current_url, document=True)
+                if status not in (302, 303, 307, 308):
+                    break
+                redirect = urllib.parse.urljoin(current_url, headers.get('Location', ''))
+                target = urllib.parse.urlsplit(redirect)
+                target_path = target.path
+                if target.username or target.password:
+                    break
+                same_origin = target.scheme == origin.scheme and target.netloc == origin.netloc
+                if same_origin and (target.path == '/sign-in' or target.path.startswith('/sign-in/')):
+                    protected = True
+                    break
+                # Development Clerk instances initialize an anonymous browser cookie
+                # before returning to the app. Follow only that exact flow, retaining
+                # cookies and never printing handshake tokens or query parameters.
+                clerk_handshake = (
+                    target.scheme == 'https'
+                    and (target.hostname or '').endswith('.clerk.accounts.dev')
+                    and target.port in (None, 443)
+                    and target.path == '/v1/client/handshake'
+                    and headers.get('X-Clerk-Auth-Status') == 'handshake'
+                    and urllib.parse.parse_qs(target.query).get('redirect_url') == [base + protected_path]
+                )
+                if not (same_origin and target.path == protected_path) and not clerk_handshake:
+                    break
+                current_url = redirect
+            if not check(f'Signed-out {protected_path} requires sign-in', protected, f'HTTP {status}; redirect path {target_path}'):
+                return 1
         print(json.dumps(report, indent=2))
         return 0
     except (OSError, ValueError, TypeError, AttributeError) as error:

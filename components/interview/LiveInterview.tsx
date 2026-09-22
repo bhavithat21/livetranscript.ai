@@ -8,7 +8,7 @@ import { downloadInterview } from '@/lib/interview/client'
 import { useInterviewTuning } from '@/lib/interview/TuningContext'
 import type { InterviewSession } from '@/lib/interview/session'
 
-export function LiveInterview({ visible, blocked, onActivity, onComplete }: {
+export function LiveInterview({ blocked, onActivity, onComplete }: {
   visible: boolean; blocked: boolean; onActivity: (active: boolean) => void
   onComplete: (session: InterviewSession) => void
 }) {
@@ -29,6 +29,8 @@ export function LiveInterview({ visible, blocked, onActivity, onComplete }: {
   const [captureStartedAt, setCaptureStartedAt] = useState(0)
   const startTime = useRef(0)
   const ending = useRef(false)
+  const lifecycle = useRef(0)
+  useEffect(() => () => { lifecycle.current += 1 }, [])
   const sessionId = useRef('')
   const activity = useRef(false)
   const getCallSegments = call.getSegments
@@ -38,6 +40,12 @@ export function LiveInterview({ visible, blocked, onActivity, onComplete }: {
     source === 'system' ? [] : getMicSegments().filter((row) => row.capturedAt >= startTime.current),
   ), [getCallSegments, getMicSegments, source])
 
+  // Detection consumes only finalized interviewer-channel text. The richer
+  // labeled dual-channel transcript remains the answer's grounding context.
+  const questionText = useCallback(() => (source === 'mic' ? getMicSegments() : getCallSegments())
+    .filter((row) => row.isFinal && row.capturedAt >= startTime.current)
+    .map((row) => row.text).join('\n'), [getCallSegments, getMicSegments, source])
+
   useEffect(() => {
     if (!active) return
     const timer = setInterval(() => setElapsed(Math.floor((Date.now() - startTime.current) / 1000)), 1000)
@@ -46,19 +54,24 @@ export function LiveInterview({ visible, blocked, onActivity, onComplete }: {
 
   async function begin() {
     if (activity.current || blocked || !consent) return
+    const token = ++lifecycle.current
     activity.current = true; ending.current = false; sessionId.current = crypto.randomUUID(); startTime.current = Date.now()
     setCaptureStartedAt(startTime.current); setElapsed(0); setError(null); setBusy(true); setActive(true); setTranscriptOpen(false); onActivity(true)
     try {
       if (source !== 'mic') await call.start('system', keyterms)
-      if (!ending.current && source !== 'system') await microphone.start('mic', keyterms)
+      if (token === lifecycle.current && !ending.current && source !== 'system') await microphone.start('mic', keyterms)
     } catch (e) {
+      if (token !== lifecycle.current) return
       await Promise.all([call.stop(), microphone.stop()])
+      if (token !== lifecycle.current) return
+      activity.current = false; setActive(false); onActivity(false)
       if (!ending.current) setError(e instanceof Error ? e.message : 'Could not start audio capture.')
-    } finally { if (!ending.current) setBusy(false) }
+    } finally { if (token === lifecycle.current && !ending.current) setBusy(false) }
   }
 
   async function finish() {
     if (ending.current || !activity.current) return
+    lifecycle.current += 1
     ending.current = true; setFinishing(true); setBusy(true)
     try {
       const [callRows, micRows] = await Promise.all([call.stop(), microphone.stop()])
@@ -121,7 +134,7 @@ export function LiveInterview({ visible, blocked, onActivity, onComplete }: {
 
       <div className={`grid min-h-[68vh] min-w-0 ${transcriptOpen ? '2xl:grid-cols-[minmax(560px,1fr)_340px]' : 'grid-cols-1'}`}>
         <div className="flex min-w-0 flex-col p-4 sm:p-6">
-          <LiveAnswerCanvas getTranscript={text} instructions={tuning.state.active.instructions} />
+          <LiveAnswerCanvas getTranscript={text} getQuestionTranscript={questionText} instructions={tuning.state.active.instructions} />
           <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-black/[0.06] pt-3 text-xs text-black/45">
             {source !== 'system' && <span className="inline-flex items-center gap-1.5"><span className={`h-1.5 w-1.5 rounded-full ${microphone.phase === 'recording' ? 'bg-emerald-500' : 'bg-black/20'}`} />Mic</span>}
             {source !== 'mic' && <span className="inline-flex items-center gap-1.5"><span className={`h-1.5 w-1.5 rounded-full ${call.phase === 'recording' ? 'bg-emerald-500' : 'bg-black/20'}`} />System</span>}

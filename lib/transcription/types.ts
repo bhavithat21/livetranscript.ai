@@ -10,6 +10,8 @@ export type TranscriptionConfig = {
   keyterms: string[]
   sampleRate: number
   maxSpeakers: number
+  // Optional cancellation covers token minting, connection and the live socket.
+  signal?: AbortSignal
 }
 
 export interface TranscriptionProvider {

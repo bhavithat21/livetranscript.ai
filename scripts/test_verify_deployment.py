@@ -26,12 +26,12 @@ class ReleaseCheckTests(unittest.TestCase):
                     self.end_headers()
                     self.wfile.write(json.dumps({
                         'commit': '7654321' + '0' * 33 if mode == 'old-release' else COMMIT,
-                        'features': ['repository-screenshots', 'repository-specialist-agents'],
+                        'features': ['repository-screenshots', 'repository-specialist-agents', 'remote-assistance', 'app-appearance', 'standalone-ai-copilot', 'answer-preferences', 'interview-workspace', 'practice-coach'],
                     }).encode())
-                elif self.path == '/record':
+                elif self.path in ('/record', '/copilot', '/remote', '/interview', '/practice'):
                     if self.headers.get('Sec-Fetch-Dest') != 'document' or self.headers.get('Accept') != 'text/html':
                         self.send_response(404)
-                    elif mode == 'unprotected':
+                    elif mode == 'unprotected' or (mode == 'unprotected-copilot' and self.path == '/copilot'):
                         self.send_response(200)
                     else:
                         self.send_response(307)
@@ -70,6 +70,11 @@ class ReleaseCheckTests(unittest.TestCase):
     def test_unprotected_recording_page_fails(self):
         code, _ = self.run_check('unprotected')
         self.assertEqual(code, 1)
+
+    def test_unprotected_standalone_copilot_fails(self):
+        code, report = self.run_check('unprotected-copilot')
+        self.assertEqual(code, 1)
+        self.assertEqual(report['checks'][-1]['name'], 'Signed-out /copilot requires sign-in')
 
     def test_unexpected_external_redirect_fails(self):
         code, _ = self.run_check('external-redirect')

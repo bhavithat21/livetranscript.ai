@@ -10,6 +10,14 @@ const image = 'data:image/jpeg;base64,fixture'
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks() })
 
 describe('screenshot session lifecycle', () => {
+  it('passes selected output preferences to final repository synthesis', async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response('{"type":"delta","text":"Grounded answer"}\n{"type":"done"}\n'))
+    vi.stubGlobal('fetch', fetcher)
+    const preferences = { format: 'keywords' as const, tone: 'technical' as const, followups: true }
+    const hook = renderHook(() => useScreenRepository(true, false, () => null, preferences))
+    await act(async () => { expect(await hook.result.current.analyze('Where do I navigate?', 'src/source.ts:12', '')).toBe(true) })
+    expect(JSON.parse(fetcher.mock.calls[0][1].body).preferences).toEqual(preferences)
+  })
   it('retains previous evidence when extraction fails and permits retry of the same image', async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(Response.json({ observation, model: 'vision-test' }))

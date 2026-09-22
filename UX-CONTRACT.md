@@ -3,7 +3,7 @@
 ## Product context
 
 Technical users read transcripts, inspect repository context and collaborate on a
-laptop. These changes cover `/remote`, `/settings`, shared identity and navigation.
+laptop. These changes cover `/copilot`, `/remote`, `/settings`, shared identity and navigation.
 UI language is English; expiry is a relative duration. Accessibility target is
 WCAG 2.2 AA, with device/browser gaps recorded in release verification rather than
 assumed complete. Visual rules are in `DESIGN.md`.
@@ -17,6 +17,7 @@ assumed complete. Visual rules are in `DESIGN.md`.
 | Native control boundary | `src-tauri/src/remote_assist`, `src-tauri/remote-assist-core` | Native lease and input contract | 2026-09-22 |
 | Identity persistence | `lib/appIdentity/useAppIdentity.ts` | Device preference contract | 2026-09-22 |
 | Analytics exclusion | `lib/analyticsPrivacy.ts`, `app/providers.tsx` | Capture boundary | 2026-09-22 |
+| Standalone AI workflow | User request: separate AI tab without a meeting; `components/workspace`, `lib/copilot/answerPreferences.ts` | Product instruction and request contract | 2026-09-22 |
 | Billing, deletion and legal terms | No changes in this feature | Out of scope | 2026-09-22 |
 
 ## Visual contract
@@ -30,9 +31,11 @@ available. No independent theme adapter is introduced.
 
 | Capability | Canonical owner | Source of truth | Allowed variants | Verification |
 |---|---|---|---|---|
-| Form | AppearanceSettings and RemoteAssist | Existing settings inline form pattern plus this contract | explicit save, invitation submit, local file picker | component tests, keyboard validation |
+| Form | AppearanceSettings, RemoteAssist and CandidateProfileSettings | Existing settings inline form pattern plus this contract | explicit save, invitation submit, local file picker | component tests, keyboard validation |
 | Scrollbar | app/globals.css | global scrollbar tokens and baseline | native forced-colors | CSS audit and rendered inspection where available |
 | Toast | Inline status/alert regions | Existing settings and remote connection state | success, recoverable error, persistent condition | component tests |
+| Tabs | SettingsWorkspace and InterviewWorkspace | WAI-ARIA tabs or labeled mobile view buttons | horizontal settings, desktop interview tabs | keyboard and state retention tests |
+| Select/Listbox | Native HTML select | Browser accessibility and platform picker | labeled source, tone, identity and repository task choices | keyboard and component tests |
 
 ## Navigation and responsive behavior
 
@@ -59,6 +62,10 @@ and IME without relying on a hardware keyboard.
 | End | Either peer, native tray or shortcut | local teardown | same route setup | ended reason | native lease expires even if UI stalls | ordinary setup controls | native lease contract |
 | Save name/icon | explicit save or preset/file selection | icon preparation | same settings route | saved on this device | inline error, retry or reset | invalid field receives focus | identity contract |
 | Reset appearance | Reset appearance | immediate local change | same route | reset status | storage limitation stated honestly | same action region | identity contract |
+| Ask AI directly | Typed question + Send | streaming answer | same mode thread | streamed answer, measured timing | explicit error/retry; original question retained | composer remains reachable | useCopilot |
+| Optional listening | Source + Start listening | permission/connection pending | same AI route | visible listening state and transcript | inline error or Cancel; stale acquisition is stopped | Stop/Cancel stays reachable | useCopilotCapture |
+| Stop listening | Stop, device end, navigation | local teardown | same route or destination | audio stopped; context kept in current tab | late events ignored; provider disconnects | start action remains available | useCopilotCapture |
+| Answer preferences | Format, tone, followups | next request uses selection | same workspace | selected values remain visible | invalid persisted values fall back; server validates | native form controls | answerPreferences |
 
 ## Async and resilience
 
@@ -103,3 +110,42 @@ Representative sibling: existing Settings and HomeMenu. Browser coverage should
 include empty/loading/error/success, keyboard, narrow viewport, dark mode and
 reduced motion. Report unavailable environments explicitly. No new CRUD dataset,
 calendar, Japanese UI or billing flow is introduced.
+
+## Standalone AI workspace
+
+`/copilot` does not create a meeting, recording record or room. A typed question is
+the primary action. Audio is optional and starts only from an explicit action.
+The live transcript stays in tab memory. Resume/JD and mode documents retain their
+existing device persistence; the UI must distinguish this from transient audio.
+AI requests send selected context to the configured providers.
+
+Desktop uses a setup rail beside the answer/composer, with compact disclosure on
+small screens. General, Coding, System design, Behavioral and Repository retain
+their existing domain logic. Clear, stop, errors and pending states remain
+reachable without a hover-only interaction. Enter/Shift+Enter behavior is stated
+next to the multiline composer. Empty suggestions populate the composer; they
+do not make a paid request automatically.
+
+Focus mode is a visual reading preference. It must never claim screen-capture or
+process invisibility. Desktop capture exclusion is subject to OS and capture-tool
+limitations. No proctor compatibility, sub-50ms generation or guaranteed unseen
+operation is represented as verified. Timing is based on real completed requests.
+The standalone workspace and its API URLs are excluded from product analytics;
+session replay is disabled application-wide.
+
+## Interview and practice integration
+
+`/interview` owns Live, Mock Lab and Feedback. Desktop sidebar and mobile view
+buttons select the same mounted panels without stopping capture. Leaving while
+a session is active is guarded. Mobile keyboard focus remains in mobile controls.
+Tools link to `/dashboard`, `/copilot?mode=repoInterview`, `/practice` and `/remote`.
+Mock Lab embeds the real copilot in normal document flow; no floating panel
+covers its controls. Expected criteria stay out of model generation. Promotion
+requires a completed, human-approved run with matching draft instructions.
+Feedback statistics derive from saved account-local sessions, never sample scores.
+
+`/practice` is candidate rehearsal, distinct from testing the assistant. Audio and
+question speech are explicit actions. Quoted feedback evidence must exist in the
+submitted answer. Speech metrics reflect measured capture time and are not a
+validated performance score. Stop/unmount cancels pending work and stale answers.
+The practice surface is excluded from analytics alongside other private workspaces.

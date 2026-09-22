@@ -1,3 +1,6 @@
+// Verbatim src-tauri/icons/128x128.png; shared browser/native default artwork.
+export const DEFAULT_ICON_DATA_URL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAAA8UlEQVR42u3SsQ0AMAjAsA7s/ZSR9+ENJOwTosSv7MdZIYEBMAAGwAAYAANgAAyAATAABsAAGAADYAAMgAEwAAbAABgAA2AADIABMAAGwAAYAANgAAyAATAABsAAGAADYAAMgAEwAAbAABgAA2AADIABMAAGwAAYAANgAAyAATAABsAAGAADYAAMgAEwAAbAABgAA2AADIABMAAGwAAYAANgAAyAATAABsAAGMAAEhgAA2AADIABMAAGwAAYAANgAAyAATAABsAAGAADYAAMgAEwAAbAABgAA2AADIABMAAGwAAYAANgAAyAATAABsAA7DCgqQPzl63ULgAAAABJRU5ErkJggg=='
+
 export const ICON_SIZE = 256
 export const MAX_ICON_FILE_BYTES = 2 * 1024 * 1024
 const MAX_SOURCE_SIDE = 4096
@@ -23,7 +26,7 @@ const PRESET_SVGS: Record<Exclude<IconPresetId, 'default'>, string> = {
 
 export function iconSource(icon: AppIcon): string {
   if (icon.kind === 'custom') return icon.dataUrl
-  if (icon.id === 'default') return '/favicon.ico'
+  if (icon.id === 'default') return DEFAULT_ICON_DATA_URL
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(PRESET_SVGS[icon.id])}`
 }
 

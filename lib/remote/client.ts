@@ -4,12 +4,18 @@ import * as Ably from 'ably'
 import { FrameAssembler, sendFrame } from './frames'
 import { remoteNative, type RemoteDisplay, type RemoteLease, type RemoteNative } from './native'
 import {
-  createRemoteInputGate, parseRemoteInput, REMOTE_CLIENT_PATTERN, REMOTE_ID_PATTERN, REMOTE_SESSION_MS,
-  remoteDisplayName, remotePeerChannel, remoteRequestsChannel, type RemoteInput, type RemoteSession,
+  createRemoteInputGate, parseRemoteInput, parseRemoteNote, REMOTE_CLIENT_PATTERN, REMOTE_ID_PATTERN, REMOTE_NOTE_HISTORY_LIMIT, REMOTE_SESSION_MS,
+  remoteDisplayName, remotePeerChannel, remoteRequestsChannel, type RemoteInput, type RemoteNoteMessage, type RemoteRole, type RemoteSession,
 } from './protocol'
 
 export type { RemoteDisplay } from './native'
 export type RemoteInputDraft = RemoteInput extends infer T ? T extends RemoteInput ? Omit<T, 'seq'> : never : never
+export type RemoteNote = {
+  id: string
+  sender: RemoteRole
+  senderName: string
+  text: string
+}
 export type RemoteSnapshot = {
   status: 'idle' | 'creating' | 'waiting' | 'connecting' | 'connected' | 'ended' | 'error'
   role: 'host' | 'controller' | null
@@ -22,11 +28,12 @@ export type RemoteSnapshot = {
   relayConfigured: boolean
   expiresAt: number | null
   display: RemoteDisplay | null
+  notes: RemoteNote[]
 }
 
 export const initialRemoteSnapshot: RemoteSnapshot = {
   status: 'idle', role: null, invite: null, helperCode: null, pending: [], controlEnabled: false,
-  error: null, endedReason: null, relayConfigured: false, expiresAt: null, display: null,
+  error: null, endedReason: null, relayConfigured: false, expiresAt: null, display: null, notes: [],
 }
 
 export type RemoteSignalMessage = { clientId?: string; data: unknown }
@@ -53,6 +60,7 @@ type Control =
   | { type: 'permission'; epoch: number; enabled: boolean; display: RemoteDisplay }
   | { type: 'input'; epoch: number; event: RemoteInput }
   | { type: 'end' }
+  | RemoteNoteMessage
 
 const MAX_SIGNAL_BYTES = 65_536
 const MAX_CONTROL_BYTES = 8_192
@@ -60,6 +68,8 @@ const MAX_BUFFERED_CONTROL = 32_768
 const HEARTBEAT_MS = 1_000
 const PEER_TIMEOUT_MS = 5_000
 const CONNECT_TIMEOUT_MS = 30_000
+const NOTE_RATE_WINDOW_MS = 10_000
+const NOTE_RATE_LIMIT = 5
 
 function plain(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
@@ -98,6 +108,7 @@ function parseControl(value: unknown): Control | null {
   let data: unknown
   try { data = JSON.parse(value) } catch { return null }
   if (!plain(data)) return null
+  if (data.type === 'note') return parseRemoteNote(data)
   if ((data.type === 'ping' || data.type === 'pong') && Number.isSafeInteger(data.seq) && (data.seq as number) > 0) return { type: data.type, seq: data.seq as number }
   if (data.type === 'end') return { type: 'end' }
   if (data.type === 'input' && Number.isSafeInteger(data.epoch) && (data.epoch as number) > 0) {
@@ -211,6 +222,10 @@ export class RemoteSessionClient {
   private lastPong = 0
   private frameSequence = 0
   private inputSequence = 0
+  private noteSequence = 0
+  private lastPeerNoteSequence = 0
+  private sentNoteTimes: number[] = []
+  private receivedNoteTimes: number[] = []
   private permissionVersion = 0
   private remotePermissionVersion = 0
   private inputGate = createRemoteInputGate()
@@ -261,7 +276,9 @@ export class RemoteSessionClient {
     this.permissionQueue = this.signalingQueue = Promise.resolve()
     this.signalingPending = 0
     this.lastPing = this.lastPong = this.pingSequence = this.inputSequence = this.frameSequence = 0
-    this.state = { ...initialRemoteSnapshot, pending: [] }
+    this.noteSequence = this.lastPeerNoteSequence = 0
+    this.sentNoteTimes = this.receivedNoteTimes = []
+    this.state = { ...initialRemoteSnapshot, pending: [], notes: [] }
     this.update({ role, status: 'creating' })
     return this.generation
   }
@@ -461,6 +478,18 @@ export class RemoteSessionClient {
     const data = parseControl(value)
     if (!data) return
     if (data.type === 'end') { void this.stop('The other participant ended the session.'); return }
+    if (data.type === 'note') {
+      // A data channel exists only for the pinned, approved peer. Never accept
+      // sender labels from the payload or turn a note into native input.
+      if (this.state.status !== 'connected' || !this.session || data.seq <= this.lastPeerNoteSequence) return
+      const now = this.deps.now()
+      this.receivedNoteTimes = this.receivedNoteTimes.filter((time) => now - time < NOTE_RATE_WINDOW_MS)
+      if (this.receivedNoteTimes.length >= NOTE_RATE_LIMIT) return
+      this.receivedNoteTimes.push(now)
+      this.lastPeerNoteSequence = data.seq
+      this.appendNote(data, this.session.role === 'host' ? 'controller' : 'host')
+      return
+    }
     if (this.session?.role === 'host') {
       if (data.type === 'ping' && data.seq > this.lastPing) {
         this.lastPing = data.seq
@@ -551,6 +580,30 @@ export class RemoteSessionClient {
     return true
   }
 
+  /** Explicit, visible collaboration text; independent of mouse/keyboard access. */
+  sendNote(text: string): boolean {
+    if (this.state.status !== 'connected' || !this.state.display || !this.session) return false
+    const note = parseRemoteNote({ type: 'note', seq: this.noteSequence + 1, text })
+    if (!note) return false
+    const now = this.deps.now()
+    this.sentNoteTimes = this.sentNoteTimes.filter((time) => now - time < NOTE_RATE_WINDOW_MS)
+    if (this.sentNoteTimes.length >= NOTE_RATE_LIMIT || !this.sendControl(note)) return false
+    this.noteSequence++
+    this.sentNoteTimes.push(now)
+    this.appendNote(note, this.session.role)
+    return true
+  }
+
+  private appendNote(note: RemoteNoteMessage, sender: RemoteRole): void {
+    if (!this.session) return
+    const peerId = sender === 'host' ? this.session.hostClientId : this.session.role === 'controller' ? this.session.clientId : this.approved
+    if (!peerId) return
+    this.update({ notes: [...this.state.notes, { id: `${peerId}:${note.seq}`, sender, senderName: remoteDisplayName(peerId), text: note.text }].slice(-REMOTE_NOTE_HISTORY_LIMIT) })
+  }
+
+  /** Clearing is local only; it cannot erase the other participant's copy. */
+  clearNotes(): void { this.update({ notes: [] }) }
+
   releaseInputs(): void {
     for (const key of [...this.heldKeys]) if (!this.sendInput({ type: 'key', key, down: false })) { void this.stop('Remote input focus was lost. Remote access has ended.'); break }
     for (const button of [...this.heldButtons]) if (!this.sendInput({ type: 'button', button, down: false })) { void this.stop('Remote input focus was lost. Remote access has ended.'); break }
@@ -612,7 +665,8 @@ export class RemoteSessionClient {
     this.heldKeys.clear()
     this.heldButtons.clear()
     this.frames.clear()
-    this.update({ status: failed ? 'error' : 'ended', invite: null, pending: [], controlEnabled: false, display: null, error: failed ? reason : null, endedReason: failed ? null : reason })
+    this.sentNoteTimes = this.receivedNoteTimes = []
+    this.update({ status: failed ? 'error' : 'ended', invite: null, pending: [], controlEnabled: false, display: null, notes: [], error: failed ? reason : null, endedReason: failed ? null : reason })
     if (lease) await this.deps.native.stop(lease.leaseId).catch(() => {})
   }
 

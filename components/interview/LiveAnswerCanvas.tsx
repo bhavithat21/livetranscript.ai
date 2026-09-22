@@ -1,6 +1,8 @@
 'use client'
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react'
+import { ResponsePreferencesControls } from '@/components/copilot/CopilotWorkspaceUi'
+import { useResponsePreferences } from '@/lib/copilot/useResponsePreferences'
 import { Markdown } from '@/components/copilot/Markdown'
 import { useAnswerFeed } from '@/lib/copilot/useAnswerFeed'
 import { useOrchestrationRouter } from '@/lib/copilot/useOrchestrationRouter'
@@ -12,23 +14,33 @@ import type { CopilotMode } from '@/lib/copilot/modes'
 
 const MODE_LABEL: Record<string, string> = { general: 'General', coding: 'Coding', systemDesign: 'System Design', behavioral: 'Behavioral', repoInterview: 'Repository' }
 
-export function LiveAnswerCanvas({ getTranscript, instructions }: { getTranscript: () => string; instructions: string }) {
-  const feed = useAnswerFeed()
+export function LiveAnswerCanvas({ getTranscript, getQuestionTranscript = getTranscript, instructions }: { getTranscript: () => string; getQuestionTranscript?: () => string; instructions: string }) {
+  const responsePreferences = useResponsePreferences()
+  const feed = useAnswerFeed(responsePreferences.preferences)
   const router = useOrchestrationRouter()
   const profile = useCandidateProfile()
   const me = useMeContext()
   const context = useModeContext('general')
   const [mode, setMode] = useState<CopilotMode>('general')
   const [routing, setRouting] = useState(false)
+  const [paused, setPaused] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const generation = useRef(0)
+  const mounted = useRef(true)
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; generation.current += 1 } }, [])
 
   const answerQuestion = useCallback(async (question: string) => {
-    setRouting(true)
+    const token = ++generation.current
+    const valid = () => mounted.current && token === generation.current
+    setRouting(true); setError(null)
     try {
       const routed = await router.route(question)
+      if (!valid()) return
       // Repository interviews keep their dedicated evidence pipeline outside Live.
       const answerMode: CopilotMode = routed.classification?.mode === 'repoInterview' ? 'general' : (routed.classification?.mode ?? 'general')
       setMode(answerMode)
       const retrieved = context.count > 0 ? await context.retrieve(question) : null
+      if (!valid()) return
       const grounded = [
         routed.webContext && `LIVE WEB RESULTS:\n${routed.webContext}`,
         profile.contextBlock(),
@@ -36,14 +48,27 @@ export function LiveAnswerCanvas({ getTranscript, instructions }: { getTranscrip
         retrieved,
       ].filter(Boolean).join('\n\n') || null
       await feed.answer(question, answerMode, grounded, null, instructions || context.instructions || null, getTranscript())
-    } finally { setRouting(false) }
+    } catch (failure) {
+      if (valid()) setError(failure instanceof Error ? failure.message : 'Could not prepare this question. Try again.')
+    } finally { if (valid()) setRouting(false) }
   }, [router, context, profile, me, feed, instructions, getTranscript])
 
-  const proactive = useProactive(true, getTranscript, answerQuestion)
+  const proactive = useProactive(!paused, getQuestionTranscript, answerQuestion)
   const current = feed.current
   const activeQuestion = current?.question || proactive.lastAsked
 
+  function toggleAnswers() {
+    if (!paused) { generation.current += 1; feed.stop(); setRouting(false) }
+    setPaused((value) => !value)
+  }
+
   return <div className="flex min-h-0 flex-1 flex-col">
+    <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+      <details className="max-w-sm text-xs"><summary className="min-h-9 cursor-pointer py-2 font-medium text-black/55">Answer preferences</summary><ResponsePreferencesControls {...responsePreferences} compact /></details>
+      <button type="button" onClick={toggleAnswers} className="btn-ghost min-h-9 text-xs">{paused ? 'Resume answers' : 'Pause answers'}</button>
+    </div>
+    {paused && <p role="status" className="mb-3 text-xs text-black/55">Answers paused. Audio capture continues until you end the interview.</p>}
+    {error && <p role="alert" className="mb-3 text-sm text-[color:var(--stop)]">{error}</p>}
     <div className="flex flex-wrap items-center gap-2 text-xs">
       <span className="rounded-full bg-emerald-500/10 px-2.5 py-1 font-semibold text-emerald-700">Question detection</span>
       <span className="rounded-full bg-black/[0.045] px-2.5 py-1 font-medium text-black/55">{MODE_LABEL[mode]}</span>

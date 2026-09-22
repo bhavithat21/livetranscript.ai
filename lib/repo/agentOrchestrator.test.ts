@@ -15,6 +15,12 @@ beforeEach(() => {
 })
 
 describe('independent repository specialists', () => {
+  it('formats the final synthesis while leaving specialist evidence gathering detailed', async () => {
+    await runRepoAgents({ ...input, preferences: { format: 'keywords', tone: 'technical', followups: true } }, new AbortController().signal, () => {}, models)
+    expect(vi.mocked(streamRepoModel).mock.calls[0][0].system).toContain('3–4 short, scannable keyword bullets')
+    expect(vi.mocked(streamRepoModel).mock.calls[0][0].system).toContain('### Possible follow-ups')
+    for (const [request] of vi.mocked(callRepoModel).mock.calls) expect(request.system).not.toContain('FINAL RESPONSE REQUIREMENTS')
+  })
   it('launches independent roles concurrently and synthesizes with original evidence', async () => {
     let resolveCalls!: () => void
     const wait = new Promise<void>((resolve) => { resolveCalls = resolve })

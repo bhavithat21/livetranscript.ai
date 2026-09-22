@@ -1,4 +1,6 @@
-import { useCallback, useRef } from 'react'
+'use client'
+
+import { useCallback, useEffect, useRef } from 'react'
 import type { MicStreamOptions } from './useMicStream'
 import { logError } from '@/lib/log'
 
@@ -34,29 +36,66 @@ export function isTauri(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 }
 
+type NativeSession = {
+  cancelled: boolean
+  start: Promise<number>
+  stop: Promise<void> | null
+}
+
+// Native capture is a single OS resource. Serialize acquisition/retirement even
+// across route changes: a late stop from an unmounted hook must never terminate
+// the replacement page's capture. A stop requested during a permission dialog
+// also runs after acquisition, when Rust has installed the session's stopper.
+let commandTail: Promise<void> = Promise.resolve()
+let nativeOwner: NativeSession | null = null
+
+function serializeNative<T>(operation: () => Promise<T>): Promise<T> {
+  const result = commandTail.then(operation)
+  commandTail = result.then(() => {}, () => {})
+  return result
+}
+
+function cancelError() {
+  return new DOMException('Audio capture cancelled', 'AbortError')
+}
+
 export function useNativeCapture() {
-  const stoppingRef = useRef(false)
+  const sessionRef = useRef<NativeSession | null>(null)
 
-  // Returns the PCM sample rate on success, or 0 to signal "not native — the
-  // caller should fall back to browser capture". Never throws for the
-  // not-native case; only a real native start failure rejects.
-  const start = useCallback(
-    async (
-      onPcm: (pcm: ArrayBuffer) => void,
-      onLevel: (rms: number) => void,
-      opts: MicStreamOptions = {},
-    ): Promise<number> => {
-      if (!isTauri()) return 0
+  const stop = useCallback((): Promise<void> => {
+    const session = sessionRef.current
+    if (!session) return Promise.resolve()
+    session.cancelled = true
+    if (session.stop) return session.stop
+    session.stop = serializeNative(async () => {
+      if (nativeOwner !== session) return
+      const { invoke } = await import('@tauri-apps/api/core')
+      await invoke('stop_native_audio')
+      if (nativeOwner === session) nativeOwner = null
+    })
+    return session.stop
+  }, [])
 
+  useEffect(() => () => { void stop().catch(() => {}) }, [stop])
+
+  const start = useCallback((
+    onPcm: (pcm: ArrayBuffer) => void,
+    onLevel: (rms: number) => void,
+    opts: MicStreamOptions = {},
+  ): Promise<number> => {
+    if (!isTauri()) return Promise.resolve(0)
+    const existing = sessionRef.current
+    if (existing && !existing.cancelled) return existing.start
+    const session: NativeSession = { cancelled: false, start: Promise.resolve(0), stop: null }
+    sessionRef.current = session
+    session.start = serializeNative(async () => {
+      if (session.cancelled) throw cancelError()
       const { invoke, Channel } = await import('@tauri-apps/api/core')
+      if (session.cancelled) throw cancelError()
       const channel = new Channel<ArrayBuffer>()
-
       let badShapeLogged = false
       channel.onmessage = (message) => {
-        // InvokeResponseBody::Raw SHOULD arrive as an ArrayBuffer (16-bit LE mono
-        // PCM), but the delivered shape varies by webview/Tauri version (typed
-        // array, number[]). Coerce instead of dropping — a silent drop here kills
-        // the meter AND transcription with zero errors anywhere.
+        if (session.cancelled || nativeOwner !== session) return
         const pcm = toArrayBuffer(message)
         if (!pcm) {
           if (!badShapeLogged) {
@@ -67,25 +106,34 @@ export function useNativeCapture() {
         }
         if (opts.isMuted?.()) {
           onLevel(0)
-          return // muted: keep the tap alive but send nothing (same as useMicStream)
+          return
         }
         onPcm(pcm)
         onLevel(rms16(pcm))
       }
 
-      stoppingRef.current = false
-      // Rust arg is `on_frame` (snake_case); Tauri v2 maps camelCase `onFrame`.
-      const rate = await invoke<number>('start_native_audio', { onFrame: channel })
-      return rate
-    },
-    [],
-  )
-
-  const stop = useCallback(async () => {
-    if (!isTauri() || stoppingRef.current) return
-    stoppingRef.current = true
-    const { invoke } = await import('@tauri-apps/api/core')
-    await invoke('stop_native_audio')
+      nativeOwner = session
+      try {
+        const rate = await invoke<number>('start_native_audio', { onFrame: channel })
+        if (session.cancelled) {
+          await invoke('stop_native_audio')
+          if (nativeOwner === session) nativeOwner = null
+          throw cancelError()
+        }
+        return rate
+      } catch (cause) {
+        session.cancelled = true
+        if (nativeOwner === session) {
+          // Also retire a partially acquired native session after a start error.
+          try {
+            await invoke('stop_native_audio')
+            nativeOwner = null
+          } catch { /* a queued explicit stop may retry */ }
+        }
+        throw cause
+      }
+    })
+    return session.start
   }, [])
 
   return { start, stop, isNative: isTauri() }

@@ -2,6 +2,7 @@ import { callRepoModel, streamRepoModel } from './agentProviders'
 import { repoAgentEvidence, repoAgentSystem } from './agentPrompts'
 import type { RepoAgentEvent, RepoAgentInput, RepoAgentRole } from './agentTypes'
 import { repoModelFor } from './modelPolicy'
+import { withAnswerPreferences } from '@/lib/copilot/answerPreferences'
 
 export type RepoAgentModels = Record<RepoAgentRole, string>
 export function configuredRepoModels(): RepoAgentModels {
@@ -36,7 +37,7 @@ export async function runRepoAgents(input: RepoAgentInput, signal: AbortSignal, 
   emit({ type: 'agent', role: 'synthesis', model, status: 'running' })
   let text = ''
   try {
-    for await (const delta of streamRepoModel({ model, system: repoAgentSystem('synthesis'), evidence: JSON.stringify({ sourceEvidence: JSON.parse(evidence), specialistReports: results }), signal })) {
+    for await (const delta of streamRepoModel({ model, system: withAnswerPreferences(repoAgentSystem('synthesis'), input.preferences), evidence: JSON.stringify({ sourceEvidence: JSON.parse(evidence), specialistReports: results }), signal })) {
       signal.throwIfAborted()
       model = delta.model
       text += delta.text

@@ -4,6 +4,7 @@ import { boundedText, readRepoJson, RepoRequestError } from '@/lib/repo/agentHtt
 import { configuredRepoModels, runRepoAgents } from '@/lib/repo/agentOrchestrator'
 import type { RepoAgentEvent, RepoAgentInput, RepoTask } from '@/lib/repo/agentTypes'
 import { assertRepoModelConfigured } from '@/lib/repo/modelPolicy'
+import { parseAnswerPreferences } from '@/lib/copilot/answerPreferences'
 
 export const maxDuration = 120
 
@@ -20,6 +21,7 @@ export async function POST(req: Request) {
       context: boundedText(body.context, 'context', 120_000, true),
       transcript: boundedText(body.transcript, 'transcript', 35_000),
       task: task as RepoTask,
+      preferences: parseAnswerPreferences(body.preferences),
     }
   } catch (error) {
     return Response.json({ error: error instanceof RepoRequestError ? error.message : 'Invalid request' }, { status: error instanceof RepoRequestError ? error.status : 400 })
