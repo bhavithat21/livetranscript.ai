@@ -89,7 +89,7 @@ function Workspace({ ownerId }: { ownerId: string }) {
         </header>
 
         <div role="tablist" aria-label="Interview modes" className="mb-5 grid grid-cols-3 rounded-xl bg-black/[0.035] p-1 lg:hidden">
-          {TABS.map((item, index) => <button key={item.id} role="tab" aria-label={item.label} aria-selected={tab === item.id} onKeyDown={(event) => tabKey(event, index)} onClick={() => setTab(item.id)} className={`min-h-10 rounded-lg px-2 text-sm font-medium transition-colors ${tab === item.id ? 'bg-white text-ink shadow-sm' : 'text-black/45'}`}>{item.short}</button>)}
+          {TABS.map((item, index) => <button key={item.id} aria-label={item.label} aria-pressed={tab === item.id} onKeyDown={(event) => tabKey(event, index)} onClick={() => setTab(item.id)} className={`min-h-10 rounded-lg px-2 text-sm font-medium transition-colors ${tab === item.id ? 'bg-white text-ink shadow-sm' : 'text-black/45'}`}>{item.short}</button>)}
         </div>
 
         {active && ((liveActive && tab !== 'live') || (mockActive && tab !== 'mock')) && <div role="status" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-700/15 bg-emerald-50/50 px-4 py-3 text-sm"><span>{liveActive ? 'Live Interview is still listening.' : 'Mock Lab is still running.'}</span><button className="inline-flex items-center gap-1.5 font-medium text-emerald-800" onClick={() => setTab(liveActive ? 'live' : 'mock')}><RotateCcw size={14} />Return</button></div>}
