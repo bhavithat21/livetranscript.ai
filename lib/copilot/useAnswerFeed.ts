@@ -1,13 +1,14 @@
 'use client'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { captureLatency } from './latency'
 import type { AnswerPreferences } from './answerPreferences'
+import { CopilotCalibrationContext, type Calibration } from '@/lib/interview/TuningContext'
 
 export type AnswerEntry = {
   id: number; question: string; answer: string; streaming: boolean; retrying: boolean; failed: boolean
   error?: string | null
 }
-type RequestArgs = { mode: string; meContext: string | null; image: string | null; instructions?: string | null; transcript?: string | null; preferences?: AnswerPreferences }
+type RequestArgs = { mode: string; meContext: string | null; image: string | null; instructions?: string | null; transcript?: string | null; preferences?: AnswerPreferences; calibration: Calibration | null }
 const STALL_TIMEOUT_MS = 20_000
 const TOKEN_GAP_MS = 15_000
 const MAX_AUTO_RETRIES = 2
@@ -35,29 +36,54 @@ export function useAnswerFeed(preferences?: AnswerPreferences) {
   const mounted = useRef(true)
   const preferencesRef = useRef(preferences)
   useEffect(() => { preferencesRef.current = preferences }, [preferences])
+  const calibration = useContext(CopilotCalibrationContext)
+  const calibrationRef = useRef(calibration)
+  useEffect(() => { calibrationRef.current = calibration }, [calibration])
+  // One callback can observe multiple concurrent cards. Finishing one card must
+  // not unlock Mock's calibration editor while another card is still running.
+  const runningCallbacks = useRef(new Map<AbortController, NonNullable<Calibration['onRunning']>>())
+  const finishRunning = useCallback((controller: AbortController) => {
+    const callback = runningCallbacks.current.get(controller)
+    if (!callback) return
+    runningCallbacks.current.delete(controller)
+    if (![...runningCallbacks.current.values()].includes(callback)) callback(false)
+  }, [])
   const updateEntries = useCallback((update: (current: AnswerEntry[]) => AnswerEntry[]) => {
     entriesRef.current = update(entriesRef.current)
     setEntries(entriesRef.current)
   }, [])
   const cancelAll = useCallback(() => {
-    for (const controller of jobs.current.values()) controller.abort()
+    for (const controller of jobs.current.values()) { controller.abort(); finishRunning(controller) }
     jobs.current.clear()
-  }, [])
+  }, [finishRunning])
   useEffect(() => {
     mounted.current = true
     return () => { mounted.current = false; cancelAll() }
   }, [cancelAll])
 
   const run = useCallback(async (id: number, question: string, args: RequestArgs) => {
-    jobs.current.get(id)?.abort()
+    const previous = jobs.current.get(id)
+    if (previous) { previous.abort(); finishRunning(previous) }
     const job = new AbortController()
     jobs.current.set(id, job)
+    const settings = args.calibration
+    if (settings?.onRunning) {
+      const alreadyRunning = [...runningCallbacks.current.values()].includes(settings.onRunning)
+      runningCallbacks.current.set(job, settings.onRunning)
+      if (!alreadyRunning) settings.onRunning(true)
+    }
     const current = () => mounted.current && jobs.current.get(id) === job && !job.signal.aborted
     const update = (changes: Partial<AnswerEntry>) => {
       if (current()) updateEntries((previous) => previous.map((entry) => entry.id === id ? { ...entry, ...changes } : entry))
     }
     let failureMessage = 'Assistant unavailable. Please retry.'
     let retryable = true
+    let completed = false
+    let finalContent = ''
+    // The observation measures what the user waited for, including automatic
+    // retry backoff. Per-provider-attempt latency remains in captureLatency.
+    const runStartedAt = performance.now()
+    let runFirstTokenAt: number | null = null
     try {
       for (let attempt = 0; attempt <= MAX_AUTO_RETRIES; attempt++) {
         if (!current()) return
@@ -92,7 +118,7 @@ export function useAnswerFeed(preferences?: AnswerPreferences) {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ question, transcript: args.transcript ?? '', mode: args.mode, history,
               image: args.image ?? undefined, context: args.meContext ?? undefined, instructions: args.instructions ?? undefined,
-              preferences: args.preferences }),
+              preferences: args.preferences, calibration: settings?.instructions || undefined }),
             signal: controller.signal,
           })
           if (!current() || controller.signal.aborted) { void response.body?.cancel().catch(() => {}); controller.signal.throwIfAborted(); return }
@@ -109,6 +135,7 @@ export function useAnswerFeed(preferences?: AnswerPreferences) {
             const text = done ? decoder.decode() : decoder.decode(value, { stream: true })
             if (text) {
               if (firstTokenAt === null) firstTokenAt = performance.now()
+              if (runFirstTokenAt === null) runFirstTokenAt = firstTokenAt
               raw += text
               arm(TOKEN_GAP_MS)
               update({ answer: raw, retrying: false })
@@ -118,11 +145,13 @@ export function useAnswerFeed(preferences?: AnswerPreferences) {
           if (!raw.trim()) throw new Error('The assistant returned no answer. Please retry.')
           captureLatency(args.mode, startedAt, firstTokenAt, raw)
           update({ streaming: false, retrying: false, failed: false, error: null })
-          return
+          completed = true
+          break
         } catch (failure) {
           if (!current()) return
           failureMessage = stalled ? 'The assistant timed out. Please retry.' : failure instanceof Error ? failure.message : 'Assistant failed. Please retry.'
         } finally {
+          finalContent = raw
           clearTimeout(watchdog)
           job.signal.removeEventListener('abort', cancelAttempt)
           controller.signal.removeEventListener('abort', cancelReader)
@@ -131,11 +160,20 @@ export function useAnswerFeed(preferences?: AnswerPreferences) {
         }
         if (!retryable) break
       }
-      update({ streaming: false, retrying: false, failed: true, error: failureMessage })
+      if (!current()) return
+      if (!completed) update({ streaming: false, retrying: false, failed: true, error: failureMessage })
+      settings?.onResult?.({
+        id: crypto.randomUUID(), question, mode: args.mode, answer: finalContent, transcript: args.transcript ?? '',
+        instructions: args.instructions ?? '', calibration: settings.instructions, revision: settings.revision,
+        firstTokenMs: runFirstTokenAt === null ? null : runFirstTokenAt - runStartedAt,
+        totalMs: performance.now() - runStartedAt, status: completed ? 'complete' : 'error',
+        error: completed ? undefined : failureMessage, hasImage: !!args.image,
+      })
     } finally {
       if (jobs.current.get(id) === job) jobs.current.delete(id)
+      finishRunning(job)
     }
-  }, [updateEntries])
+  }, [finishRunning, updateEntries])
 
   const answer = useCallback(async (
     question: string, mode: string, meContext: string | null, image: string | null,
@@ -144,7 +182,8 @@ export function useAnswerFeed(preferences?: AnswerPreferences) {
     if (!question.trim() || !mounted.current) return
     const id = ++idRef.current
     const args: RequestArgs = { mode, meContext, image, instructions, transcript,
-      preferences: preferencesRef.current ? { ...preferencesRef.current } : undefined }
+      preferences: preferencesRef.current ? { ...preferencesRef.current } : undefined,
+      calibration: calibrationRef.current ? { ...calibrationRef.current } : null }
     argsRef.current.set(id, args)
     const previousLength = entriesRef.current.length
     updateEntries((previous) => [...previous, { id, question, answer: '', streaming: true, retrying: false, failed: false, error: null }])

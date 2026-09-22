@@ -6,7 +6,8 @@ import { LeverSwitch } from '@/components/ui/LeverSwitch'
 import { useAppIdentity } from '@/lib/desktop/useAppIdentity'
 import { useCopilot } from '@/lib/copilot/useCopilot'
 import { useScreenStream } from '@/lib/vision/useScreenStream'
-import { useModeContext } from '@/lib/copilot/useModeContext'
+import type { useModeContext } from '@/lib/copilot/useModeContext'
+import { useModeContexts } from '@/lib/copilot/useModeContexts'
 import { useCandidateProfile } from '@/lib/copilot/useCandidateProfile'
 import { useOrchestrationRouter } from '@/lib/copilot/useOrchestrationRouter'
 import { latencyStats } from '@/lib/copilot/latency'
@@ -84,13 +85,16 @@ export function CopilotPanel({
   const [mode, setMode] = useState<CopilotMode>(initialMode)
   const repo = useRepoInterview(getTranscript, mode === 'repoInterview')
   const screenRepo = useScreenRepository(mode === 'repoInterview', screen.sharing, screen.grabCodeFrame, responsePreferences.preferences)
-  const context = useModeContext(mode) // per-mode uploaded documents + answer instructions
+  const contexts = useModeContexts()
+  const context = contexts[mode] // per-mode uploaded documents + answer instructions
   const profile = useCandidateProfile() // resume + JD: global, always-injected grounding
   const router = useOrchestrationRouter() // auto mode-routing + live web search for a question
   const feed = useAnswerFeed(responsePreferences.preferences)
   const me = useMeContext() // opt-in mic stream: "what I said" as AI context, never in transcript
   const [showContextEditor, setShowContextEditor] = useState(false)
   const orchestrator = useOrchestrator(ask)
+  const feedBusy = feed.entries.some((entry) => entry.streaming)
+  const pipelineBusy = orchestrator.stage !== 'idle' && orchestrator.stage !== 'done'
   const [auto, setAuto] = useState(false)
   const [focusMode, setFocusMode] = useState(false)
   const [showAnswerPreferences, setShowAnswerPreferences] = useState(false)
@@ -194,7 +198,7 @@ export function CopilotPanel({
   // gate (the user explicitly asked, so answer even if the classifier is unsure).
   const answerQuestion = useCallback(
     (q: string, viaButton = false) => {
-      if (capturedRequestRef.current) return Promise.resolve()
+      if (capturedRequestRef.current || submissionRef.current || streaming || feedBusy || pipelineBusy) return Promise.resolve()
       const request = Symbol('captured question')
       capturedRequestRef.current = request
       const generation = preparationGeneration.current
@@ -211,14 +215,14 @@ export function CopilotPanel({
         const answerMode: CopilotMode = routed.classification?.mode ?? mode
         if (answerMode !== mode) setMode(answerMode)
         if (answerMode === 'repoInterview') { await answerRepoQuestion(q); return }
-        const sameMode = answerMode === mode
+        const routedContext = contexts[answerMode]
         const retrieved =
-          sameMode && answerMode === 'behavioral' && context.storyCount > 0
-            ? await context.retrieveStories(q, 2).then((ss) =>
+          answerMode === 'behavioral' && routedContext.storyCount > 0
+            ? await routedContext.retrieveStories(q, 2).then((ss) =>
                 ss.length ? ss.map((s) => `STORY — ${s.title}\n${s.fullText}`).join('\n\n---\n\n') : null,
               )
-            : sameMode && context.count > 0
-              ? await context.retrieve(q)
+            : routedContext.count > 0
+              ? await routedContext.retrieve(q)
               : null
         if (!current()) return
         const parts = [
@@ -230,7 +234,7 @@ export function CopilotPanel({
         const ctx = parts.length ? parts.join('\n\n') : null
         const image = screen.sharing && usesScreen(answerMode) ? screen.grabFrame() : null
         setPreparingCaptured(false)
-        await feed.answer(q, answerMode, ctx, image, context.instructions || null, getTranscript())
+        await feed.answer(q, answerMode, ctx, image, routedContext.instructions || null, getTranscript())
         } catch (cause) {
           if (current()) setPreparationError(cause instanceof Error ? cause.message : 'Could not prepare this question. Try Answer last question again.')
         } finally {
@@ -241,7 +245,7 @@ export function CopilotPanel({
         }
       })()
     },
-    [mode, context, profile, me, screen, router, feed, getTranscript, answerRepoQuestion],
+    [mode, contexts, profile, me, screen, router, feed, getTranscript, answerRepoQuestion, streaming, feedBusy, pipelineBusy],
   )
 
   // Manual "Answer" button: answer the latest question heard in the transcript RIGHT
@@ -260,7 +264,7 @@ export function CopilotPanel({
   // Proactive: while auto is on, a settled (complete) heard question is answered
   // automatically into the navigable answer feed. Returns the promise so the hook's
   // in-flight guard holds until streaming finishes (no stacked duplicates).
-  useProactive(auto && mode !== 'repoInterview', getTranscript, (q) => {
+  useProactive(auto && mode !== 'repoInterview' && !preparing && !streaming && !pipelineBusy, getTranscript, (q) => {
     return (async () => {
       await answerQuestion(q)
     })()
@@ -276,10 +280,10 @@ export function CopilotPanel({
   // changed since the last auto grab can still get image=null. Full fix needs a
   // force/ignore-gate option on grabFrame.
   useAutoCapture(
-    auto && mode === 'coding' && screen.sharing && orchestrator.stage === 'idle' && !input.trim(),
+    auto && mode === 'coding' && screen.sharing && orchestrator.stage === 'idle' && !input.trim() && !preparing && !preparingCaptured && !streaming && !feedBusy,
     screen.grabFrame,
     (frame) => {
-      if (streaming) return
+      if (streaming || feedBusy || submissionRef.current || capturedRequestRef.current) return
       orchestrator.process(frame, context.instructions || null)
     },
   )
@@ -309,7 +313,7 @@ export function CopilotPanel({
   const visibleTurns = turns.map((t, i) => ({ t, i })).filter(({ t }) => t.mode === mode)
 
   const submit = async (q: string) => {
-    if (!q.trim() || submissionRef.current || capturedRequestRef.current || streaming || screenRepo.analysis?.running) return
+    if (!q.trim() || submissionRef.current || capturedRequestRef.current || streaming || feedBusy || pipelineBusy || screenRepo.analysis?.running) return
     submissionRef.current = true
     const generation = ++preparationGeneration.current
     setPreparing(true)
@@ -462,8 +466,8 @@ export function CopilotPanel({
         <SlidersHorizontal size={16} aria-hidden /><span>{MODE_PROFILES[mode].label} · {responsePreferences.preferences.format}</span><ChevronDown size={15} aria-hidden className={`ml-auto ${mobileSetupOpen ? 'rotate-180' : ''}`} />
       </button>}
 
-      <div className={workspace ? 'grid min-w-0 lg:grid-cols-[17rem_minmax(0,1fr)]' : 'contents'}>
-        <div id={`${responseId}-setup`} className={workspace ? `${mobileSetupOpen ? 'block' : 'hidden'} border-b border-black/10 lg:block lg:border-b-0 lg:border-r` : 'contents'}>
+      <div className={workspace ? 'copilot-workspace-grid grid min-w-0 lg:grid-cols-[17rem_minmax(0,1fr)]' : 'contents'}>
+        <div id={`${responseId}-setup`} className={workspace ? `copilot-workspace-rail ${mobileSetupOpen ? 'block' : 'hidden'} border-b border-black/10 lg:block lg:border-b-0 lg:border-r` : 'contents'}>
           {workspace ? <WorkspaceModeNavigation mode={mode} onChange={changeMode} /> : <div aria-label="Interview focus" className="flex gap-1 overflow-x-auto border-b border-black/10 px-3 py-2">
             {MODE_ORDER.map((item) => <button key={item} type="button" onClick={() => changeMode(item)} aria-pressed={mode === item} data-active={mode === item} title={MODE_PROFILES[item].hint}
               className="min-h-11 shrink-0 rounded-full px-3 text-xs text-black/55 hover:bg-black/5 data-[active=true]:bg-ink data-[active=true]:text-white">{MODE_PROFILES[item].label}</button>)}
@@ -491,7 +495,7 @@ export function CopilotPanel({
           </section>}
         </div>
 
-        <div className={workspace ? 'flex min-w-0 flex-col' : 'contents'}>
+        <div className={workspace ? 'copilot-workspace-main flex min-w-0 flex-col' : 'contents'}>
           {mode !== 'repoInterview' && <div className="flex flex-wrap items-center gap-1 border-b border-black/10 px-4 py-2 text-xs">
             <button type="button" onClick={() => setView('chat')} aria-pressed={view === 'chat'} data-active={view === 'chat'} className="min-h-11 rounded-full px-3 text-black/60 hover:bg-black/5 data-[active=true]:bg-ink data-[active=true]:text-white">{workspace ? 'Conversation' : 'Chat'}</button>
             <button type="button" onClick={() => setView('answers')} aria-pressed={view === 'answers'} data-active={view === 'answers'} className="min-h-11 rounded-full px-3 text-black/60 hover:bg-black/5 data-[active=true]:bg-ink data-[active=true]:text-white">{workspace ? 'Captured questions' : 'Answers'}{feed.count > 0 ? ` (${feed.count})` : ''}</button>
@@ -523,7 +527,7 @@ export function CopilotPanel({
           {mode === 'repoInterview' ? <RepoAnalysisView repo={screenRepo} onRetry={(question, task, questionId) => void answerRepoQuestion(question, questionId, task)} /> : view === 'answers' ?
             <AnswersView feed={feed} auto={auto} review={review} onReview={runReview} onAnswerLatest={answerLatest} /> :
             <div ref={scrollRef} onScroll={(event) => { const el = event.currentTarget; followsAnswer.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80 }}
-              className={workspace ? 'min-h-80 flex-1 px-4 py-4 sm:px-7' : 'min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4'}>
+              className={workspace ? 'copilot-workspace-conversation min-h-80 flex-1 px-4 py-4 sm:px-7' : 'min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4'}>
               <div className={workspace ? 'mx-auto max-w-3xl space-y-6' : 'space-y-4'}>
                 {visibleTurns.length === 0 && !error && (workspace ? <WorkspaceEmptyState mode={mode} onChoose={choosePrompt} onAddContext={() => setShowContextEditor(true)} /> : <div className="pt-6 text-center">
                   <p className="font-[family-name:var(--font-serif)] text-lg text-black/50">Ask a question, or use the live transcript.</p>

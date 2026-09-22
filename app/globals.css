@@ -643,3 +643,15 @@ html.lt-dark:not(.lt-desktop) nav[aria-label='Main'] { background: rgba(18, 18, 
   color: #e4e4e7 !important;
   border-color: rgba(255, 255, 255, .2) !important;
 }
+
+/* The standalone desktop composer stays reachable; other workspace embeddings
+   (Mock Lab) keep natural document height. Small screens also use document scroll. */
+@media (min-width: 1024px) {
+  .ai-workspace-body > .copilot-workspace { height: 100%; min-height: 0; }
+  .ai-workspace-body .copilot-workspace-grid { flex: 1; min-height: 0; overflow: hidden; }
+  .ai-workspace-body .copilot-workspace-rail { overflow-y: auto; }
+  .ai-workspace-body .copilot-workspace-main { min-height: 0; overflow-y: auto; }
+  .ai-workspace-body .copilot-workspace-conversation { min-height: 0; overflow-y: auto; }
+  .ai-workspace-body .copilot-workspace-main > form { flex-shrink: 0; position: sticky; bottom: 0; background: var(--reader); z-index: 1; }
+  .ai-workspace-body .copilot-workspace-main > section { max-height: 45%; flex-shrink: 0; overflow-y: auto; }
+}

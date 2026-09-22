@@ -10,7 +10,8 @@ vi.mock('@/components/copilot/CopilotPanel', () => ({ CopilotPanel: ({ getTransc
   const copilot = useCopilot(getTranscript)
   return <button onClick={() => void copilot.ask('How should the limiter work?', 'coding', null, 'Existing grounding', 'Existing mode preferences')}>Generate test answer</button>
 } }))
-vi.mock('@/lib/interview/useInterviewRecorder', () => ({ useInterviewRecorder: () => ({ start: vi.fn(), stop: vi.fn().mockResolvedValue([]), getSegments: () => [], phase: 'idle', segments: [], error: null }), captureText: () => '' }))
+const recorderStop = vi.hoisted(() => vi.fn())
+vi.mock('@/lib/interview/useInterviewRecorder', () => ({ useInterviewRecorder: () => ({ start: vi.fn(), stop: recorderStop, getSegments: () => [], phase: 'idle', segments: [], error: null }), captureText: () => '' }))
 import { MockInterview } from './MockInterview'
 const fetcher = vi.fn()
 function LiveProbe() { const value = useContext(CopilotCalibrationContext); return <output data-testid="live-profile">{value?.revision}:{value?.instructions}</output> }
@@ -19,7 +20,7 @@ function mount(blocked = false) {
   render(<InterviewTuningProvider ownerId="tuning-tester"><LiveProbe /><MockInterview blocked={blocked} onActivity={vi.fn()} onComplete={complete} /></InterviewTuningProvider>)
   return complete
 }
-beforeEach(() => { fetcher.mockReset(); fetcher.mockImplementation(async () => new Response('Use an atomic sliding window.')); vi.stubGlobal('fetch', fetcher) })
+beforeEach(() => { recorderStop.mockReset().mockResolvedValue([]); fetcher.mockReset(); fetcher.mockImplementation(async () => new Response('Use an atomic sliding window.')); vi.stubGlobal('fetch', fetcher) })
 afterEach(() => { cleanup(); localStorage.clear(); vi.unstubAllGlobals() })
 async function testAnswer() {
   fireEvent.click(screen.getByText('Open live copilot for mock test'))
@@ -27,6 +28,17 @@ async function testAnswer() {
   await screen.findByText('Use an atomic sliding window.')
 }
 describe('mock calibrates the live system', () => {
+  it('cannot begin another test while the previous microphone flush is finishing', async () => {
+    let finish!: () => void
+    recorderStop.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve }))
+    mount()
+    fireEvent.click(screen.getByText('Open live copilot for mock test'))
+    fireEvent.click(screen.getByText('End test & open feedback'))
+    const open = screen.getByText('Open live copilot for mock test') as HTMLButtonElement
+    expect(open.disabled).toBe(true)
+    finish()
+    await waitFor(() => expect(open.disabled).toBe(false))
+  })
   it('uses the real answer transport and holds expected behavior out of generation', async () => {
     mount()
     fireEvent.change(screen.getByLabelText(/Expected behavior/), { target: { value: 'REFERENCE_ONLY' } })

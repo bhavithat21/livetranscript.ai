@@ -4,6 +4,7 @@ import { Download, Mic, Settings2, Square, Waves } from 'lucide-react'
 import { LiveAnswerCanvas } from './LiveAnswerCanvas'
 import { useKeytermPrefs } from '@/lib/transcription/useKeytermPrefs'
 import { liveTranscript, useInterviewRecorder } from '@/lib/interview/useInterviewRecorder'
+import { detectionTranscript } from '@/lib/interview/detectionTranscript'
 import { downloadInterview } from '@/lib/interview/client'
 import { useInterviewTuning } from '@/lib/interview/TuningContext'
 import type { InterviewSession } from '@/lib/interview/session'
@@ -42,9 +43,10 @@ export function LiveInterview({ blocked, onActivity, onComplete }: {
 
   // Detection consumes only finalized interviewer-channel text. The richer
   // labeled dual-channel transcript remains the answer's grounding context.
-  const questionText = useCallback(() => (source === 'mic' ? getMicSegments() : getCallSegments())
-    .filter((row) => row.isFinal && row.capturedAt >= startTime.current)
-    .map((row) => row.text).join('\n'), [getCallSegments, getMicSegments, source])
+  const questionText = useCallback(() => detectionTranscript(
+    (source === 'mic' ? getMicSegments() : getCallSegments()).filter((row) => row.capturedAt >= startTime.current),
+    source === 'both' ? getMicSegments().filter((row) => row.capturedAt >= startTime.current) : [],
+  ), [getCallSegments, getMicSegments, source])
 
   useEffect(() => {
     if (!active) return
@@ -134,7 +136,7 @@ export function LiveInterview({ blocked, onActivity, onComplete }: {
 
       <div className={`grid min-h-[68vh] min-w-0 ${transcriptOpen ? '2xl:grid-cols-[minmax(560px,1fr)_340px]' : 'grid-cols-1'}`}>
         <div className="flex min-w-0 flex-col p-4 sm:p-6">
-          <LiveAnswerCanvas getTranscript={text} getQuestionTranscript={questionText} instructions={tuning.state.active.instructions} />
+          <LiveAnswerCanvas getTranscript={text} getQuestionTranscript={questionText} />
           <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-black/[0.06] pt-3 text-xs text-black/45">
             {source !== 'system' && <span className="inline-flex items-center gap-1.5"><span className={`h-1.5 w-1.5 rounded-full ${microphone.phase === 'recording' ? 'bg-emerald-500' : 'bg-black/20'}`} />Mic</span>}
             {source !== 'mic' && <span className="inline-flex items-center gap-1.5"><span className={`h-1.5 w-1.5 rounded-full ${call.phase === 'recording' ? 'bg-emerald-500' : 'bg-black/20'}`} />System</span>}

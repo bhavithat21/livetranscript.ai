@@ -23,6 +23,7 @@ export function MockInterview({ blocked, visible = true, onActivity, onComplete 
   const [expected, setExpected] = useState(SCENARIOS[0].expected)
   const [draft, setDraft] = useState<string | null>(null)
   const instructions = draft ?? tuning.state.active.instructions
+  const [finishing, setFinishing] = useState(false)
   const [running, setRunning] = useState(false)
   const [answerRunning, setAnswerRunning] = useState(false)
   const [runs, setRuns] = useState<TuningRun[]>([])
@@ -46,7 +47,7 @@ export function MockInterview({ blocked, visible = true, onActivity, onComplete 
   const observeRunning = useCallback((value: boolean) => { if (collecting.current) setAnswerRunning(value) }, [])
 
   function begin() {
-    if (blocked || collecting.current || !scenario.trim()) return
+    if (blocked || stopping.current || collecting.current || !scenario.trim()) return
     collecting.current = true
     lifecycle.current += 1
     startedAt.current = Date.now()
@@ -82,7 +83,7 @@ export function MockInterview({ blocked, visible = true, onActivity, onComplete 
   }
   async function finish() {
     if (!collecting.current || stopping.current) return
-    stopping.current = true
+    stopping.current = true; setFinishing(true)
     collecting.current = false
     lifecycle.current += 1
     setRunning(false) // unmounting the production panel cancels its pending answer
@@ -92,7 +93,7 @@ export function MockInterview({ blocked, visible = true, onActivity, onComplete 
       if (runs.length) onComplete(tuningSession(runs, startedAt.current))
       else setNotice('Test ended without a completed copilot request. Nothing was scored or saved.')
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not save this report. Export the test examples before leaving.') }
-    finally { micLock.current = false; stopping.current = false; setMicOn(false); setMicBusy(false); onActivity(false) }
+    finally { setFinishing(false); micLock.current = false; stopping.current = false; setMicOn(false); setMicBusy(false); onActivity(false) }
   }
   function updateRun(id: string, update: Partial<Pick<TuningRun, 'verdict' | 'notes'>>) {
     setRuns((previous) => previous.map((run) => run.id === id ? { ...run, ...update } : run))
@@ -120,7 +121,7 @@ export function MockInterview({ blocked, visible = true, onActivity, onComplete 
       <label className="block space-y-2 text-sm">Expected behavior or reference answer (not sent to the answering model)<textarea rows={3} maxLength={2000} value={expected} disabled={answerRunning || blocked} onChange={(e) => setExpected(e.target.value)} className="resize-none w-full rounded-lg border border-black/10 bg-white/60 px-3 py-2.5 outline-none transition focus:border-emerald-700/30 focus:ring-2 focus:ring-emerald-700/10" placeholder="Describe what a correct, useful response must contain." /></label>
       <label className="block space-y-2 text-sm">Draft live calibration instructions<textarea rows={4} maxLength={MAX_CALIBRATION} value={instructions} disabled={answerRunning || blocked} onChange={(e) => setDraft(e.target.value)} className="resize-none w-full rounded-lg border border-black/10 bg-white/60 px-3 py-2.5 outline-none transition focus:border-emerald-700/30 focus:ring-2 focus:ring-emerald-700/10" placeholder="For example: Start with a direct answer. State assumptions. Keep the opening under 80 words. Never invent resume facts." /></label>
       <div className="flex flex-wrap gap-2">
-        {!running ? <button className="btn-signal" disabled={blocked || !scenario.trim()} onClick={begin}>Open live copilot for mock test</button> : <>
+        {!running ? <button className="btn-signal" disabled={blocked || finishing || !scenario.trim()} onClick={begin}>Open live copilot for mock test</button> : <>
           <button className="btn-ghost" disabled={micBusy || answerRunning} onClick={() => void toggleMic()}>{micOn ? 'Stop & append interviewer speech' : 'Dictate interviewer input'}</button>
           <button className="btn-ghost" disabled={answerRunning} onClick={() => setPanelKey((key) => key + 1)}>Reset copilot for clean replay</button>
           <button className="btn-signal" onClick={() => void finish()}>End test &amp; open feedback</button>
@@ -145,6 +146,6 @@ export function MockInterview({ blocked, visible = true, onActivity, onComplete 
       <label className="block space-y-1 text-sm">System improvement notes<textarea rows={2} maxLength={2000} value={run.notes} onChange={(e) => updateRun(run.id, { notes: e.target.value })} className="resize-none w-full rounded-lg border border-black/10 bg-white/60 px-3 py-2.5 outline-none transition focus:border-emerald-700/30 focus:ring-2 focus:ring-emerald-700/10" /></label>
       <details className="text-xs"><summary className="cursor-pointer">Calibration used for this request</summary><pre className="mt-2 whitespace-pre-wrap">{run.calibration || '(Live defaults; no calibration override)'}</pre></details>
     </article>)}</section>}
-    {running && <div hidden={!visible} className="min-h-[36rem] overflow-hidden rounded-2xl border border-black/10 lg:h-[48rem]"><CopilotCalibrationContext.Provider value={{ instructions, revision: tuning.state.active.revision, onResult: observe, onRunning: observeRunning }}><CopilotPanel key={panelKey} variant="workspace" getTranscript={transcript} /></CopilotCalibrationContext.Provider></div>}
+    {running && <div hidden={!visible} className="min-h-[36rem] rounded-2xl border border-black/10"><CopilotCalibrationContext.Provider value={{ instructions, revision: tuning.state.active.revision, onResult: observe, onRunning: observeRunning }}><CopilotPanel key={panelKey} variant="workspace" getTranscript={transcript} /></CopilotCalibrationContext.Provider></div>}
   </div>
 }

@@ -9,18 +9,18 @@ import { useOrchestrationRouter } from '@/lib/copilot/useOrchestrationRouter'
 import { useProactive } from '@/lib/copilot/useProactive'
 import { useCandidateProfile } from '@/lib/copilot/useCandidateProfile'
 import { useMeContext } from '@/lib/copilot/useMeContext'
-import { useModeContext } from '@/lib/copilot/useModeContext'
+import { useModeContexts } from '@/lib/copilot/useModeContexts'
 import type { CopilotMode } from '@/lib/copilot/modes'
 
 const MODE_LABEL: Record<string, string> = { general: 'General', coding: 'Coding', systemDesign: 'System Design', behavioral: 'Behavioral', repoInterview: 'Repository' }
 
-export function LiveAnswerCanvas({ getTranscript, getQuestionTranscript = getTranscript, instructions }: { getTranscript: () => string; getQuestionTranscript?: () => string; instructions: string }) {
+export function LiveAnswerCanvas({ getTranscript, getQuestionTranscript = getTranscript }: { getTranscript: () => string; getQuestionTranscript?: () => string }) {
   const responsePreferences = useResponsePreferences()
   const feed = useAnswerFeed(responsePreferences.preferences)
   const router = useOrchestrationRouter()
   const profile = useCandidateProfile()
   const me = useMeContext()
-  const context = useModeContext('general')
+  const contexts = useModeContexts()
   const [mode, setMode] = useState<CopilotMode>('general')
   const [routing, setRouting] = useState(false)
   const [paused, setPaused] = useState(false)
@@ -39,7 +39,10 @@ export function LiveAnswerCanvas({ getTranscript, getQuestionTranscript = getTra
       // Repository interviews keep their dedicated evidence pipeline outside Live.
       const answerMode: CopilotMode = routed.classification?.mode === 'repoInterview' ? 'general' : (routed.classification?.mode ?? 'general')
       setMode(answerMode)
-      const retrieved = context.count > 0 ? await context.retrieve(question) : null
+      const context = contexts[answerMode]
+      const retrieved = answerMode === 'behavioral' && context.storyCount > 0
+        ? await context.retrieveStories(question, 2).then((stories) => stories.map((story) => `STORY — ${story.title}\n${story.fullText}`).join('\n\n'))
+        : context.count > 0 ? await context.retrieve(question) : null
       if (!valid()) return
       const grounded = [
         routed.webContext && `LIVE WEB RESULTS:\n${routed.webContext}`,
@@ -47,11 +50,11 @@ export function LiveAnswerCanvas({ getTranscript, getQuestionTranscript = getTra
         me.getMeContext() && `What I said: ${me.getMeContext()}`,
         retrieved,
       ].filter(Boolean).join('\n\n') || null
-      await feed.answer(question, answerMode, grounded, null, instructions || context.instructions || null, getTranscript())
+      await feed.answer(question, answerMode, grounded, null, context.instructions || null, getTranscript())
     } catch (failure) {
       if (valid()) setError(failure instanceof Error ? failure.message : 'Could not prepare this question. Try again.')
     } finally { if (valid()) setRouting(false) }
-  }, [router, context, profile, me, feed, instructions, getTranscript])
+  }, [router, contexts, profile, me, feed, getTranscript])
 
   const proactive = useProactive(!paused, getQuestionTranscript, answerQuestion)
   const current = feed.current
