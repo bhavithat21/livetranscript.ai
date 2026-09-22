@@ -89,6 +89,10 @@ export function LiveInterview({ visible, blocked, onActivity, onComplete }: {
   const captured = (source !== 'mic' && callRows.length > 0) || (source !== 'system' && micRows.length > 0)
   const hasRecording = call.phase === 'recording' || microphone.phase === 'recording'
   const formatTime = (seconds: number) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+  // The generic copilot default is intentionally narrow for transcript pages.
+  // Live Interview is answer-first: reserve enough width for readable technical
+  // answers even when an older 384px preference is stored in localStorage.
+  const livePanelWidth = Math.min(720, Math.max(540, panel.width))
 
   if (!active) return <div className="mx-auto max-w-2xl py-5 sm:py-12">
     <section className="rounded-2xl border border-black/[0.07] bg-white/60 px-5 py-8 text-center sm:px-10 sm:py-12">
@@ -115,7 +119,7 @@ export function LiveInterview({ visible, blocked, onActivity, onComplete }: {
     </section>
   </div>
 
-  return <div className="space-y-4 sm:pr-[var(--interview-ask-w,0px)]" style={visible && askOpen ? { '--interview-ask-w': `${panel.width}px` } as CSSProperties : undefined}>
+  return <div className="space-y-4 sm:pr-[var(--interview-ask-w,0px)]" style={visible && askOpen ? { '--interview-ask-w': `${livePanelWidth}px` } as CSSProperties : undefined}>
     <section className="rounded-xl border border-black/[0.07] bg-white/50">
       <div className="flex flex-wrap items-center gap-3 border-b border-black/[0.06] px-4 py-3 sm:px-5">
         <span className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.1em] text-emerald-800"><span className="h-2 w-2 animate-pulse rounded-full bg-emerald-600" />Live</span>
@@ -124,12 +128,14 @@ export function LiveInterview({ visible, blocked, onActivity, onComplete }: {
         <button className="btn-ghost min-h-9 gap-1.5 px-2.5 text-xs" disabled={finishing} onClick={() => void finish()}><Square size={13} />End</button>
       </div>
 
-      <div className="min-h-[48vh] px-4 py-8 sm:px-8 sm:py-12">
-        <div className="mx-auto max-w-3xl">
-          <div className="flex items-center gap-2 text-xs text-black/40"><Sparkles size={14} /><span>Live assistant</span><span>·</span><span>Profile v{tuning.state.active.revision}</span></div>
-          <h2 className="mt-4 text-2xl font-semibold tracking-[-0.025em] sm:text-3xl">{busy ? 'Connecting audio…' : hasRecording ? 'Listening for the next question…' : 'Capture paused'}</h2>
-          <p className="mt-3 max-w-xl text-sm leading-relaxed text-black/45">Keep your attention on the conversation. Suggested responses appear in the assistant panel; open the transcript only when you need evidence or context.</p>
-          <button className="mt-7 inline-flex items-center gap-2 text-sm font-medium text-emerald-800" disabled={!captured || !consent} onClick={() => setAskOpen(true)}>Open assistant <ChevronRight size={15} /></button>
+      <div className="px-4 py-5 sm:px-5">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <Sparkles size={15} className="text-emerald-700" />
+            <span>{busy ? 'Connecting audio…' : hasRecording ? 'Listening' : 'Capture paused'}</span>
+          </div>
+          <span className="text-xs text-black/40">Profile v{tuning.state.active.revision}</span>
+          {!askOpen && <button className="ml-auto inline-flex items-center gap-1.5 text-sm font-medium text-emerald-800" disabled={!captured || !consent} onClick={() => setAskOpen(true)}>Open assistant <ChevronRight size={15} /></button>}
         </div>
       </div>
 
@@ -148,6 +154,6 @@ export function LiveInterview({ visible, blocked, onActivity, onComplete }: {
       </div>
     </section>}
     {(error || call.error || microphone.error) && <p role="alert" className="text-sm text-[color:var(--stop)]">{error || call.error || microphone.error}</p>}
-    {visible && askOpen && <CopilotPanel getTranscript={text} onClose={() => setAskOpen(false)} width={panel.width} onResizeStart={panel.onResizeStart} />}
+    {visible && askOpen && <CopilotPanel getTranscript={text} onClose={() => setAskOpen(false)} width={livePanelWidth} onResizeStart={panel.onResizeStart} />}
   </div>
 }
