@@ -1,8 +1,7 @@
 'use client'
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
-import { ChevronRight, Download, Mic, Settings2, Sparkles, Square, Waves } from 'lucide-react'
-import { CopilotPanel } from '@/components/copilot/CopilotPanel'
-import { usePanelWidth } from '@/lib/copilot/usePanelWidth'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Download, Mic, Settings2, Square, Waves } from 'lucide-react'
+import { LiveAnswerCanvas } from './LiveAnswerCanvas'
 import { useKeytermPrefs } from '@/lib/transcription/useKeytermPrefs'
 import { liveTranscript, useInterviewRecorder } from '@/lib/interview/useInterviewRecorder'
 import { downloadInterview } from '@/lib/interview/client'
@@ -17,14 +16,12 @@ export function LiveInterview({ visible, blocked, onActivity, onComplete }: {
   const microphone = useInterviewRecorder()
   const tuning = useInterviewTuning()
   const { keyterms } = useKeytermPrefs()
-  const panel = usePanelWidth()
   const [source, setSource] = useState<'both' | 'system' | 'mic'>('both')
   const [title, setTitle] = useState('Live interview')
   const [consent, setConsent] = useState(false)
   const [active, setActive] = useState(false)
   const [busy, setBusy] = useState(false)
   const [finishing, setFinishing] = useState(false)
-  const [askOpen, setAskOpen] = useState(false)
   const [setupOpen, setSetupOpen] = useState(false)
   const [transcriptOpen, setTranscriptOpen] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -54,7 +51,6 @@ export function LiveInterview({ visible, blocked, onActivity, onComplete }: {
     try {
       if (source !== 'mic') await call.start('system', keyterms)
       if (!ending.current && source !== 'system') await microphone.start('mic', keyterms)
-      if (!ending.current) setAskOpen(true)
     } catch (e) {
       await Promise.all([call.stop(), microphone.stop()])
       if (!ending.current) setError(e instanceof Error ? e.message : 'Could not start audio capture.')
@@ -63,7 +59,7 @@ export function LiveInterview({ visible, blocked, onActivity, onComplete }: {
 
   async function finish() {
     if (ending.current || !activity.current) return
-    ending.current = true; setFinishing(true); setBusy(true); setAskOpen(false)
+    ending.current = true; setFinishing(true); setBusy(true)
     try {
       const [callRows, micRows] = await Promise.all([call.stop(), microphone.stop()])
       const transcript = liveTranscript(
@@ -89,11 +85,6 @@ export function LiveInterview({ visible, blocked, onActivity, onComplete }: {
   const captured = (source !== 'mic' && callRows.length > 0) || (source !== 'system' && micRows.length > 0)
   const hasRecording = call.phase === 'recording' || microphone.phase === 'recording'
   const formatTime = (seconds: number) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
-  // The generic copilot default is intentionally narrow for transcript pages.
-  // Live Interview is answer-first: reserve enough width for readable technical
-  // answers even when an older 384px preference is stored in localStorage.
-  const livePanelWidth = Math.min(780, Math.max(600, panel.width))
-
   if (!active) return <div className="mx-auto max-w-2xl py-5 sm:py-12">
     <section className="rounded-2xl border border-black/[0.07] bg-white/60 px-5 py-8 text-center sm:px-10 sm:py-12">
       <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-emerald-50 text-emerald-800"><Waves size={20} /></div>
@@ -119,46 +110,35 @@ export function LiveInterview({ visible, blocked, onActivity, onComplete }: {
     </section>
   </div>
 
-  return <div className="space-y-4 sm:pr-[var(--interview-ask-w,0px)]" style={visible && askOpen ? { '--interview-ask-w': `${livePanelWidth}px` } as CSSProperties : undefined}>
+  return <div className="space-y-4">
     <section className="overflow-hidden rounded-2xl border border-black/[0.08] bg-white/70 shadow-[0_18px_50px_rgba(0,0,0,0.06)]">
-      <div className="flex flex-wrap items-center gap-3 border-b border-black/[0.07] px-5 py-3.5">
+      <div className="flex flex-wrap items-center gap-3 border-b border-black/[0.07] px-4 py-3 sm:px-5">
         <span className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.1em] text-emerald-700"><span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" />Live</span>
-        <span className="text-sm font-semibold">{title || 'Live interview'}</span>
+        <span className="min-w-0 truncate text-sm font-semibold">{title || 'Live interview'}</span>
         <span className="ml-auto text-sm font-medium tabular-nums text-black/45">{formatTime(elapsed)}</span>
         <button className="inline-flex min-h-9 items-center gap-1.5 rounded-full bg-red-500 px-3.5 text-xs font-semibold text-white shadow-sm hover:bg-red-600 disabled:opacity-50" disabled={finishing} onClick={() => void finish()}><Square size={12} />End</button>
       </div>
 
-      <div className="grid min-h-[64vh] xl:grid-cols-[minmax(0,1fr)_330px]">
-        <div className="flex min-w-0 flex-col px-5 py-5 sm:px-7">
-          <div className="flex flex-wrap items-center gap-2 text-xs text-black/45">
-            <span className="rounded-full bg-emerald-50 px-2.5 py-1 font-medium text-emerald-800">Question detection on</span>
-            <span>Profile v{tuning.state.active.revision}</span>
-          </div>
-          <div className="flex flex-1 flex-col justify-center py-10">
-            <div className="mx-auto w-full max-w-2xl">
-              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-black/35">Current question</p>
-              <h2 className="mt-3 text-2xl font-semibold tracking-[-0.025em] sm:text-3xl">{busy ? 'Connecting audio…' : hasRecording ? 'Listening for the next question…' : 'Capture paused'}</h2>
-              <p className="mt-3 max-w-xl text-sm leading-6 text-black/45">When a question settles, the Interview Copilot streams a direct, speakable answer beside this workspace.</p>
-              {!askOpen && <button className="mt-6 inline-flex items-center gap-1.5 rounded-lg bg-ink px-4 py-2.5 text-sm font-semibold text-white" disabled={!captured || !consent} onClick={() => setAskOpen(true)}>Open copilot <ChevronRight size={15} /></button>}
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-3 border-t border-black/[0.06] pt-3 text-xs text-black/45">
+      <div className={`grid min-h-[68vh] min-w-0 ${transcriptOpen ? '2xl:grid-cols-[minmax(560px,1fr)_340px]' : 'grid-cols-1'}`}>
+        <div className="flex min-w-0 flex-col p-4 sm:p-6">
+          <LiveAnswerCanvas getTranscript={text} instructions={tuning.state.active.instructions} />
+          <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-black/[0.06] pt-3 text-xs text-black/45">
             {source !== 'system' && <span className="inline-flex items-center gap-1.5"><span className={`h-1.5 w-1.5 rounded-full ${microphone.phase === 'recording' ? 'bg-emerald-500' : 'bg-black/20'}`} />Mic</span>}
             {source !== 'mic' && <span className="inline-flex items-center gap-1.5"><span className={`h-1.5 w-1.5 rounded-full ${call.phase === 'recording' ? 'bg-emerald-500' : 'bg-black/20'}`} />System</span>}
+            <span>{busy ? 'Connecting…' : hasRecording ? 'Listening' : 'Paused'}</span>
             <button className="ml-auto rounded-md px-2 py-1.5 font-medium hover:bg-black/[0.04]" onClick={() => setTranscriptOpen((open) => !open)}>{transcriptOpen ? 'Hide transcript' : 'Transcript'}</button>
             <button className="inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 font-medium hover:bg-black/[0.04]" disabled={!captured} onClick={() => downloadInterview(title, text())}><Download size={13} />Export</button>
           </div>
         </div>
 
-        {transcriptOpen && <aside className="border-t border-black/[0.07] bg-black/[0.018] p-4 xl:border-l xl:border-t-0">
+        {transcriptOpen && <aside className="border-t border-black/[0.07] bg-black/[0.018] p-4 2xl:border-l 2xl:border-t-0">
           <div className="flex items-center justify-between"><div><h3 className="text-sm font-semibold">Transcript</h3><p className="mt-0.5 text-[11px] text-black/40">Live context</p></div><button className="text-xs text-black/40 hover:text-ink" onClick={() => setTranscriptOpen(false)}>Close</button></div>
-          <div className="mt-4 max-h-[54vh] space-y-5 overflow-y-auto pr-1">
+          <div className="mt-4 max-h-[48vh] space-y-5 overflow-y-auto pr-1 2xl:max-h-[60vh]">
             {([{ name: 'Interviewer', rows: callRows, enabled: source !== 'mic' }, { name: 'You', rows: micRows, enabled: source !== 'system' }] as const).filter((channel) => channel.enabled).map(({ name, rows }) => <div key={name}><h4 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-black/35">{name}</h4><div className="space-y-2 text-xs leading-5">{rows.length === 0 ? <p className="text-black/30">Waiting for speech…</p> : rows.slice(-12).map((row) => <p key={row.id} className={row.isFinal ? 'text-black/65' : 'italic text-black/35'}>{row.text}</p>)}</div></div>)}
           </div>
         </aside>}
       </div>
     </section>
     {(error || call.error || microphone.error) && <p role="alert" className="text-sm text-[color:var(--stop)]">{error || call.error || microphone.error}</p>}
-    {visible && askOpen && <CopilotPanel getTranscript={text} onClose={() => setAskOpen(false)} width={livePanelWidth} onResizeStart={panel.onResizeStart} />}
   </div>
 }
