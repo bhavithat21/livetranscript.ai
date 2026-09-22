@@ -48,7 +48,7 @@ function Workspace({ ownerId }: { ownerId: string }) {
   function guardNavigation(event: MouseEvent<HTMLDivElement>) {
     if (!active || !(event.target instanceof Element) || !event.target.closest('a[href]')) return
     event.preventDefault()
-    setNavigationError('Finish the active session before leaving Interview. Switching between Interview views is safe.')
+    setNavigationError('Finish the active interview before leaving this workspace. Switching between Interview views is safe.')
   }
 
   function tabKey(event: KeyboardEvent<HTMLButtonElement>, index: number) {
