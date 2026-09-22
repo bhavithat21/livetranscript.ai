@@ -12,6 +12,7 @@
     "eval:coding": "vitest run --config evals/vitest.eval.config.ts runCoding",
     "eval:detection": "vitest run --config evals/vitest.eval.config.ts runDetection",
     "eval:voice": "vitest run --config evals/vitest.eval.config.ts runBehavioralVoice",
+    "eval:live": "vitest run --config evals/vitest.eval.config.ts runLiveAnswer",
     "eval:all": "vitest run --config evals/vitest.eval.config.ts",
     "eval:repo": "vitest run --config evals/repo/vitest.config.ts runBenchmark",
     "eval:repo:plan": "REPO_BENCHMARK_ACTION=plan vitest run --config evals/repo/vitest.config.ts manageBenchmark",
