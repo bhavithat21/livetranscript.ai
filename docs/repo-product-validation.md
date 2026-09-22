@@ -10,6 +10,7 @@ The product journey is: open Repo interview → upload or capture browser IDE vi
 | ESLint | Passed with no errors or warnings |
 | Production build and TypeScript | Passed |
 | Release-check HTTP fixtures | Healthy release passed; wrong commit, missing feature and unprotected recording page correctly failed |
+| Release-check regression suite | 4 Python HTTP tests passed, including document headers and external-redirect rejection |
 | Known-bug repository | Baseline: 1 pass / 2 failures; minimal patch in a disposable copy: 3 passes / 0 failures |
 | Authenticated browser and live AI quality | Not run; model credentials and an authenticated test session are unavailable here |
 
@@ -44,6 +45,7 @@ corepack pnpm test
 corepack pnpm exec eslint .
 corepack pnpm run eval:detection
 corepack pnpm build
+python3 -m unittest scripts/test_verify_deployment.py
 ```
 
 Component tests use a DOM test environment and simulated model/network responses. The API journey tests use the real application pipeline with only the authentication/telemetry and external model SDK boundary replaced. These tests demonstrate interaction and transport behavior, not browser rendering fidelity, OCR accuracy or reasoning quality.
@@ -58,6 +60,8 @@ python3 scripts/verify_deployment.py https://livetranscript.ai EXPECTED_COMMIT_S
 
 This fails on an old release, absent feature identifiers, an unavailable homepage, or a signed-out recording page that does not redirect to sign-in. It never disables authentication or claims to test model output.
 
+The checker sends browser document headers for page requests and preserves anonymous cookies through Clerk's bounded development handshake. This matters because [Clerk deliberately returns 404 for unauthenticated non-document requests](https://clerk.com/docs/reference/nextjs/app-router/auth#auth-protect). The final redirect must still reach this application's sign-in page; unrelated external redirects fail.
+
 ## Authenticated browser and live-model acceptance
 
 Start with the included [known-bug repository](../examples/repository-cancellation/README.md). It has two source files, three executable acceptance cases, capture instructions and reviewer ground truth. The initial run intentionally has two failures; the minimal correct patch makes all three tests pass. Make a disposable copy and sign in normally. Configure the provider keys in the deployment environment; never paste keys into screenshots or the question field.
@@ -71,4 +75,4 @@ Start with the included [known-bug repository](../examples/repository-cancellati
 
 Record real timings from question settled → preliminary navigation → first answer text → complete answer. Record OCR mismatches, incorrect citations, unsupported claims, patch correctness and test outcomes separately. A fast response or passing keyword score does not prove correctness.
 
-Use the [model comparison harness](../evals/repo/README.md) for per-role measurements. Do not select a benchmark winner or claim live interview reliability until real model outputs and patches have been reviewed. Live model checks remain unrun in this workspace while API credentials and authenticated publication access are unavailable.
+Use the [model comparison harness](../evals/repo/README.md) for per-role measurements. Do not select a benchmark winner or claim live interview reliability until real model outputs and patches have been reviewed. Live model checks remain unrun in this workspace while API credentials and an authenticated application session are unavailable.

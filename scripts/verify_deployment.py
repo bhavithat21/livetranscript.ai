@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Read-only release smoke checks. Does not claim live AI functionality."""
 import argparse
+import http.cookiejar
 import json
 import re
 import sys
@@ -27,11 +28,16 @@ def main():
     if not re.fullmatch(r'[a-fA-F0-9]{7,40}', args.commit):
         parser.error('Expected commit must contain 7–40 hexadecimal characters')
     base = args.origin.rstrip('/')
-    opener = urllib.request.build_opener(NoRedirect)
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()), NoRedirect)
     report = {'origin': base, 'expectedCommit': args.commit, 'checks': [], 'liveAiTest': 'not run; requires sign-in and model credentials'}
 
-    def fetch(path):
-        req = urllib.request.Request(base + path, headers={'User-Agent': 'LiveTranscript-Release-Check', 'Cache-Control': 'no-cache'})
+    def fetch(path, document=False):
+        headers = {'User-Agent': 'LiveTranscript-Release-Check', 'Cache-Control': 'no-cache', 'Accept': 'application/json'}
+        if document:
+            # Clerk distinguishes browser navigation from API requests. A plain
+            # HTTP client receives a deliberate 404 for protected pages.
+            headers.update({'Accept': 'text/html', 'Sec-Fetch-Dest': 'document', 'Sec-Fetch-Mode': 'navigate'})
+        req = urllib.request.Request(urllib.parse.urljoin(base + '/', path), headers=headers)
         try:
             with opener.open(req, timeout=20) as response:
                 return response.status, response.headers, response.read(300_000)
@@ -59,11 +65,37 @@ def main():
         status, _, _ = fetch('/')
         if not check('Home page', status == 200, f'HTTP {status}'):
             return 1
-        status, headers, _ = fetch('/record')
-        redirect = urllib.parse.urljoin(base, headers.get('Location', ''))
-        target = urllib.parse.urlsplit(redirect)
-        protected = status in (302, 303, 307, 308) and target.netloc == origin.netloc and target.path.startswith('/sign-in')
-        if not check('Signed-out recording page requires sign-in', protected, f'HTTP {status}; redirect path {target.path}'):
+        current_url = base + '/record'
+        protected = False
+        target_path = ''
+        for _ in range(6):
+            status, headers, _ = fetch(current_url, document=True)
+            if status not in (302, 303, 307, 308):
+                break
+            redirect = urllib.parse.urljoin(current_url, headers.get('Location', ''))
+            target = urllib.parse.urlsplit(redirect)
+            target_path = target.path
+            if target.username or target.password:
+                break
+            same_origin = target.scheme == origin.scheme and target.netloc == origin.netloc
+            if same_origin and (target.path == '/sign-in' or target.path.startswith('/sign-in/')):
+                protected = True
+                break
+            # Development Clerk instances initialize an anonymous browser cookie
+            # before returning to the app. Follow only that exact flow, retaining
+            # cookies and never printing handshake tokens or query parameters.
+            clerk_handshake = (
+                target.scheme == 'https'
+                and (target.hostname or '').endswith('.clerk.accounts.dev')
+                and target.port in (None, 443)
+                and target.path == '/v1/client/handshake'
+                and headers.get('X-Clerk-Auth-Status') == 'handshake'
+                and urllib.parse.parse_qs(target.query).get('redirect_url') == [base + '/record']
+            )
+            if not (same_origin and target.path == '/record') and not clerk_handshake:
+                break
+            current_url = redirect
+        if not check('Signed-out recording page requires sign-in', protected, f'HTTP {status}; redirect path {target_path}'):
             return 1
         print(json.dumps(report, indent=2))
         return 0

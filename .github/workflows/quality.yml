@@ -12,6 +12,7 @@ on:
       - 'app/**'
       - 'components/**'
       - 'evals/**'
+      - 'scripts/*verify_deployment.py'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - 'proxy.ts'
@@ -23,6 +24,7 @@ on:
       - 'app/**'
       - 'components/**'
       - 'evals/**'
+      - 'scripts/*verify_deployment.py'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - 'proxy.ts'
@@ -49,6 +51,8 @@ jobs:
         run: pnpm exec tsc --noEmit
       - name: Unit tests
         run: pnpm exec vitest run
+      - name: Release checker tests
+        run: python3 -B -m unittest scripts/test_verify_deployment.py
       - name: Lint
         run: pnpm run lint
       - name: Production build
