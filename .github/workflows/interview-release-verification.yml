@@ -1,0 +1,101 @@
+name: Interview production verification
+on:
+  push:
+    branches: ['verify/interview-release-20260922']
+    paths: ['.github/workflows/interview-release-verification.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify exact production release, browser navigation and API protection
+        env:
+          EXPECTED_COMMIT: 2fd72434539800c89dae27943afd5f77dac3a6d9
+        run: |
+          python3 - <<'PY'
+          import http.cookiejar
+          import json
+          import os
+          import sys
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+          from pathlib import Path
+
+          base = 'https://livetranscript.ai'
+          expected = os.environ['EXPECTED_COMMIT']
+          report = {'origin': base, 'expectedCommit': expected, 'checks': [], 'authenticatedAiAndAudio': 'not tested; requires user sign-in and device permissions'}
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+          opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()), NoRedirect)
+          def fetch(url, document=False, method='GET'):
+              headers = {'User-Agent': 'LiveTranscript-Release-Check', 'Cache-Control': 'no-cache', 'Accept': 'application/json'}
+              if document:
+                  headers.update({'Accept': 'text/html', 'Sec-Fetch-Dest': 'document', 'Sec-Fetch-Mode': 'navigate'})
+              data = None
+              if method == 'POST':
+                  headers.update({'Content-Type': 'application/json', 'Origin': base, 'Sec-Fetch-Site': 'same-origin'})
+                  data = b'{}'
+              req = urllib.request.Request(url, headers=headers, data=data, method=method)
+              try:
+                  with opener.open(req, timeout=20) as r:
+                      return r.status, r.headers, r.read(500000)
+              except urllib.error.HTTPError as e:
+                  return e.code, e.headers, e.read(10000)
+          def check(name, passed, detail):
+              report['checks'].append({'name': name, 'passed': bool(passed), 'detail': detail})
+              if not passed:
+                  raise AssertionError(name)
+          try:
+              status, headers, body = fetch(base + '/api/health')
+              check('Production health', status == 200, f'HTTP {status}')
+              health = json.loads(body)
+              check('Exact deployed commit', health.get('commit') == expected, health.get('commit'))
+              check('Health is not cached', 'no-store' in headers.get('Cache-Control', ''), headers.get('Cache-Control'))
+              status, headers, body = fetch(base + '/')
+              check('Home page and Interviews navigation', status == 200 and b'href="/interview"' in body, f'HTTP {status}')
+              original = base + '/interview'
+              current = original
+              sign_in = None
+              for attempt in range(6):
+                  status, headers, body = fetch(current, document=True)
+                  if status not in (302, 303, 307, 308):
+                      break
+                  target_url = urllib.parse.urljoin(current, headers.get('Location', ''))
+                  target = urllib.parse.urlsplit(target_url)
+                  if target.username or target.password:
+                      break
+                  same = target.scheme == 'https' and target.netloc == 'livetranscript.ai'
+                  if same and (target.path == '/sign-in' or target.path.startswith('/sign-in/')):
+                      sign_in = target_url
+                      break
+                  handshake = (target.scheme == 'https' and (target.hostname or '').endswith('.clerk.accounts.dev') and target.port in (None, 443) and target.path == '/v1/client/handshake' and headers.get('X-Clerk-Auth-Status') == 'handshake' and urllib.parse.parse_qs(target.query).get('redirect_url') == [original])
+                  if not (same and target.path == '/interview') and not handshake:
+                      break
+                  current = target_url
+              check('Interview browser navigation requires sign-in', sign_in is not None, f'HTTP {status}; verified same-origin /sign-in destination' if sign_in else f'HTTP {status}; sign-in redirect not reached')
+              status, headers, body = fetch(sign_in, document=True)
+              check('Sign-in page is served', status == 200 and b'__next_error__' not in body, f'HTTP {status}')
+              for path in ['/api/copilot/answer', '/api/interview']:
+                  status, headers, body = fetch(base + path, method='POST')
+                  blocked = status in (401, 403) or (status == 404 and headers.get('X-Clerk-Auth-Status') == 'signed-out')
+                  check('Signed-out POST blocked: ' + path, blocked, f'HTTP {status}; auth status {headers.get("X-Clerk-Auth-Status", "not supplied")}')
+          except Exception as error:
+              # Do not log redirect query strings, handshake cookies or tokens.
+              report['failureType'] = type(error).__name__
+          finally:
+              Path('interview-production-verification.json').write_text(json.dumps(report, indent=2))
+              print(json.dumps(report, indent=2))
+          sys.exit(0 if 'failureType' not in report and all(c['passed'] for c in report['checks']) else 1)
+          PY
+      - name: Preserve verification report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: interview-production-verification
+          path: interview-production-verification.json
+          retention-days: 14
