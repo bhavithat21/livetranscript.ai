@@ -52,7 +52,7 @@ it('does not re-answer a question already answered (dedupe holds)', () => {
 
 
 it('does not loop after an async answer finishes while the transcript is unchanged', async () => {
-  let transcript = 'What authentication methods can webhooks use?'
+  const transcript = 'What authentication methods can webhooks use?'
   const onQ = vi.fn(async () => {
     await Promise.resolve()
   })
