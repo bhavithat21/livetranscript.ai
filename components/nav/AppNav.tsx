@@ -11,7 +11,7 @@ import { ThemeToggle } from '@/components/ui/ThemeToggle'
 // room, session detail, the public share view, and auth pages) so nothing
 // competes with the transcript for attention. Each of those carries its own
 // lightweight back-link instead.
-const HIDDEN_PREFIXES = ['/record', '/room', '/remote', '/s/', '/session/', '/settings', '/sign-in', '/sign-up']
+const HIDDEN_PREFIXES = ['/record', '/interview', '/room', '/remote', '/s/', '/session/', '/settings', '/sign-in', '/sign-up']
 
 export function AppNav({ clerkConfigured }: { clerkConfigured: boolean }) {
   const pathname = usePathname()
@@ -27,10 +27,10 @@ export function AppNav({ clerkConfigured }: { clerkConfigured: boolean }) {
           <Wordmark className="text-lg" />
         </Link>
 
-        {/* Desktop: full link row. Phone (< md): collapse secondary links into a
-            menu so the pill never overflows 320px. */}
+        {/* Collapse secondary links on smaller screens so the added interview
+            destination never squeezes the primary action or account controls. */}
         <div className="ml-auto flex items-center gap-1 text-sm">
-          <div className="hidden items-center gap-1 md:flex">
+          <div className="hidden items-center gap-1 xl:flex">
             {clerkConfigured && (
               <Show when="signed-in">
                 <span data-tour="library">
@@ -47,6 +47,7 @@ export function AppNav({ clerkConfigured }: { clerkConfigured: boolean }) {
             <span data-tour="room">
               <NavLink href="/room/new">New room</NavLink>
             </span>
+            <NavLink href="/interview">Interviews</NavLink>
             <NavLink href="/remote">Remote assist</NavLink>
             <button
               type="button"
@@ -56,8 +57,7 @@ export function AppNav({ clerkConfigured }: { clerkConfigured: boolean }) {
               Tour
             </button>
           </div>
-          {/* Stays OUTSIDE the md:flex group — the theme control is worth keeping
-              on phones, unlike the secondary links that collapse into the menu. */}
+          {/* The theme control remains available on every screen size. */}
           <ThemeToggle className="transition-colors hover:bg-black/5 hover:text-ink" />
           <Link href="/record" data-tour="record" className="btn-signal ml-1 px-4 text-sm">
             New transcript
@@ -77,8 +77,8 @@ export function AppNav({ clerkConfigured }: { clerkConfigured: boolean }) {
               </Show>
             </span>
           )}
-          {/* Phone menu: everything the desktop row holds, behind one 44px button. */}
-          <details className="group relative md:hidden">
+          {/* Compact menu: secondary destinations behind one 44px button. */}
+          <details className="group relative xl:hidden">
             <summary className="ml-1 inline-flex h-11 w-11 cursor-pointer list-none items-center justify-center rounded-full hover:bg-black/5 [&::-webkit-details-marker]:hidden">
               <Menu size={20} />
             </summary>
@@ -91,6 +91,7 @@ export function AppNav({ clerkConfigured }: { clerkConfigured: boolean }) {
               <MenuLink href="/pricing">Pricing</MenuLink>
               <MenuLink href="/download">Download</MenuLink>
               <MenuLink href="/room/new">New room</MenuLink>
+              <MenuLink href="/interview">Interviews</MenuLink>
               <MenuLink href="/remote">Remote assist</MenuLink>
               {clerkConfigured && (
                 <Show when="signed-out">
