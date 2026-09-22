@@ -298,7 +298,7 @@ export function CopilotPanel({
     <aside
       // Full-width on mobile; on ≥sm the width follows the drag-resized value
       // (--panel-w), so the drawer is user-resizable and the preference sticks.
-      className={`glass copilot-panel relative flex h-full w-full flex-col overflow-hidden border-l border-black/10 sm:w-[var(--panel-w)] sm:rounded-l-3xl${stealth ? ' lt-stealth' : ''}`}
+      className={`copilot-panel relative flex h-full w-full flex-col overflow-hidden border-l border-black/10 bg-[color:var(--paper)] shadow-[-16px_0_40px_rgba(0,0,0,0.08)] sm:w-[var(--panel-w)]${stealth ? ' lt-stealth' : ''}`}
       style={{ '--panel-w': `${width}px` } as CSSProperties}
     >
       {/* Left-edge resize handle (desktop only). Drag to widen/narrow the panel.
@@ -318,7 +318,7 @@ export function CopilotPanel({
           dot on the ⋯ so nothing "on" is hidden. */}
       <header className="relative flex items-center gap-2 border-b border-black/10 px-4 py-3">
         <Sparkles size={16} className="shrink-0 text-[color:var(--signal)]" />
-        <span className="font-[family-name:var(--font-serif)] text-base font-semibold">Ask</span>
+        <span className="text-sm font-semibold tracking-[-0.01em]">Interview Copilot</span>
         <div className="ml-auto flex items-center gap-1">
           {/* 1 — Auto-answer: the primary live control. */}
           <div
@@ -429,14 +429,14 @@ export function CopilotPanel({
 
       {/* Mode selector — per-domain answer styling (coding / system design /
           behavioral) on the same transcript grounding. */}
-      <div className="flex gap-1 overflow-x-auto border-b border-black/10 px-3 py-2">
+      <div className="flex gap-1 overflow-x-auto border-b border-black/[0.07] px-3 py-2">
         {MODE_ORDER.map((m) => (
           <button
             key={m}
             onClick={() => setMode(m)}
             data-active={mode === m}
             title={MODE_PROFILES[m].hint}
-            className="shrink-0 rounded-full px-3 py-1 text-xs text-black/55 transition-colors hover:bg-black/5 data-[active=true]:bg-ink data-[active=true]:text-white"
+            className="shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-medium text-black/50 transition-colors hover:bg-black/5 data-[active=true]:bg-black/[0.07] data-[active=true]:text-ink"
           >
             {MODE_PROFILES[m].label}
           </button>
@@ -925,7 +925,7 @@ function AnswersView({
   }
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
-      <div className="flex items-center gap-2 border-b border-black/10 px-4 py-2 text-xs text-black/50">
+      <div className="flex flex-wrap items-center gap-2 border-b border-black/[0.07] px-4 py-2.5 text-xs text-black/50">
         <button onClick={feed.prev} disabled={feed.cursor === 0} className="rounded-full p-1 hover:bg-black/5 disabled:opacity-30" aria-label="Previous">
           <ChevronLeft size={16} />
         </button>
@@ -980,9 +980,9 @@ function AnswersView({
           )}
         </div>
       )}
-      <div ref={bodyRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
+      <div ref={bodyRef} className="flex-1 space-y-4 overflow-y-auto px-5 py-5 sm:px-6">
         <div className="text-xs font-medium uppercase tracking-wide text-[color:var(--signal)]">Question</div>
-        <p className="text-sm font-medium text-ink">{e?.question}</p>
+        <p className="text-base font-medium leading-snug text-ink">{e?.question}</p>
         {(() => {
           // Two-pass draft protocol: while a fast draft is showing, badge it as a
           // "Quick take"; it's cleanly replaced by the refined answer when ready.
@@ -1138,7 +1138,7 @@ function StructuredAnswer({ content, streaming }: { content: string; streaming: 
     <div className="space-y-3">
       {lede && (
         // Tier 1 — the hero line. Larger, near-full-contrast, accent left-rule.
-        <p className="border-l-[3px] border-[color:var(--signal)] pl-3 text-lg font-medium leading-snug text-ink">
+        <p className="border-l-[3px] border-[color:var(--signal)] pl-4 text-xl font-medium leading-snug text-ink">
           {lede}
           {streaming && !body && <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-[color:var(--signal)] align-middle" aria-hidden />}
         </p>
@@ -1168,7 +1168,7 @@ function RichContent({ content, streaming }: { content: string; streaming: boole
   const parts = content.split(/(```mermaid\n[\s\S]*?```)/g)
 
   return (
-    <div className="max-w-[92%] break-words text-sm leading-relaxed text-ink">
+    <div className="max-w-none break-words text-[15px] leading-7 text-ink sm:text-base">
       {parts.map((part, i) => {
         const mermaidMatch = part.match(/```mermaid\n([\s\S]*?)```/)
         if (mermaidMatch) {
