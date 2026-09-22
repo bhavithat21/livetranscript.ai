@@ -11,6 +11,7 @@ const LINKS = [
   { href: '/', label: 'Home', icon: Home },
   { href: '/dashboard', label: 'Library', icon: LayoutGrid },
   { href: '/record', label: 'New transcript', icon: Mic },
+  { href: '/interview', label: 'Interviews', icon: Mic },
   { href: '/room/new', label: 'New meeting', icon: Users },
   { href: '/remote', label: 'Remote assist', icon: MonitorUp },
   { href: '/settings', label: 'Settings', icon: Settings },
