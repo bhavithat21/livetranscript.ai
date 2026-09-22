@@ -9,9 +9,10 @@ import { captureText, useInterviewRecorder } from '@/lib/interview/useInterviewR
 import type { InterviewSession } from '@/lib/interview/session'
 
 const SCENARIOS = [
-  { name: 'Coding', text: 'Interviewer: Implement a per-user sliding-window rate limiter. Explain the data structure, concurrency concerns, complexity and boundary tests.' },
-  { name: 'System design', text: 'Interviewer: Design a reliable notification service. Clarify scale, explain retry and deduplication behavior, and discuss trade-offs.' },
-  { name: 'Behavioral grounding', text: 'Interviewer: Tell me about a time you disagreed with a technical decision. Use only experience supplied in your profile; ask for missing details rather than inventing them.' },
+  { name: 'Direct technical', text: 'Interviewer: What authentication methods can webhooks use?', expected: 'Answer immediately. Cover HMAC signatures, bearer/API tokens, Basic Auth, mTLS, and IP allowlisting as a supporting control. No transcript disclaimer.' },
+  { name: 'Coding', text: 'Interviewer: Implement a per-user sliding-window rate limiter. Explain the data structure, concurrency concerns, complexity and boundary tests.', expected: 'Start with the algorithm and complexity, then a concise execution plan and correct code/tests.' },
+  { name: 'System design', text: 'Interviewer: Design a reliable notification service. Clarify scale, explain retry and deduplication behavior, and discuss trade-offs.', expected: 'Start with requirements/scale, then architecture, retries/idempotency and explicit trade-offs. Diagram only if useful.' },
+  { name: 'Behavioral grounding', text: 'Interviewer: Tell me about a time you disagreed with a technical decision. Use only experience supplied in your profile; ask for missing details rather than inventing them.', expected: 'Use only grounded candidate experience, give a speakable STAR answer, and never invent a story.' },
 ]
 
 export function MockInterview({ blocked, visible = true, onActivity, onComplete }: {
@@ -21,7 +22,7 @@ export function MockInterview({ blocked, visible = true, onActivity, onComplete 
   const panel = usePanelWidth()
   const microphone = useInterviewRecorder()
   const [scenario, setScenario] = useState(SCENARIOS[0].text)
-  const [expected, setExpected] = useState('')
+  const [expected, setExpected] = useState(SCENARIOS[0].expected)
   const [draft, setDraft] = useState<string | null>(null)
   const instructions = draft ?? tuning.state.active.instructions
   const [running, setRunning] = useState(false)
@@ -113,9 +114,9 @@ export function MockInterview({ blocked, visible = true, onActivity, onComplete 
 
   return <div className="space-y-5 sm:pr-[var(--mock-panel-w,0px)]" style={running && visible ? { '--mock-panel-w': `${panel.width}px` } as CSSProperties : undefined}>
     <section className="space-y-6 rounded-xl border border-black/[0.07] bg-white/50 p-5 sm:p-7">
-      <div><h2 className="font-[family-name:var(--font-serif)] text-2xl">Mock Lab</h2><p className="mt-2 text-sm leading-relaxed text-black/60">Test the exact system used in Live. Run a scenario, review the response, tune the profile, then promote only after it passes.</p></div>
+      <div><h2 className="font-[family-name:var(--font-serif)] text-2xl">Mock Lab</h2><p className="mt-2 text-sm leading-relaxed text-black/60">Test the exact Live pipeline against realistic interview questions. The expected answer is held out from generation so you can catch regressions in directness, correctness, grounding, and latency.</p></div>
       <p className="rounded-lg border border-black/[0.06] bg-black/[0.025] px-3 py-2.5 text-sm text-black/60">Live profile: revision {tuning.state.active.revision}. Draft instructions are isolated until you review a successful test and choose Promote to Live.</p>
-      <div className="flex flex-wrap gap-2">{SCENARIOS.map((item) => <button key={item.name} className="btn-ghost text-sm" disabled={answerRunning || micOn || blocked} onClick={() => setScenario(item.text)}>Load {item.name.toLowerCase()} scenario</button>)}</div>
+      <div className="flex flex-wrap gap-2">{SCENARIOS.map((item) => <button key={item.name} className="btn-ghost text-sm" disabled={answerRunning || micOn || blocked} onClick={() => { setScenario(item.text); setExpected(item.expected) }}>Load {item.name.toLowerCase()} scenario</button>)}</div>
       <label className="block space-y-2 text-sm">Scenario transcript / interviewer question<textarea rows={5} maxLength={40_000} value={scenario} disabled={answerRunning || micOn || blocked} onChange={(e) => setScenario(e.target.value)} className="w-full rounded-lg border border-black/10 bg-white/60 px-3 py-2.5 outline-none transition focus:border-emerald-700/30 focus:ring-2 focus:ring-emerald-700/10" /></label>
       <label className="block space-y-2 text-sm">Expected behavior or reference answer (not sent to the answering model)<textarea rows={3} maxLength={2000} value={expected} disabled={answerRunning || blocked} onChange={(e) => setExpected(e.target.value)} className="w-full rounded-lg border border-black/10 bg-white/60 px-3 py-2.5 outline-none transition focus:border-emerald-700/30 focus:ring-2 focus:ring-emerald-700/10" placeholder="Describe what a correct, useful response must contain." /></label>
       <label className="block space-y-2 text-sm">Draft live calibration instructions<textarea rows={4} maxLength={MAX_CALIBRATION} value={instructions} disabled={answerRunning || blocked} onChange={(e) => setDraft(e.target.value)} className="w-full rounded-lg border border-black/10 bg-white/60 px-3 py-2.5 outline-none transition focus:border-emerald-700/30 focus:ring-2 focus:ring-emerald-700/10" placeholder="For example: Start with a direct answer. State assumptions. Keep the opening under 80 words. Never invent resume facts." /></label>
@@ -136,7 +137,7 @@ export function MockInterview({ blocked, visible = true, onActivity, onComplete 
       {notice && <p role="status" className="text-sm">{notice}</p>}
       {(error || tuning.error || microphone.error) && <p role="alert" className="text-sm text-[color:var(--stop)]">{error || tuning.error || microphone.error}</p>}
     </section>
-    {runs.length > 0 && <section className="space-y-4 rounded-xl border border-black/[0.07] bg-white/50 p-5 sm:p-6"><div className="flex flex-wrap items-center justify-between gap-3"><h3 className="font-semibold">Test results ({runs.length}/20 retained)</h3><button className="btn-ghost" disabled={!runs.some((run) => run.verdict === 'pass' && run.status === 'complete')} onClick={exportExamples}>Export accepted examples</button></div><p className="text-xs text-black/60">Times measure request start to first text and completion, excluding ASR and pre-request orchestration. Review correctness yourself; Pass is your annotation, not an automated guarantee.</p>{runs.map((run) => <article key={run.id} className="space-y-3 border-t border-black/[0.07] py-5 first:border-t-0 first:pt-0 last:pb-0">
+    {runs.length > 0 && <section className="space-y-4 rounded-xl border border-black/[0.07] bg-white/50 p-5 sm:p-6"><div className="flex flex-wrap items-center justify-between gap-3"><h3 className="font-semibold">Test results ({runs.length}/20 retained)</h3><button className="btn-ghost" disabled={!runs.some((run) => run.verdict === 'pass' && run.status === 'complete')} onClick={exportExamples}>Export accepted examples</button></div><p className="text-xs text-black/60">Times measure request start to first text and completion, excluding ASR and pre-request orchestration. Use the held-out expectation as the acceptance test. Mark Pass only when the response is correct, direct, speakable, and free of unnecessary transcript/meta disclaimers. Times exclude ASR and pre-request orchestration.</p>{runs.map((run) => <article key={run.id} className="space-y-3 border-t border-black/[0.07] py-5 first:border-t-0 first:pt-0 last:pb-0">
       <h4 className="font-medium">{run.question}</h4><p className="text-xs text-black/60">{run.mode} · {run.status} · First text: {run.firstTokenMs === null ? 'not observed' : `${Math.round(run.firstTokenMs)} ms`} · Completion: {Math.round(run.totalMs)} ms</p>
       {run.expected && <p className="whitespace-pre-wrap text-sm"><strong>Expected:</strong> {run.expected}</p>}
       <div className="max-h-80 overflow-auto break-words"><Markdown>{run.answer || run.error || 'No output'}</Markdown></div>
