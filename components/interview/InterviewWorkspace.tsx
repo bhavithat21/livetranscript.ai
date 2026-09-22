@@ -1,6 +1,6 @@
 'use client'
 import { useCallback, useEffect, useState, useSyncExternalStore, type KeyboardEvent, type MouseEvent } from 'react'
-import { Activity, FlaskConical, MessageSquareText, Radio, RotateCcw } from 'lucide-react'
+import { Activity, FileText, FlaskConical, GitBranch, MessageSquareText, Radio, RotateCcw, Settings2 } from 'lucide-react'
 import { HomeMenu } from '@/components/nav/HomeMenu'
 import { createInterviewHistory } from '@/lib/interview/history'
 import type { InterviewSession } from '@/lib/interview/session'
@@ -76,10 +76,18 @@ function Workspace({ ownerId }: { ownerId: string }) {
             </button>
           })}
         </div>
-        <div className="mt-auto space-y-3 px-2"><ProfileStatus /><p className="text-[11px] leading-relaxed text-black/35">Mock Lab changes Live only after a reviewed test is explicitly promoted.</p></div>
+        <div className="mt-8 px-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-black/35">Tools</div>
+        <nav aria-label="Interview tools" className="mt-2 space-y-1 text-sm">
+          <a href="/library" className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-black/50 transition hover:bg-black/[0.035] hover:text-ink"><FileText size={15} />Transcripts</a>
+          <a href="/repo-interview" className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-black/50 transition hover:bg-black/[0.035] hover:text-ink"><GitBranch size={15} />Repository</a>
+        </nav>
+        <div className="mt-auto space-y-3 px-2">
+          <a href="/settings" className="flex items-center gap-2 text-xs font-medium text-black/45 hover:text-ink"><Settings2 size={14} />Settings</a>
+          <ProfileStatus />
+        </div>
       </aside>
 
-      <section className="min-w-0 px-4 pb-20 pt-4 sm:px-6 lg:px-9 lg:pb-12 lg:pt-7">
+      <section className="min-w-0 px-4 pb-20 pt-4 sm:px-6 lg:px-8 lg:pb-10 lg:pt-6 xl:px-10">
         <header className="mb-5 flex items-start justify-between gap-4">
           <div className="min-w-0">
             
