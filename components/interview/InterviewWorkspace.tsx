@@ -82,7 +82,7 @@ function Workspace({ ownerId }: { ownerId: string }) {
       <section className="min-w-0 px-4 pb-20 pt-4 sm:px-6 lg:px-9 lg:pb-12 lg:pt-7">
         <header className="mb-5 flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <div className="lg:hidden" onClickCapture={guardNavigation}><HomeMenu /></div>
+            
             <div className="mt-5 lg:mt-0"><h1 className="text-xl font-semibold tracking-[-0.02em] sm:text-2xl">{current.short}</h1><p className="mt-1 text-sm text-black/45">{current.description}</p></div>
           </div>
           <div className="hidden items-center gap-2 lg:flex"><ProfileStatus compact />{active && <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1.5 text-xs font-medium text-emerald-800"><Activity size={13} />Active</span>}</div>
