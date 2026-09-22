@@ -1,0 +1,86 @@
+name: Model benchmarks
+
+# Paid model calls run only on an explicit dispatch. Unit/CI tests stay offline.
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: Purpose suite to measure
+        type: choice
+        options: [repo, vision, classifier]
+        default: repo
+      models:
+        description: Comma-separated account-supported IDs; classifier uses this as its single legacy model
+        type: string
+        required: true
+        default: claude-sonnet-5
+      purposes:
+        description: Repository purposes (ignored for vision and classifier)
+        type: string
+        default: requirements,navigation,implementation,debugger,reviewer,synthesis
+      repetitions:
+        description: Repeated trials per case and model
+        type: choice
+        options: ['2', '3', '4']
+        default: '2'
+
+permissions:
+  contents: read
+
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      BENCHMARK_SUITE: ${{ inputs.suite }}
+      BENCHMARK_MODELS: ${{ inputs.models }}
+      BENCHMARK_REPETITIONS: ${{ inputs.repetitions }}
+      REPO_BENCHMARK_PURPOSES: ${{ inputs.purposes }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Measure selected purpose suite
+        shell: bash
+        run: |
+          mkdir -p benchmark-results
+          case "$BENCHMARK_SUITE" in
+            repo)
+              export REPO_BENCHMARK_MODELS="$BENCHMARK_MODELS"
+              export REPO_BENCHMARK_REPETITIONS="$BENCHMARK_REPETITIONS"
+              export REPO_BENCHMARK_REPORT=benchmark-results/repo-report.json
+              pnpm run eval:repo:plan
+              REPO_BENCHMARK_LIVE=1 pnpm run eval:repo
+              ;;
+            vision)
+              export VISION_BENCHMARK_MODELS="$BENCHMARK_MODELS"
+              export VISION_BENCHMARK_REPEATS="$BENCHMARK_REPETITIONS"
+              export VISION_BENCHMARK_REPORT=benchmark-results/vision-report.json
+              VISION_BENCHMARK_LIVE=1 pnpm run eval:vision
+              ;;
+            classifier)
+              export COPILOT_CLASSIFIER_MODEL="$BENCHMARK_MODELS"
+              export CLASSIFIER_BENCHMARK_REPEATS="$BENCHMARK_REPETITIONS"
+              export CLASSIFIER_BENCHMARK_REPORT=benchmark-results/classifier-report.json
+              CLASSIFIER_BENCHMARK_LIVE=1 pnpm run eval:classifier
+              ;;
+            *) exit 1 ;;
+          esac
+      - name: Save measurements and partial reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: model-benchmark-${{ inputs.suite }}-${{ github.run_id }}
+          path: benchmark-results/
+          if-no-files-found: warn
+          retention-days: 30

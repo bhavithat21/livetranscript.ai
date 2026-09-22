@@ -12,6 +12,11 @@
 
 # testing
 /coverage
+/benchmark-results/
+/vision-benchmark-fixtures/
+/*-benchmark-report.json
+/*-benchmark-review.json
+/*-benchmark-selection.json
 
 # next.js
 /.next/

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildRepoIndex, createRepoFile, extractQuestions, isIndexablePath, rankRepoFiles } from './index'
+import { buildRepoIndex, createRepoFile, extractQuestions, isIndexablePath, rankRepoFiles, repoContext } from './index'
 
 describe('repository interview index', () => {
   it('skips dependencies, generated output, and likely secrets', () => {
@@ -29,6 +29,61 @@ describe('repository interview index', () => {
       'How is the token verified?',
       'Tell me what you would change.',
     ])
+  })
+
+  it('keeps distant relevant locations with exact source line numbers and explicit gaps', () => {
+    const lines = Array.from({ length: 650 }, (_, row) => `// unrelated source ${row + 1}`)
+    lines[149] = 'export function cancelOrder(id: string) {'
+    lines[150] = '  return store.cancel(id)'
+    lines[151] = '}'
+    lines[499] = 'export function publishCancellation(id: string) {'
+    lines[500] = '  events.publish({ type: "cancelled", id })'
+    lines[501] = '}'
+    const index = buildRepoIndex('orders', [createRepoFile('src/orders.ts', lines.join('\r\n'))])
+    const [match] = rankRepoFiles(index, 'Trace cancelOrder and publishCancellation')
+    expect(match.excerpt).toContain('150 export function cancelOrder(id: string) {')
+    expect(match.excerpt).toContain('500 export function publishCancellation(id: string) {')
+    expect(match.excerpt).toMatch(/\[OMITTED lines \d+-\d+; source not included\]/)
+    expect(match.excerpt.length).toBeLessThanOrEqual(3_600)
+    for (const line of match.excerpt.split('\n')) {
+      const source = line.match(/^(\d+) (.*)$/)
+      if (source) expect(source[2]).toBe(lines[Number(source[1]) - 1])
+    }
+    const context = repoContext(index, 'Trace cancelOrder and publishCancellation')!
+    expect(context).toContain('EVIDENCE 1: "src/orders.ts"')
+    expect(context).toContain('150 export function cancelOrder')
+    expect(context).toContain('OMITTED ranges are gaps, never consecutive code')
+  })
+
+  it('omits oversized source lines without clipping them or hiding nearby evidence', () => {
+    const oversized = `const cancellationData = "${'x'.repeat(8_000)}"`
+    const index = buildRepoIndex('orders', [createRepoFile('src/orders.ts', [
+      'export function cancelOrder() {',
+      '  const changed = store.cancel()',
+      oversized,
+      '  if (changed) publishCancellation()',
+      '}',
+    ].join('\n'))])
+    const [match] = rankRepoFiles(index, 'cancelOrder cancellationData publishCancellation')
+    expect(match.excerpt).toContain('1 export function cancelOrder() {')
+    expect(match.excerpt).toContain('4   if (changed) publishCancellation()')
+    expect(match.excerpt).toContain('[OMITTED lines 3-3; source not included]')
+    expect(match.excerpt).not.toContain('const cancellationData')
+    expect(match.excerpt.length).toBeLessThanOrEqual(3_600)
+  })
+
+  it('bounds the complete context even when filenames and symbol metadata are large', () => {
+    const longName = 'name'.repeat(200)
+    const files = Array.from({ length: 15 }, (_, row) => createRepoFile(
+      `src/${'nested/'.repeat(900)}orders-${row}.ts`,
+      `export function cancelOrder() {}\nexport function ${longName}() {}`,
+    ))
+    const index = buildRepoIndex('project'.repeat(1_000), files)
+    const context = repoContext(index, 'cancelOrder')!
+    expect(context.length).toBeLessThanOrEqual(32_000)
+    expect(context).toContain('paths OMITTED from tree')
+    expect(context).toContain('relevant files OMITTED by context budget')
+    expect(context).toContain('1 export function cancelOrder() {}')
   })
 })
 

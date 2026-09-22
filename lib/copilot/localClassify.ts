@@ -39,6 +39,11 @@ const WEAK_RE =
 // Freshness signals → the answer needs LIVE web facts.
 const WEB_RE =
   /\b(latest|newest|current(?:ly)?|as of (?:now|today|this)|right now|this (?:year|week|month)|recent(?:ly)?|202[4-9]|today'?s|up to date|most recent|just (?:released|announced))\b/i
+// A coding/design question can still depend on current external APIs or quotas.
+// Pair freshness with concrete external facts; "recently mentored" and a locally
+// checked-in schema are not reasons to send an interview answer to web search.
+const EXTERNAL_FACT_RE = /\b(?:version|release|api signature|quotas?|pricing|prices?|deprecation)\b/i
+const EXTERNAL_SOURCE_RE = /\b(?:online|official|web|node(?:\.js)?|react|aws|azure|google cloud|kubernetes|sdk|framework|library|package|vendor|provider)\b/i
 
 // A question-shape check independent of mode (mirrors useProactive's intent, kept
 // simple here — the caller already gates on its own detector for firing).
@@ -63,10 +68,9 @@ export function localClassify(questionRaw: string): LocalClassification | null {
 
   if (hits.length === 1) {
     const mode = hits[0]
-    // needsWeb only matters for fact-lookup modes. A behavioral/design/coding answer
-    // shouldn't trigger a web search (or get a "prefer live facts" block) just because
-    // it contains "recently" — that's noise + a needless ~12s hop.
-    const needsWeb = mode === 'general' && WEB_RE.test(q)
+    // A freshness word alone should not add a web request to personal experience
+    // or local code questions. Concrete external API/version/limit facts should.
+    const needsWeb = mode !== 'behavioral' && WEB_RE.test(q) && EXTERNAL_FACT_RE.test(q) && EXTERNAL_SOURCE_RE.test(q)
     return { mode, needsWeb, isQuestion }
   }
 

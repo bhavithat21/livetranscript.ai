@@ -75,4 +75,4 @@ Start with the included [known-bug repository](../examples/repository-cancellati
 
 Record real timings from question settled → preliminary navigation → first answer text → complete answer. Record OCR mismatches, incorrect citations, unsupported claims, patch correctness and test outcomes separately. A fast response or passing keyword score does not prove correctness.
 
-Use the [model comparison harness](../evals/repo/README.md) for per-role measurements. Do not select a benchmark winner or claim live interview reliability until real model outputs and patches have been reviewed. Live model checks remain unrun in this workspace while API credentials and an authenticated application session are unavailable.
+Use the [model evaluation guide](model-evaluation.md) for the manual GitHub workflow, routing comparisons, screenshot measurements and reviewed per-role selection. Do not select a benchmark winner or claim live interview reliability until real model outputs and patches have been reviewed. Live model checks remain unrun in this workspace while API credentials and an authenticated application session are unavailable.

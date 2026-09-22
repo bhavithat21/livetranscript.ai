@@ -1,7 +1,8 @@
 'use client'
 import { useCallback, useRef } from 'react'
-import type { CopilotMode } from './modes'
 import { localClassify } from './localClassify'
+import { parseClassification, type Classification } from './classification'
+export type { Classification } from './classification'
 
 // The orchestrator's routing brain (client side). For a heard/typed question it
 // asks the classifier route to decide: is this a real question, which MODE it is,
@@ -13,19 +14,10 @@ import { localClassify } from './localClassify'
 // on a detected question, switches the tab to the returned mode, and passes any web
 // context into the answer.
 
-export type Classification = {
-  isQuestion: boolean
-  mode: CopilotMode
-  needsWeb: boolean
-  confidence: number
-}
-
 export type RouteResult = {
   classification: Classification | null
   webContext: string | null
 }
-
-const VALID: CopilotMode[] = ['general', 'repoInterview', 'coding', 'systemDesign', 'behavioral']
 
 export function useOrchestrationRouter() {
   // Guard against overlapping route() calls stacking classifier requests.
@@ -40,8 +32,7 @@ export function useOrchestrationRouter() {
       })
       if (!res.ok) return null
       const { result } = await res.json()
-      if (!result || !VALID.includes(result.mode)) return null
-      return result as Classification
+      return parseClassification(result)
     } catch {
       return null
     }

@@ -1,33 +1,25 @@
-import { writeFile } from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
+import { mkdir, rename, writeFile } from 'node:fs/promises'
+import { dirname } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { callRepoModel } from '../../lib/repo/agentProviders'
-import { repoAgentEvidence, repoAgentSystem } from '../../lib/repo/agentPrompts'
-import { REPO_AGENT_ROLES, validRepoModel } from '../../lib/repo/modelPolicy'
-import type { RepoAgentRole } from '../../lib/repo/agentTypes'
-import { repoBenchmarkFixtures, scoreRepoBenchmark } from './fixtures'
+import { assertRepoModelConfigured } from '../../lib/repo/modelPolicy'
+import { collectBenchmark, configFromEnv, type BenchmarkReport } from './benchmark'
 
-// Opt-in: never spend model credits from a normal unit-test run.
-describe.skipIf(process.env.REPO_BENCHMARK_LIVE !== '1')('live repository specialist benchmark', () => {
-  it('records raw answers, task-grounding proxies and actual latency for configured candidates', async () => {
-    const candidates = (process.env.REPO_BENCHMARK_MODELS ?? '').split(',').map((v) => v.trim()).filter(Boolean)
-    expect(candidates.length, 'Set REPO_BENCHMARK_MODELS to model IDs available on your API accounts').toBeGreaterThan(0)
-    expect(candidates.every(validRepoModel)).toBe(true)
-    const roles = (process.env.REPO_BENCHMARK_ROLES ?? 'requirements,implementation,debugger,reviewer').split(',') as RepoAgentRole[]
-    expect(roles.every((role) => REPO_AGENT_ROLES.includes(role))).toBe(true)
-    const rows = []
-    // Sequential models limit unexpected cost and provider contention. Production
-    // runs roles in parallel; these timings measure isolated calls, not UX latency.
-    for (const model of candidates) for (const role of roles) for (const fixture of repoBenchmarkFixtures) {
-      const started = performance.now()
-      try {
-        const result = await callRepoModel({ model, system: repoAgentSystem(role), evidence: repoAgentEvidence(fixture.input), signal: AbortSignal.timeout(35_000) })
-        rows.push({ requestedModel: model, actualModel: result.model, role, fixture: fixture.id, latencyMs: Math.round(performance.now() - started), ...scoreRepoBenchmark(fixture, result.text), response: result.text })
-      } catch {
-        rows.push({ requestedModel: model, role, fixture: fixture.id, latencyMs: Math.round(performance.now() - started), error: 'Provider failed or timed out' })
-      }
+// Never spend model credits in the normal unit suite or offline review commands.
+describe.skipIf(process.env.REPO_BENCHMARK_LIVE !== '1' || !!process.env.REPO_BENCHMARK_ACTION)('live repository purpose benchmark', () => {
+  it('measures explicit candidates using production prompts and provider settings', async () => {
+    const config = configFromEnv(process.env)
+    config.models.forEach(assertRepoModelConfigured)
+    let gitCommit: string | null = null
+    try { gitCommit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() } catch { /* archive checkout */ }
+    const output = process.env.REPO_BENCHMARK_REPORT ?? 'benchmark-results/repo-report.json'
+    await mkdir(dirname(output), { recursive: true })
+    const checkpoint = async (report: BenchmarkReport) => {
+      await writeFile(`${output}.partial`, `${JSON.stringify(report, null, 2)}\n`)
+      await rename(`${output}.partial`, output)
     }
-    const report = { version: 1, benchmarkId: `repo-evidence-${new Date().toISOString()}`, measuredAt: new Date().toISOString(), reviewed: false, limits: 'Three synthetic partial-repository fixtures. Keyword/path heuristics are diagnostics, not correctness scores or proof of interview success. Review raw responses for valid patches before selecting models. Does not test image OCR, code execution or end-to-end speech latency.', rows }
-    await writeFile(process.env.REPO_BENCHMARK_REPORT ?? 'repo-benchmark-report.json', JSON.stringify(report, null, 2))
-    expect(rows.some((row) => 'actualModel' in row), 'No provider succeeded; inspect configuration and report').toBe(true)
+    const report = await collectBenchmark({ config, mode: 'live', gitCommit, checkpoint })
+    expect(report.rows.length).toBe(report.expectedCalls)
+    expect(report.rows.some((row) => row.status === 'completed'), `No provider completed; inspect ${output}`).toBe(true)
   })
 })

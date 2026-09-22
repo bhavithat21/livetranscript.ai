@@ -1,0 +1,549 @@
+{
+  "version": 1,
+  "verifiedAt": "2026-09-22",
+  "purpose": "Experiment shortlist only; not a runtime policy, account availability check or measured leaderboard.",
+  "pricingCaveat": "Rates can change and omit caching, service tiers, long-context multipliers and taxes. Compute task cost from actual usage and applicable provider pricing.",
+  "purposeCaveat": "Purpose assignments are experiment hypotheses. Navigation is evaluated within grounded repository roles; vision and routing require separate suites.",
+  "candidates": [
+    {
+      "model": "claude-fable-5-1",
+      "provider": "anthropic",
+      "purposes": [
+        "implementation",
+        "debugger",
+        "reviewer"
+      ],
+      "sourceUrls": [
+        "https://platform.claude.com/docs/en/models/overview",
+        "https://platform.claude.com/docs/en/models/fable-5-1/overview"
+      ],
+      "pricing": {
+        "inputUsdPerMillion": 10,
+        "outputUsdPerMillion": 50,
+        "basis": "published_standard_uncached_text",
+        "verifiedAt": "2026-09-22"
+      },
+      "externalCoding": {
+        "source": "https://benchlm.ai/coding",
+        "refreshedAt": "2026-09-21",
+        "rank": 1,
+        "score": 84.6,
+        "evidenceLabel": "Supported",
+        "meaning": "calibrated_category_score_not_application_success_percentage"
+      },
+      "documentationVerified": true,
+      "accountAccess": "unverified",
+      "liveRequestVerified": false,
+      "measuredWinner": false,
+      "notes": [
+        "Adaptive thinking is always on. Evaluate effort and completion budget explicitly."
+      ],
+      "externalLiveBench": {
+        "source": "https://livebench.ai/table_2026_06_25.csv",
+        "release": "2026-06-25",
+        "configuration": "claude-fable-5-1-max-effort",
+        "taskScores": {
+          "code_generation": 90.141,
+          "code_completion": 82.609,
+          "javascript": 68.182,
+          "typescript": 60.0,
+          "python": 70.0
+        },
+        "derivedCategoryMeans": {
+          "Coding": 86.375,
+          "Agentic Coding": 66.061
+        },
+        "categoryMeanMethod": "unweighted_arithmetic_mean_of_published_task_columns",
+        "effort": "max",
+        "isApplicationMeasurement": false
+      }
+    },
+    {
+      "model": "claude-fable-5",
+      "provider": "anthropic",
+      "purposes": [
+        "implementation",
+        "debugger",
+        "reviewer"
+      ],
+      "sourceUrls": [
+        "https://platform.claude.com/docs/en/models/fable-5-1/migration-guide",
+        "https://platform.claude.com/docs/en/models/fable-5-1/overview"
+      ],
+      "pricing": {
+        "inputUsdPerMillion": 10,
+        "outputUsdPerMillion": 50,
+        "basis": "published_standard_uncached_text",
+        "verifiedAt": "2026-09-22"
+      },
+      "externalCoding": {
+        "source": "https://benchlm.ai/coding",
+        "refreshedAt": "2026-09-21",
+        "rank": 2,
+        "score": 77.9,
+        "evidenceLabel": "Supported",
+        "meaning": "calibrated_category_score_not_application_success_percentage"
+      },
+      "documentationVerified": true,
+      "accountAccess": "unverified",
+      "liveRequestVerified": false,
+      "measuredWinner": false,
+      "notes": [
+        "Optional prior-version comparison; shortlist favors current Fable 5.1 for new trials."
+      ],
+      "externalLiveBench": {
+        "source": "https://livebench.ai/table_2026_06_25.csv",
+        "release": "2026-06-25",
+        "configuration": "claude-fable-5-max-effort",
+        "taskScores": {
+          "code_generation": 91.549,
+          "code_completion": 80.435,
+          "javascript": 68.182,
+          "typescript": 53.333,
+          "python": 65.0
+        },
+        "derivedCategoryMeans": {
+          "Coding": 85.992,
+          "Agentic Coding": 62.172
+        },
+        "categoryMeanMethod": "unweighted_arithmetic_mean_of_published_task_columns",
+        "effort": "max",
+        "isApplicationMeasurement": false
+      }
+    },
+    {
+      "model": "gpt-6-astra",
+      "provider": "openai",
+      "purposes": [
+        "implementation",
+        "debugger",
+        "reviewer"
+      ],
+      "sourceUrls": [
+        "https://developers.openai.com/api/docs/models",
+        "https://developers.openai.com/api/docs/models/gpt-6-astra",
+        "https://developers.openai.com/api/docs/guides/latest-model"
+      ],
+      "pricing": {
+        "inputUsdPerMillion": 10,
+        "outputUsdPerMillion": 50,
+        "basis": "published_standard_uncached_text",
+        "verifiedAt": "2026-09-22"
+      },
+      "externalCoding": {
+        "source": "https://benchlm.ai/coding",
+        "refreshedAt": "2026-09-21",
+        "rank": 3,
+        "score": 77,
+        "evidenceLabel": "Supported",
+        "meaning": "calibrated_category_score_not_application_success_percentage"
+      },
+      "documentationVerified": true,
+      "accountAccess": "unverified",
+      "liveRequestVerified": false,
+      "measuredWinner": false,
+      "notes": [
+        "Chat Completions supports text; function calls require Responses.",
+        "Reasoning effort none is invalid; omit sampling parameters.",
+        "Long-context and service-tier pricing can differ."
+      ],
+      "externalLiveBench": {
+        "source": "https://livebench.ai/table_2026_06_25.csv",
+        "release": "2026-06-25",
+        "configuration": "gpt-6-astra-max",
+        "taskScores": {
+          "code_generation": 80.282,
+          "code_completion": 80.435,
+          "javascript": 63.636,
+          "typescript": 43.333,
+          "python": 65.0
+        },
+        "derivedCategoryMeans": {
+          "Coding": 80.358,
+          "Agentic Coding": 57.323
+        },
+        "categoryMeanMethod": "unweighted_arithmetic_mean_of_published_task_columns",
+        "effort": "max",
+        "isApplicationMeasurement": false
+      }
+    },
+    {
+      "model": "claude-opus-5",
+      "provider": "anthropic",
+      "purposes": [
+        "implementation",
+        "debugger",
+        "reviewer",
+        "vision"
+      ],
+      "sourceUrls": [
+        "https://platform.claude.com/docs/en/models/overview"
+      ],
+      "pricing": {
+        "inputUsdPerMillion": 5,
+        "outputUsdPerMillion": 25,
+        "basis": "published_standard_uncached_text",
+        "verifiedAt": "2026-09-22"
+      },
+      "externalCoding": {
+        "source": "https://benchlm.ai/coding",
+        "refreshedAt": "2026-09-21",
+        "rank": 4,
+        "score": 76.6,
+        "evidenceLabel": "Supported",
+        "meaning": "calibrated_category_score_not_application_success_percentage"
+      },
+      "documentationVerified": true,
+      "accountAccess": "unverified",
+      "liveRequestVerified": false,
+      "measuredWinner": false,
+      "notes": [],
+      "externalLiveBench": {
+        "source": "https://livebench.ai/table_2026_06_25.csv",
+        "release": "2026-06-25",
+        "configuration": "claude-opus-5-max-effort",
+        "taskScores": {
+          "code_generation": 80.282,
+          "code_completion": 82.609,
+          "javascript": 77.273,
+          "typescript": 43.333,
+          "python": 75.0
+        },
+        "derivedCategoryMeans": {
+          "Coding": 81.445,
+          "Agentic Coding": 65.202
+        },
+        "categoryMeanMethod": "unweighted_arithmetic_mean_of_published_task_columns",
+        "effort": "max",
+        "isApplicationMeasurement": false
+      }
+    },
+    {
+      "model": "gpt-5.6-sol",
+      "provider": "openai",
+      "purposes": [
+        "implementation",
+        "debugger",
+        "reviewer"
+      ],
+      "sourceUrls": [
+        "https://developers.openai.com/api/docs/models",
+        "https://developers.openai.com/api/docs/models/gpt-5.6-sol"
+      ],
+      "pricing": {
+        "inputUsdPerMillion": 4,
+        "outputUsdPerMillion": 20,
+        "basis": "published_standard_uncached_text",
+        "verifiedAt": "2026-09-22"
+      },
+      "externalCoding": {
+        "source": "https://benchlm.ai/coding",
+        "refreshedAt": "2026-09-21",
+        "rank": 5,
+        "score": 75.2,
+        "evidenceLabel": "Supported",
+        "meaning": "calibrated_category_score_not_application_success_percentage"
+      },
+      "documentationVerified": true,
+      "accountAccess": "unverified",
+      "liveRequestVerified": false,
+      "measuredWinner": false,
+      "notes": [
+        "Promotional published pricing through at least 2026-11-21."
+      ],
+      "externalLiveBench": {
+        "source": "https://livebench.ai/table_2026_06_25.csv",
+        "release": "2026-06-25",
+        "configuration": "gpt-5.6-sol-max",
+        "taskScores": {
+          "code_generation": 83.099,
+          "code_completion": 84.783,
+          "javascript": 63.636,
+          "typescript": 50.0,
+          "python": 55.0
+        },
+        "derivedCategoryMeans": {
+          "Coding": 83.941,
+          "Agentic Coding": 56.212
+        },
+        "categoryMeanMethod": "unweighted_arithmetic_mean_of_published_task_columns",
+        "effort": "max",
+        "isApplicationMeasurement": false
+      }
+    },
+    {
+      "model": "gpt-5.6-terra",
+      "provider": "openai",
+      "purposes": [
+        "requirements",
+        "implementation",
+        "debugger",
+        "reviewer",
+        "synthesis"
+      ],
+      "sourceUrls": [
+        "https://developers.openai.com/api/docs/models",
+        "https://developers.openai.com/api/docs/models/gpt-5.6-terra"
+      ],
+      "pricing": {
+        "inputUsdPerMillion": 2,
+        "outputUsdPerMillion": 12,
+        "basis": "published_standard_uncached_text",
+        "verifiedAt": "2026-09-22"
+      },
+      "externalCoding": {
+        "source": "https://benchlm.ai/coding",
+        "refreshedAt": "2026-09-21",
+        "rank": 7,
+        "score": 68.2,
+        "evidenceLabel": "Supported",
+        "meaning": "calibrated_category_score_not_application_success_percentage"
+      },
+      "documentationVerified": true,
+      "accountAccess": "unverified",
+      "liveRequestVerified": false,
+      "measuredWinner": false,
+      "notes": [],
+      "externalLiveBench": {
+        "source": "https://livebench.ai/table_2026_06_25.csv",
+        "release": "2026-06-25",
+        "configuration": "gpt-5.6-terra-max",
+        "taskScores": {
+          "code_generation": 76.056,
+          "code_completion": 80.435,
+          "javascript": 68.182,
+          "typescript": 46.667,
+          "python": 50.0
+        },
+        "derivedCategoryMeans": {
+          "Coding": 78.245,
+          "Agentic Coding": 54.95
+        },
+        "categoryMeanMethod": "unweighted_arithmetic_mean_of_published_task_columns",
+        "effort": "max",
+        "isApplicationMeasurement": false
+      }
+    },
+    {
+      "model": "gpt-5.6-luna",
+      "provider": "openai",
+      "purposes": [
+        "requirements",
+        "navigation",
+        "synthesis"
+      ],
+      "sourceUrls": [
+        "https://developers.openai.com/api/docs/models",
+        "https://developers.openai.com/api/docs/models/gpt-5.6-luna"
+      ],
+      "pricing": {
+        "inputUsdPerMillion": 0.2,
+        "outputUsdPerMillion": 1.2,
+        "basis": "published_standard_uncached_text",
+        "verifiedAt": "2026-09-22"
+      },
+      "externalCoding": {
+        "source": "https://benchlm.ai/coding",
+        "refreshedAt": "2026-09-21",
+        "rank": 10,
+        "score": 67.8,
+        "evidenceLabel": "Supported",
+        "meaning": "calibrated_category_score_not_application_success_percentage"
+      },
+      "documentationVerified": true,
+      "accountAccess": "unverified",
+      "liveRequestVerified": false,
+      "measuredWinner": false,
+      "notes": [],
+      "externalLiveBench": {
+        "source": "https://livebench.ai/table_2026_06_25.csv",
+        "release": "2026-06-25",
+        "configuration": "gpt-5.6-luna-max",
+        "taskScores": {
+          "code_generation": 78.873,
+          "code_completion": 86.957,
+          "javascript": 63.636,
+          "typescript": 36.667,
+          "python": 45.0
+        },
+        "derivedCategoryMeans": {
+          "Coding": 82.915,
+          "Agentic Coding": 48.434
+        },
+        "categoryMeanMethod": "unweighted_arithmetic_mean_of_published_task_columns",
+        "effort": "max",
+        "isApplicationMeasurement": false
+      }
+    },
+    {
+      "model": "claude-sonnet-5",
+      "provider": "anthropic",
+      "purposes": [
+        "requirements",
+        "navigation",
+        "implementation",
+        "debugger",
+        "reviewer",
+        "synthesis",
+        "vision"
+      ],
+      "sourceUrls": [
+        "https://platform.claude.com/docs/en/models/overview"
+      ],
+      "pricing": {
+        "inputUsdPerMillion": 2,
+        "outputUsdPerMillion": 10,
+        "basis": "published_standard_uncached_text",
+        "verifiedAt": "2026-09-22"
+      },
+      "externalCoding": {
+        "source": "https://benchlm.ai/coding",
+        "refreshedAt": "2026-09-21",
+        "rank": 13,
+        "score": 64.8,
+        "evidenceLabel": "Supported",
+        "meaning": "calibrated_category_score_not_application_success_percentage"
+      },
+      "documentationVerified": true,
+      "accountAccess": "unverified",
+      "liveRequestVerified": false,
+      "measuredWinner": false,
+      "notes": [
+        "Existing operational default, not a measured winner."
+      ],
+      "externalLiveBench": {
+        "source": "https://livebench.ai/table_2026_06_25.csv",
+        "release": "2026-06-25",
+        "configuration": "claude-sonnet-5-xhigh-effort",
+        "taskScores": {
+          "code_generation": 83.099,
+          "code_completion": 78.261,
+          "javascript": 68.182,
+          "typescript": 50.0,
+          "python": 60.0
+        },
+        "derivedCategoryMeans": {
+          "Coding": 80.68,
+          "Agentic Coding": 59.394
+        },
+        "categoryMeanMethod": "unweighted_arithmetic_mean_of_published_task_columns",
+        "effort": "xhigh",
+        "isApplicationMeasurement": false
+      }
+    },
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "provider": "anthropic",
+      "purposes": [
+        "requirements",
+        "navigation",
+        "synthesis",
+        "vision"
+      ],
+      "sourceUrls": [
+        "https://platform.claude.com/docs/en/models/overview",
+        "https://platform.claude.com/docs/en/models/haiku-4-5/overview"
+      ],
+      "pricing": {
+        "inputUsdPerMillion": 1,
+        "outputUsdPerMillion": 5,
+        "basis": "published_standard_uncached_text",
+        "verifiedAt": "2026-09-22"
+      },
+      "externalCoding": null,
+      "documentationVerified": true,
+      "accountAccess": "unverified",
+      "liveRequestVerified": false,
+      "measuredWinner": false,
+      "notes": [
+        "Pinned snapshot. Does not support output_config.effort."
+      ],
+      "externalLiveBench": null
+    },
+    {
+      "model": "openai/gpt-oss-120b",
+      "provider": "groq",
+      "purposes": [
+        "requirements",
+        "navigation",
+        "synthesis"
+      ],
+      "sourceUrls": [
+        "https://console.groq.com/docs/models",
+        "https://console.groq.com/docs/model/openai/gpt-oss-120b",
+        "https://console.groq.com/docs/reasoning"
+      ],
+      "pricing": {
+        "inputUsdPerMillion": 0.15,
+        "outputUsdPerMillion": 0.6,
+        "basis": "published_standard_uncached_text",
+        "verifiedAt": "2026-09-22"
+      },
+      "externalCoding": null,
+      "documentationVerified": true,
+      "accountAccess": "unverified",
+      "liveRequestVerified": false,
+      "measuredWinner": false,
+      "notes": [
+        "Text input only. Use Groq API/key. Vendor throughput is not measured application latency."
+      ],
+      "externalLiveBench": null
+    },
+    {
+      "model": "openai/gpt-oss-20b",
+      "provider": "groq",
+      "purposes": [
+        "requirements",
+        "navigation",
+        "synthesis"
+      ],
+      "sourceUrls": [
+        "https://console.groq.com/docs/models",
+        "https://console.groq.com/docs/model/openai/gpt-oss-20b",
+        "https://console.groq.com/docs/reasoning"
+      ],
+      "pricing": {
+        "inputUsdPerMillion": 0.075,
+        "outputUsdPerMillion": 0.3,
+        "basis": "published_standard_uncached_text",
+        "verifiedAt": "2026-09-22"
+      },
+      "externalCoding": null,
+      "documentationVerified": true,
+      "accountAccess": "unverified",
+      "liveRequestVerified": false,
+      "measuredWinner": false,
+      "notes": [
+        "Text input only. Use Groq API/key. Vendor throughput is not measured application latency."
+      ],
+      "externalLiveBench": null
+    }
+  ],
+  "externalEvidenceSources": [
+    {
+      "name": "LiveBench",
+      "release": "2026-06-25",
+      "retrievedAt": "2026-09-22T08:00:05.931509+00:00",
+      "modelConfigurationCount": 59,
+      "categoryCount": 7,
+      "taskCount": 23,
+      "table": {
+        "url": "https://livebench.ai/table_2026_06_25.csv",
+        "lastModified": "Tue, 22 Sep 2026 05:39:32 GMT",
+        "sha256": "76ea252d9cecbacfd2398fca8626d470d1950b5a6421547e41059c1cf85a210b"
+      },
+      "categories": {
+        "url": "https://livebench.ai/categories_2026_06_25.json",
+        "lastModified": "Tue, 22 Sep 2026 05:39:32 GMT",
+        "sha256": "dad300ad18655b69db720e1b88fc5a5eac06c5b2f0e52c2bf50f10ff057674f3"
+      },
+      "methodologyUrl": "https://arxiv.org/abs/2406.19314v2",
+      "harnessChangelogUrl": "https://github.com/LiveBench/LiveBench/blob/main/changelog.md",
+      "notes": [
+        "Release is the site-selected question set, not the evaluation date of every row.",
+        "Category means below are arithmetic means computed from the published task columns, not our app measurements.",
+        "Match effort/harness when comparing configurations. No current account accessibility is established by external data."
+      ]
+    }
+  ]
+}

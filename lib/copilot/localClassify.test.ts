@@ -47,11 +47,17 @@ describe('localClassify', () => {
     expect(localClassify('How do you sort the workload across your team?')).toBeNull()
   })
 
-  it('does NOT flag needsWeb for non-general modes (no needless web hop on behavioral)', () => {
+  it('does not send recent personal experience to web search', () => {
     const r = localClassify('Tell me about a time you recently resolved a hard bug.')
     // Strong behavioral stem wins; "recently" must not drag in a web search.
     expect(r?.mode).toBe('behavioral')
     expect(r?.needsWeb).toBe(false)
+  })
+
+  it('looks up current external API facts without changing the coding or design mode', () => {
+    expect(localClassify('Write a function using the latest Node.js stable release API, and verify the current API signature online.')).toMatchObject({ mode: 'coding', needsWeb: true })
+    expect(localClassify('Design a system using the current AWS Lambda per-region concurrency quotas; check those quotas.')).toMatchObject({ mode: 'systemDesign', needsWeb: true })
+    expect(localClassify('Which file uses the latest locally checked-in schema in this repo?')).toMatchObject({ mode: 'repoInterview', needsWeb: false })
   })
 
   it('returns null on empty input', () => {

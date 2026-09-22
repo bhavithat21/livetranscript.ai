@@ -3,6 +3,8 @@ import type { InterviewQuestion, RepoIndex, RepoMatch, RepoSourceFile } from './
 const MAX_FILES = 2_000
 const MAX_FILE_CHARS = 120_000
 const MAX_TOTAL_CHARS = 8_000_000
+const MAX_EXCERPT_CHARS = 3_600
+const MAX_CONTEXT_CHARS = 32_000
 const CODE_EXTENSIONS = new Set([
   'c', 'cc', 'cpp', 'cs', 'css', 'go', 'graphql', 'h', 'hpp', 'html', 'java', 'js',
   'json', 'jsx', 'kt', 'md', 'mjs', 'php', 'prisma', 'py', 'rb', 'rs', 'scala',
@@ -74,17 +76,62 @@ export function buildRepoIndex(name: string, files: RepoSourceFile[]): RepoIndex
 function terms(value: string): string[] {
   return [...new Set(value.toLowerCase().match(/[a-z_$][a-z0-9_$.-]{2,}/g) ?? [])]
     .filter((term) => !['this', 'that', 'with', 'from', 'what', 'when', 'where', 'which', 'would', 'could', 'should', 'have', 'does', 'into', 'your'].includes(term))
+    .slice(0, 40)
 }
 
 function excerptAround(content: string, queryTerms: string[]): string {
-  const lower = content.toLowerCase()
-  let hit = -1
-  for (const term of queryTerms) {
-    const index = lower.indexOf(term)
-    if (index >= 0 && (hit < 0 || index < hit)) hit = index
+  if (!content) return '[EMPTY INDEXED FILE]'
+  const lines = content.split(/\r\n|\n|\r/)
+  if (lines.at(-1) === '') lines.pop()
+  const hits = lines.map((text, row) => {
+    const lower = text.toLowerCase()
+    return { row, terms: queryTerms.filter((term) => lower.includes(term)) }
+  })
+    .filter((hit) => hit.terms.length > 0)
+  const frequency = new Map(queryTerms.map((term) => [term, hits.filter((hit) => hit.terms.includes(term)).length]))
+  const selected = new Set<number>()
+  const anchors: number[] = []
+  const covered = new Set<string>()
+
+  const render = (rows: Set<number>): string => {
+    const result: string[] = []
+    let previous = -1
+    for (const row of [...rows].sort((a, b) => a - b)) {
+      if (row > previous + 1) result.push(`[OMITTED lines ${previous + 2}-${row}; source not included]`)
+      result.push(`${row + 1} ${lines[row]}`)
+      previous = row
+    }
+    if (previous < lines.length - 1) result.push(`[OMITTED lines ${previous + 2}-${lines.length}; source not included]`)
+    return result.join('\n')
   }
-  const start = Math.max(0, hit < 0 ? 0 : hit - 900)
-  return content.slice(start, start + 3_600)
+  const include = (row: number): boolean => {
+    if (row < 0 || row >= lines.length || selected.has(row)) return false
+    const next = new Set([...selected, row])
+    if (render(next).length > MAX_EXCERPT_CHARS) return false
+    selected.add(row)
+    return true
+  }
+
+  // Select distinct locations before adding surrounding code. Rare query terms
+  // and terms not represented yet help retain both a caller and its callee.
+  for (let window = 0; window < 3; window++) {
+    const candidates = hits.filter((hit) => anchors.every((row) => Math.abs(row - hit.row) > 12))
+      .map((hit) => ({ ...hit, score: hit.terms.reduce((sum, term) => sum + (covered.has(term) ? 1 : 2) / Math.sqrt(frequency.get(term) || 1), 0) }))
+      .sort((a, b) => b.score - a.score || a.row - b.row)
+    const candidate = candidates.find((hit) => include(hit.row))
+    if (!candidate) break
+    anchors.push(candidate.row)
+    candidate.terms.forEach((term) => covered.add(term))
+  }
+  if (!anchors.length) anchors.push(0)
+  anchors.forEach(include)
+  const radius = anchors.length === 1 ? 24 : 12
+  for (let distance = 1; distance <= radius; distance++) {
+    for (const row of anchors) { include(row - distance); include(row + distance) }
+  }
+  // Whole oversized lines stay omitted; a clipped string must not masquerade as
+  // the original implementation. Numbering always refers to the indexed file.
+  return render(selected)
 }
 
 export function rankRepoFiles(index: RepoIndex | null, query: string, limit = 6): RepoMatch[] {
@@ -113,24 +160,54 @@ export function rankRepoFiles(index: RepoIndex | null, query: string, limit = 6)
         symbols: file.symbols,
         score,
         reason: reasons.slice(0, 3).join(', ') || 'content match',
-        excerpt: excerptAround(file.content, queryTerms),
+        content: file.content,
       }
     })
     .filter((match) => match.score > 0)
     .sort((a, b) => b.score - a.score || a.path.localeCompare(b.path))
     .slice(0, limit)
+    .map(({ content, ...match }) => ({ ...match, excerpt: excerptAround(content, queryTerms) }))
 }
 
 export function repoContext(index: RepoIndex | null, query: string): string | null {
   if (!index) return null
   const matches = rankRepoFiles(index, query, 7)
-  const tree = index.files.slice(0, 300).map((file) => file.path).join('\n')
-  const evidence = matches.map((match, i) => [
-    `EVIDENCE ${i + 1}: ${match.path}`,
-    match.symbols.length ? `SYMBOLS: ${match.symbols.slice(0, 30).join(', ')}` : null,
-    `\`\`\`${match.language}\n${match.excerpt}\n\`\`\``,
-  ].filter(Boolean).join('\n')).join('\n\n')
-  return `REPOSITORY: ${index.name}\nFILES INDEXED: ${index.files.length}\n\nREPO TREE (capped):\n${tree}\n\nRELEVANT CODE:\n${evidence}`
+  const tree: string[] = []
+  let treeChars = 0
+  for (const file of index.files.slice(0, 300)) {
+    const path = JSON.stringify(file.path)
+    if (treeChars + path.length + 1 > 3_000) break
+    tree.push(path)
+    treeChars += path.length + 1
+  }
+  if (tree.length < index.files.length) tree.push(`[${index.files.length - tree.length} paths OMITTED from tree]`)
+  const parts = [
+    `REPOSITORY: ${JSON.stringify(index.name.slice(0, 300))}${index.name.length > 300 ? ' [name truncated]' : ''}\nFILES INDEXED: ${index.files.length}`,
+    'Source excerpts use original indexed line numbers. OMITTED ranges are gaps, never consecutive code. Imported files may be capped at ingestion; do not infer unseen source.',
+    `REPO TREE (capped):\n${tree.join('\n')}`,
+    'RELEVANT CODE:',
+  ]
+  let used = parts.join('\n\n').length
+  let included = 0
+  for (const match of matches) {
+    const symbols: string[] = []
+    for (const symbol of match.symbols.slice(0, 30)) {
+      if (JSON.stringify([...symbols, symbol]).length > 600) break
+      symbols.push(symbol)
+    }
+    const evidence = [
+      `EVIDENCE ${included + 1}: ${JSON.stringify(match.path)}`,
+      symbols.length ? `SYMBOLS (capped): ${JSON.stringify(symbols)}` : null,
+      `\`\`\`${match.language}\n${match.excerpt}\n\`\`\``,
+    ].filter(Boolean).join('\n')
+    // Leave room to disclose exclusions; never slice through a source line.
+    if (used + evidence.length + 2 > MAX_CONTEXT_CHARS - 120) continue
+    parts.push(evidence)
+    used += evidence.length + 2
+    included++
+  }
+  if (included < matches.length) parts.push(`[${matches.length - included} relevant files OMITTED by context budget; narrow the question]`)
+  return parts.join('\n\n')
 }
 
 const QUESTION_START = /^(?:what|why|how|when|where|who|which|whose|whom|can|could|would|will|do|did|have|are|is|tell|walk|describe|explain|show|find|implement|add|change|fix|debug|test|review|design|write|compare|solve|give|share|reverse)\b/i
