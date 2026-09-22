@@ -56,8 +56,8 @@ export default async function SessionDetailPage({ params }: { params: Promise<{ 
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-black/40">{isInterviewReport ? 'Interview feedback' : 'Summary'}</h2>
           {isInterviewReport ? (
             <div className="space-y-3 text-sm leading-relaxed [&_h1]:hidden [&_h2]:mt-6 [&_h2]:font-serif [&_h2]:text-xl [&_h3]:mt-4 [&_h3]:font-semibold [&_p]:my-2 [&_ul]:list-disc [&_ul]:pl-5">
-              {/* No raw-HTML plugin: candidate text remains escaped. */}
-              <ReactMarkdown>{summary.summary}</ReactMarkdown>
+              {/* Do not render raw HTML or load external tracking images from model/user text. */}
+              <ReactMarkdown skipHtml disallowedElements={['img']}>{summary.summary}</ReactMarkdown>
             </div>
           ) : (
             <p className="font-[family-name:var(--font-serif)] text-xl leading-relaxed text-ink">
