@@ -10,7 +10,7 @@ export default defineConfig({
   plugins: [tsconfigPaths()],
   test: {
     environment: 'node',
-    include: ['evals/runCoding.ts', 'evals/runDetection.ts', 'evals/runBehavioralVoice.ts'],
+    include: ['evals/runCoding.ts', 'evals/runDetection.ts', 'evals/runBehavioralVoice.ts', 'evals/runLiveAnswer.ts'],
     testTimeout: 300_000,
   },
 })
