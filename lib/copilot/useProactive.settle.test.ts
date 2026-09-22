@@ -49,3 +49,37 @@ it('does not re-answer a question already answered (dedupe holds)', () => {
   vi.advanceTimersByTime(600)
   expect(onQ).toHaveBeenCalledTimes(1) // fired once, not again on the next poll
 })
+
+
+it('does not loop after an async answer finishes while the transcript is unchanged', async () => {
+  let transcript = 'What authentication methods can webhooks use?'
+  const onQ = vi.fn(async () => {
+    await Promise.resolve()
+  })
+  renderHook(() => useProactive(true, () => transcript, onQ))
+
+  await vi.advanceTimersByTimeAsync(600)
+  expect(onQ).toHaveBeenCalledTimes(1)
+
+  // The answer has completed, but we are still inside the 8s multi-part merge
+  // window. The exact same transcript must NOT fire again on later polls.
+  await vi.advanceTimersByTimeAsync(4_800)
+  expect(onQ).toHaveBeenCalledTimes(1)
+})
+
+it('does re-answer once when a genuinely new follow-up extends the question group', async () => {
+  let transcript = 'Design a reliable notification service.'
+  const onQ = vi.fn(async () => {})
+  renderHook(() => useProactive(true, () => transcript, onQ))
+
+  await vi.advanceTimersByTimeAsync(600)
+  expect(onQ).toHaveBeenCalledTimes(1)
+
+  transcript += ' How would you handle retries?'
+  await vi.advanceTimersByTimeAsync(600)
+  expect(onQ).toHaveBeenCalledTimes(2)
+
+  // The extended group is now stable; it also must not loop.
+  await vi.advanceTimersByTimeAsync(2_400)
+  expect(onQ).toHaveBeenCalledTimes(2)
+})
