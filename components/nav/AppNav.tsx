@@ -11,7 +11,7 @@ import { ThemeToggle } from '@/components/ui/ThemeToggle'
 // room, session detail, the public share view, and auth pages) so nothing
 // competes with the transcript for attention. Each of those carries its own
 // lightweight back-link instead.
-const HIDDEN_PREFIXES = ['/record', '/room', '/remote', '/s/', '/session/', '/settings', '/sign-in', '/sign-up']
+const HIDDEN_PREFIXES = ['/record', '/interview', '/room', '/remote', '/s/', '/session/', '/settings', '/sign-in', '/sign-up']
 
 export function AppNav({ clerkConfigured }: { clerkConfigured: boolean }) {
   const pathname = usePathname()
@@ -47,6 +47,7 @@ export function AppNav({ clerkConfigured }: { clerkConfigured: boolean }) {
             <span data-tour="room">
               <NavLink href="/room/new">New room</NavLink>
             </span>
+            <NavLink href="/interview">Interviews</NavLink>
             <NavLink href="/remote">Remote assist</NavLink>
             <button
               type="button"
@@ -91,6 +92,7 @@ export function AppNav({ clerkConfigured }: { clerkConfigured: boolean }) {
               <MenuLink href="/pricing">Pricing</MenuLink>
               <MenuLink href="/download">Download</MenuLink>
               <MenuLink href="/room/new">New room</MenuLink>
+              <MenuLink href="/interview">Interviews</MenuLink>
               <MenuLink href="/remote">Remote assist</MenuLink>
               {clerkConfigured && (
                 <Show when="signed-out">
@@ -121,7 +123,7 @@ function MenuLink({ href, children }: { href: string; children: React.ReactNode 
   return (
     <Link
       href={href}
-      className="flex min-h-11 items-center rounded-xl px-3 text-sm text-black/70 transition-colors hover:bg-black/5 hover:text-ink"
+      className="flex min-h-11 items-center rounded-xl px-3 py-2 text-sm text-black/70 transition-colors hover:bg-black/5 hover:text-ink"
     >
       {children}
     </Link>

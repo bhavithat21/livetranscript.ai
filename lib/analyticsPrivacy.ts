@@ -1,10 +1,13 @@
 import type { CaptureResult } from 'posthog-js'
 
+// Keep the public helper name for existing callers. Both remote assistance and
+// interview transcripts/answers are private surfaces, including SPA navigation.
 export function isRemoteLocation(value: unknown): boolean {
   if (typeof value !== 'string') return false
   try {
     const path = new URL(value, 'https://livetranscript.ai').pathname
-    return path === '/remote' || path.startsWith('/remote/') || path.startsWith('/api/remote/')
+    return path === '/remote' || path.startsWith('/remote/') || path.startsWith('/api/remote/') ||
+      path === '/interview' || path.startsWith('/interview/') || path === '/api/interview' || path.startsWith('/api/interview/')
   } catch { return false }
 }
 
