@@ -11,7 +11,7 @@ import { ThemeToggle } from '@/components/ui/ThemeToggle'
 // room, session detail, the public share view, and auth pages) so nothing
 // competes with the transcript for attention. Each of those carries its own
 // lightweight back-link instead.
-const HIDDEN_PREFIXES = ['/record', '/room', '/s/', '/session/', '/settings', '/sign-in', '/sign-up']
+const HIDDEN_PREFIXES = ['/record', '/room', '/remote', '/s/', '/session/', '/settings', '/sign-in', '/sign-up']
 
 export function AppNav({ clerkConfigured }: { clerkConfigured: boolean }) {
   const pathname = usePathname()
@@ -47,6 +47,7 @@ export function AppNav({ clerkConfigured }: { clerkConfigured: boolean }) {
             <span data-tour="room">
               <NavLink href="/room/new">New room</NavLink>
             </span>
+            <NavLink href="/remote">Remote assist</NavLink>
             <button
               type="button"
               onClick={() => window.dispatchEvent(new Event('lt:start-tour'))}
@@ -90,6 +91,7 @@ export function AppNav({ clerkConfigured }: { clerkConfigured: boolean }) {
               <MenuLink href="/pricing">Pricing</MenuLink>
               <MenuLink href="/download">Download</MenuLink>
               <MenuLink href="/room/new">New room</MenuLink>
+              <MenuLink href="/remote">Remote assist</MenuLink>
               {clerkConfigured && (
                 <Show when="signed-out">
                   <SignInButton>

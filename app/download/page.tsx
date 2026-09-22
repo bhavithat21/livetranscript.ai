@@ -51,6 +51,14 @@ export default function DownloadPage() {
         />
       </section>
 
+      <section className="mx-auto max-w-4xl px-5 pt-6 sm:px-8" aria-labelledby="remote-preview-heading">
+        <div className="glass rounded-2xl p-6">
+          <h2 id="remote-preview-heading" className="font-[family-name:var(--font-serif)] text-xl">Remote assistance preview</h2>
+          <p className="mt-2 text-sm leading-relaxed text-black/60">Sharing and controlling laptop applications requires desktop version 0.1.8 or later. Preview installers are published on the release page after the Mac and Windows builds finish. Install a preview explicitly to try it; the stable updater stays on the current stable release.</p>
+          <a href="https://github.com/bhavithat21/livetranscript.ai/releases" className="btn-ghost mt-4 text-sm">View desktop preview releases</a>
+        </div>
+      </section>
+
       {/* Beta honesty: these builds are unsigned, so the OS shows a first-launch
           warning, and macOS system-audio needs a one-time Screen Recording grant. */}
       <div className="mx-auto max-w-4xl px-5 pt-5 sm:px-8">

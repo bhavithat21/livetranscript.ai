@@ -11,7 +11,7 @@ the browser.
 
 ## Prerequisites (on the build machine)
 
-- **Rust 1.85+** (Tauri v2 needs a recent toolchain). Install/upgrade: `rustup update stable`.
+- **Current stable Rust** (the locked desktop dependencies use recent Rust APIs). Install/upgrade: `rustup update stable`.
 - **Node** (for the Tauri CLI).
 - Platform build deps:
   - **Windows:** WebView2 runtime (preinstalled on Win10/11) + MSVC build tools.
@@ -57,11 +57,15 @@ npx @tauri-apps/cli icon path/to/logo.png
 The current icons are placeholders (brand emerald `#0f766e`); replace `app-icon.png`
 and re-run to brand them.
 
-## Phase 2 — silent system-audio capture (not yet wired)
+## Native capabilities
 
-The one native capability worth adding: **WASAPI loopback (Windows) / CoreAudio
-tap (macOS)** for full-system audio capture with **no screen-share picker**. It
-would register a `#[tauri::command]` in `src/lib.rs`, stream PCM to the web layer
-via an additive `window.__lt_native` bridge (feature-detected — the browser path
-stays unchanged), and feed the existing stage-4 PCM encoder. See
-`docs/low-latency-design.md` §6.
+System audio is implemented: Windows uses WASAPI loopback and macOS uses the
+audio-capture sidecar. `start_native_audio` streams PCM through a Tauri channel to
+the web audio bridge; `stop_native_audio` tears down that session.
+
+Owner-approved remote assistance adds selected-monitor capture and optional
+mouse/keyboard control. It starts view-only, requires live controller heartbeats,
+and stops on disconnect, tray stop, emergency shortcut, app exit or panic-hide.
+See [REMOTE-ASSIST.md](REMOTE-ASSIST.md) for the bridge, permissions, limits and
+real-device verification procedure. `Desktop checks` compiles the complete shell
+on macOS and Windows and runs its platform-independent input/lease tests.

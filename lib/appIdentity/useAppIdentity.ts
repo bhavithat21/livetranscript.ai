@@ -1,42 +1,77 @@
 'use client'
 import { useCallback, useEffect } from 'react'
 import { useStoredPreference } from '@/lib/browser/useStoredPreference'
+import { DEFAULT_ICON, parseStoredIcon, type AppIcon } from './icons'
 
-// Per-device app identity: a display name the user can set, applied to the header
-// wordmark and the browser/desktop-window title. Works identically on web, Mac,
-// and Windows because the desktop app loads the same web layer — so the in-app
-// name is consistent everywhere. (The OS-installed name/icon in the Dock/Start
-// menu is baked into the signed installer and cannot change per user; this
-// controls the in-app chrome, which is what the user actually looks at.)
-//
-// Stored in localStorage (no account needed). Blank/whitespace => the default.
-
-const KEY = 'lt.appName'
+export const APP_NAME_KEY = 'lt.appName'
+export const APP_ICON_KEY = 'lt.appIcon'
 export const DEFAULT_APP_NAME = 'LiveTranscript'
-const MAX_LEN = 40
-// C0 control chars + DEL, built without literal control chars in source.
+export const MAX_APP_NAME_LENGTH = 40
 const CONTROL_CHARS = new RegExp('[\\u0000-\\u001F\\u007F]', 'g')
-
-function normalizeName(value: string): string {
-  return value.replace(CONTROL_CHARS, '').trim().slice(0, MAX_LEN) || DEFAULT_APP_NAME
-}
 const serializeName = (value: string) => value
+const serializeIcon = (value: AppIcon) => JSON.stringify(value)
 
+export const IDENTITY_PRESETS = [
+  { id: 'default', label: 'LiveTranscript (default)', title: DEFAULT_APP_NAME },
+  { id: 'notes', label: 'Notes', title: 'Notes' },
+  { id: 'reader', label: 'Reader', title: 'Reader' },
+  { id: 'docs', label: 'Document', title: 'Document' },
+  { id: 'preview', label: 'Preview', title: 'Preview' },
+] as const
+
+export function normalizeName(value: string): string {
+  return value.replace(CONTROL_CHARS, '').trim().slice(0, MAX_APP_NAME_LENGTH) || DEFAULT_APP_NAME
+}
+
+export function hasAppName(value: string): boolean {
+  return Boolean(value.replace(CONTROL_CHARS, '').trim())
+}
+
+/** One preference owner for the header, browser tab and native window. */
 export function useAppIdentity() {
-  const { value: name, setValue, clear } = useStoredPreference(KEY, DEFAULT_APP_NAME, normalizeName, serializeName)
+  const { value: name, setValue: setName, clear: clearName } = useStoredPreference(APP_NAME_KEY, DEFAULT_APP_NAME, normalizeName, serializeName)
+  const { value: icon, setValue: setStoredIcon, clear: clearIcon } = useStoredPreference(APP_ICON_KEY, DEFAULT_ICON, parseStoredIcon, serializeIcon)
 
-  // Keep the document/window title in sync with the chosen name.
-  useEffect(() => {
-    if (typeof document !== 'undefined') document.title = name
-  }, [name])
-
-  const save = useCallback((next: string) => {
+  const save = useCallback((next: string): boolean => {
     const value = normalizeName(next)
-    if (value === DEFAULT_APP_NAME) clear()
-    else setValue(value)
-  }, [clear, setValue])
+    return value === DEFAULT_APP_NAME ? clearName() : setName(value)
+  }, [clearName, setName])
 
-  const reset = useCallback(() => save(''), [save])
+  // The old desktop picker cannot compete with the canonical app name or return
+  // after reset. Canonical names take precedence when both preferences exist.
+  useEffect(() => {
+    try {
+      const legacyId = localStorage.getItem('lt.identity')
+      if (legacyId === null) return
+      if (localStorage.getItem(APP_NAME_KEY) === null) {
+        const preset = IDENTITY_PRESETS.find((entry) => entry.id === legacyId)
+        if (preset && preset.id !== 'default') save(preset.title)
+      }
+      localStorage.removeItem('lt.identity')
+    } catch {
+      // Storage may be disabled; useStoredPreference still works for this session.
+    }
+  }, [save])
 
-  return { name, isCustom: name !== DEFAULT_APP_NAME, save, reset }
+  const setIcon = useCallback((next: AppIcon): boolean => {
+    const validated = parseStoredIcon(serializeIcon(next))
+    return validated.kind === 'preset' && validated.id === 'default'
+      ? clearIcon()
+      : setStoredIcon(validated)
+  }, [clearIcon, setStoredIcon])
+
+  const reset = useCallback((): boolean => {
+    const nameSaved = clearName()
+    const iconSaved = clearIcon()
+    return nameSaved && iconSaved
+  }, [clearName, clearIcon])
+
+  return {
+    name,
+    icon,
+    isCustom: name !== DEFAULT_APP_NAME || icon.kind !== 'preset' || icon.id !== 'default',
+    save,
+    setIcon,
+    reset,
+  }
 }

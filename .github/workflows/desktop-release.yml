@@ -8,12 +8,69 @@ on:
     tags:
       - 'v*'
   workflow_dispatch: # allow manual runs from the Actions tab
+  # A version bump reaches users only after the complete native shell compiles
+  # on both supported operating systems. Existing versions are not overwritten.
+  workflow_run:
+    workflows: ['Desktop checks']
+    types: [completed]
+    branches: [main]
+
+concurrency:
+  group: desktop-release
+  cancel-in-progress: false
 
 permissions:
   contents: write # create the release + upload assets
 
 jobs:
+  prepare:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      sha: ${{ steps.release.outputs.sha }}
+      publish: ${{ steps.release.outputs.publish }}
+      preview: ${{ steps.release.outputs.preview }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - name: Resolve an unpublished desktop version
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re, subprocess
+          from pathlib import Path
+          version = json.loads(Path('src-tauri/tauri.conf.json').read_text())['version']
+          if not re.fullmatch(r'\d+\.\d+\.\d+', version):
+              raise SystemExit('Desktop release requires a stable semantic version')
+          if json.loads(Path('package.json').read_text())['version'] != version:
+              raise SystemExit('Web and desktop versions must match')
+          tag = 'v' + version
+          if os.environ['REF_TYPE'] == 'tag' and os.environ['REF_NAME'] != tag:
+              raise SystemExit('Tag does not match the desktop version')
+          result = subprocess.run(['gh', 'api', f"repos/{os.environ['GITHUB_REPOSITORY']}/releases/tags/{tag}"], capture_output=True, text=True)
+          if result.returncode and '404' not in result.stderr:
+              raise SystemExit('Could not verify whether this release already exists')
+          publish = result.returncode != 0
+          preview = os.environ['GITHUB_EVENT_NAME'] != 'push'
+          # Rerun failed build jobs to resume a partial release; a fresh workflow
+          # never overwrites a published version.
+          if not publish and os.environ['GITHUB_EVENT_NAME'] != 'workflow_run':
+              raise SystemExit('This release exists; inspect it before retrying')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'tag={tag}\nsha={os.environ["SOURCE_SHA"]}\npublish={str(publish).lower()}\npreview={str(preview).lower()}\n')
+          print(f'{tag}: ' + ('ready to build' if publish else 'already published; no change'))
+          PY
+
   build:
+    needs: prepare
+    if: needs.prepare.outputs.publish == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -31,6 +88,8 @@ jobs:
       HAS_AZURE_CLIENT: ${{ secrets.AZURE_CLIENT_ID }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -128,11 +187,12 @@ jobs:
           # WIN_SIGN_ARGS is empty unless the Windows-signing step set it (Azure creds
           # present) → the signing overlay is merged only when actually signing.
           args: ${{ matrix.args }} ${{ env.WIN_SIGN_ARGS }}
-          tagName: ${{ github.ref_name }}
-          releaseName: 'LiveTranscript ${{ github.ref_name }}'
-          releaseBody: 'Auto-generated release. The desktop app updates itself on launch.'
+          tagName: ${{ needs.prepare.outputs.tag }}
+          releaseCommitish: ${{ needs.prepare.outputs.sha }}
+          releaseName: "LiveTranscript ${{ needs.prepare.outputs.tag }}${{ needs.prepare.outputs.preview == 'true' && ' — Desktop preview' || '' }}"
+          releaseBody: 'Desktop release with approved remote screen sharing/control and app appearance settings. Preview builds are installed explicitly for device testing and are not pushed through the stable updater. Mac/Windows compilation is checked in CI. Real OS permissions, multi-monitor input and cross-network operation require a device smoke test; see docs/remote-assistance.md.'
           releaseDraft: false
-          prerelease: false
+          prerelease: ${{ needs.prepare.outputs.preview == 'true' }}
           # tauri-action generates latest.json (the updater manifest) and uploads it
           # to the GitHub release. The separate publish-updates job below republishes
           # it (with rewritten URLs) to a public Blob store, since the app's updater
@@ -146,12 +206,17 @@ jobs:
   # job's local target/ only has that job's own platform, which would ship a
   # one-platform manifest and silently break updates for the other OS.
   publish-updates:
-    needs: build
+    needs: [prepare, build]
+    # Remote control is distributed explicitly as a preview until device-level
+    # verification is recorded. Keep the stable updater on the existing release.
+    if: needs.prepare.outputs.preview != 'true'
     runs-on: ubuntu-latest
     env:
       BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -161,9 +226,10 @@ jobs:
         if: ${{ env.BLOB_READ_WRITE_TOKEN != '' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           mkdir -p /tmp/rel
-          gh release download "${{ github.ref_name }}" --dir /tmp/rel --clobber
+          gh release download "$RELEASE_TAG" --dir /tmp/rel --clobber
 
       # Install the Blob SDK in an ISOLATED dir and run the script FROM there, so
       # ESM bare-specifier resolution finds @vercel/blob (NODE_PATH doesn't work for

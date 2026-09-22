@@ -6,6 +6,7 @@ import { DesktopChrome } from '@/components/DesktopChrome'
 import { PermissionPrimer } from '@/components/PermissionPrimer'
 import { FeatureTour } from '@/components/FeatureTour'
 import { TitleBar } from '@/components/TitleBar'
+import { AppIdentityEffects } from '@/lib/appIdentity/AppIdentityEffects'
 import { Providers } from './providers'
 import './globals.css'
 
@@ -36,6 +37,7 @@ export default function RootLayout({
 }>) {
   const body = (
     <body className="min-h-full font-[family-name:var(--font-body)]">
+      <AppIdentityEffects />
       <DesktopChrome />
       <PermissionPrimer />
       <TitleBar />

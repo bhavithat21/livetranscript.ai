@@ -91,7 +91,7 @@ export function CopilotPanel({
   // Post-interview review: generated on demand from the session's Q&A + transcript.
   const [review, setReview] = useState<{ loading: boolean; text: string | null; error: string | null }>({ loading: false, text: null, error: null })
   const lockMode = useLockMode() // desktop: click-through overlay (unlock via hotkey/tray)
-  const identity = useAppIdentity() // desktop: neutral window-title disguise picker
+  const identity = useAppIdentity() // desktop: shares the name in Settings
   // The turn index the orchestrator's auto test result belongs to. Pinned when
   // the result is produced so a later coding-mode chat answer (a new last turn)
   // doesn't inherit the stale panel. Derived during render (React's store-prev
@@ -401,14 +401,14 @@ export function CopilotPanel({
                   onClick={() => { clear(); setMoreOpen(false) }}
                 />
               )}
-              {/* Disguise (desktop): neutral WINDOW TITLE so the app doesn't read as
-                  "LiveTranscript" on a shared screen. Honest scope note below. */}
+              {/* Compact name presets share the canonical Settings preference. */}
               {identity.available && (
                 <div className="mt-1 border-t border-black/10 px-3 py-2">
-                  <label className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-black/45">
-                    <EyeOff size={13} /> Disguise window as
+                  <label htmlFor="copilot-app-name" className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-black/45">
+                    App name
                   </label>
                   <select
+                    id="copilot-app-name"
                     value={identity.current}
                     onChange={(e) => identity.setIdentity(e.target.value)}
                     className="mt-1 w-full rounded-lg border border-black/15 bg-white px-2 py-1.5 text-xs text-ink outline-none focus:border-emerald-700"
@@ -418,7 +418,7 @@ export function CopilotPanel({
                     ))}
                   </select>
                   <p className="mt-1 text-[10px] leading-tight text-black/40">
-                    Renames the window title only. The app name + icon are set when the app is built.
+                    Updates the header and window title. Choose a custom name and icon in Settings.
                   </p>
                 </div>
               )}

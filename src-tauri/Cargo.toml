@@ -1,9 +1,13 @@
 [package]
 name = "livetranscript-desktop"
-version = "0.1.7"
+version = "0.1.8"
 description = "LiveTranscript desktop app"
 authors = ["LiveTranscript"]
 edition = "2021"
+
+[workspace]
+members = ["remote-assist-core"]
+resolver = "2"
 
 # The library the app binary links against.
 [lib]
@@ -24,6 +28,15 @@ tauri-plugin-shell = "2" # spawn the macOS ScreenCaptureKit sidecar
 tauri-plugin-global-shortcut = "2" # OS-level panic-hide hotkey (works unfocused)
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+remote-assist-core = { path = "remote-assist-core" }
+uuid = { version = "1", features = ["v4"] }
+
+# Keep native desktop capture/input dependencies off unsupported mobile/Linux
+# targets. Their platform objects stay on dedicated worker threads.
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
+xcap = "=0.9.8"
+enigo = { version = "=0.6.1", default-features = false }
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
 
 # Windows-only: WASAPI loopback capture via cpal. Never fetched/built on macOS.
 [target.'cfg(target_os = "windows")'.dependencies]
@@ -32,6 +45,7 @@ crossbeam-channel = "0.5"
 # Real desktop blur behind the transparent window (Win11 acrylic). CSS
 # backdrop-filter can't blur the OS desktop; this calls the native DWM API.
 window-vibrancy = "0.6"
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_UI_HiDpi"] }
 
 [features]
 # When `tauri dev`/`tauri build` runs, the custom-protocol feature is enabled

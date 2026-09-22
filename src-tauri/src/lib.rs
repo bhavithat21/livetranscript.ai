@@ -17,6 +17,8 @@
 use std::sync::Mutex;
 use tauri::ipc::{Channel, InvokeResponseBody};
 
+mod remote_assist;
+
 #[cfg(target_os = "macos")]
 mod macos_capture;
 #[cfg(target_os = "windows")]
@@ -50,7 +52,9 @@ pub struct ProtectionState {
 }
 impl Default for ProtectionState {
     fn default() -> Self {
-        Self { hidden_from_capture: Mutex::new(true) }
+        Self {
+            hidden_from_capture: Mutex::new(true),
+        }
     }
 }
 
@@ -65,7 +69,9 @@ pub struct LockState {
 }
 impl Default for LockState {
     fn default() -> Self {
-        Self { click_through: Mutex::new(false) }
+        Self {
+            click_through: Mutex::new(false),
+        }
     }
 }
 
@@ -160,7 +166,8 @@ fn apply_protection(app: &tauri::AppHandle, enabled: bool) -> Result<(), String>
     let state = app.state::<ProtectionState>();
     let mut guard = lock(&state.hidden_from_capture);
     if let Some(win) = app.get_webview_window("main") {
-        win.set_content_protected(enabled).map_err(|e| e.to_string())?;
+        win.set_content_protected(enabled)
+            .map_err(|e| e.to_string())?;
     }
     *guard = enabled;
     if let Some(item) = lock(&app.state::<TrayHandles>().protection_item).as_ref() {
@@ -218,7 +225,8 @@ fn apply_lock(app: &tauri::AppHandle, enabled: bool) -> Result<(), String> {
     // (tray vs hotkey vs webview IPC) can't leave window state and flag disagreeing.
     let mut guard = lock(&state.click_through);
     if let Some(win) = app.get_webview_window("main") {
-        win.set_ignore_cursor_events(enabled).map_err(|e| e.to_string())?;
+        win.set_ignore_cursor_events(enabled)
+            .map_err(|e| e.to_string())?;
         win.set_always_on_top(enabled).map_err(|e| e.to_string())?;
     }
     *guard = enabled;
@@ -236,7 +244,9 @@ fn apply_lock(app: &tauri::AppHandle, enabled: bool) -> Result<(), String> {
 // other shortcuts: an OS refusal (hotkey taken) just means no scroll-while-locked.
 #[cfg(desktop)]
 fn apply_lock_scroll_hotkeys(app: &tauri::AppHandle, enabled: bool) {
-    use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+    use tauri_plugin_global_shortcut::{
+        Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState,
+    };
     #[cfg(target_os = "macos")]
     let primary = Modifiers::SUPER;
     #[cfg(not(target_os = "macos"))]
@@ -245,12 +255,14 @@ fn apply_lock_scroll_hotkeys(app: &tauri::AppHandle, enabled: bool) {
     let down = Shortcut::new(Some(Modifiers::SHIFT | primary), Code::ArrowDown);
     if enabled {
         for (sc, dir) in [(up, "up"), (down, "down")] {
-            let _ = app.global_shortcut().on_shortcut(sc, move |app, shortcut, event| {
-                use tauri::Emitter;
-                if event.state == ShortcutState::Pressed && shortcut == &sc {
-                    let _ = app.emit("lock-scroll", dir);
-                }
-            });
+            let _ = app
+                .global_shortcut()
+                .on_shortcut(sc, move |app, shortcut, event| {
+                    use tauri::Emitter;
+                    if event.state == ShortcutState::Pressed && shortcut == &sc {
+                        let _ = app.emit("lock-scroll", dir);
+                    }
+                });
         }
     } else {
         let _ = app.global_shortcut().unregister(up);
@@ -341,6 +353,7 @@ fn toggle_main_window(app: &tauri::AppHandle) {
         let minimized = win.is_minimized().unwrap_or(false);
         match win.is_visible() {
             Ok(true) if !minimized => {
+                remote_assist::stop_all(app, "Stopped because the host hid the desktop window.");
                 let _ = win.hide();
             }
             _ => {
@@ -387,9 +400,25 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         lock_on,
         None::<&str>,
     )?;
-    let update = MenuItem::with_id(app, "check_update", "Check for Updates…", true, None::<&str>)?;
+    let update = MenuItem::with_id(
+        app,
+        "check_update",
+        "Check for Updates…",
+        true,
+        None::<&str>,
+    )?;
+    let remote_stop = MenuItem::with_id(
+        app,
+        "remote_stop",
+        "Stop remote assistance",
+        true,
+        None::<&str>,
+    )?;
     let quit = MenuItem::with_id(app, "quit", "Quit LiveTranscript", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show, &protect, &lock_item, &update, &quit])?;
+    let menu = Menu::with_items(
+        app,
+        &[&show, &remote_stop, &protect, &lock_item, &update, &quit],
+    )?;
 
     // Stash the checkboxes so apply_protection / apply_lock keep them in sync.
     *lock(&app.state::<TrayHandles>().protection_item) = Some(protect.clone());
@@ -415,6 +444,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             "show_hide" => toggle_main_window(app),
             "toggle_protection" => toggle_protection(app),
             "toggle_lock" => toggle_lock(app),
+            "remote_stop" => remote_assist::stop_all(app, "Stopped from the host's tray menu."),
             "check_update" => {
                 // Manual update check from the tray. Runs off the UI thread; shows
                 // the window so the user sees progress / any error, then installs.
@@ -423,11 +453,19 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
                     run_update_check(handle, true).await;
                 });
             }
-            "quit" => app.exit(0),
+            "quit" => {
+                remote_assist::stop_for_exit(app);
+                app.exit(0);
+            }
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
-            if let TrayIconEvent::Click { button, button_state, .. } = event {
+            if let TrayIconEvent::Click {
+                button,
+                button_state,
+                ..
+            } = event
+            {
                 use tauri::tray::{MouseButton, MouseButtonState};
                 if button == MouseButton::Left && button_state == MouseButtonState::Up {
                     toggle_main_window(tray.app_handle());
@@ -435,6 +473,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             }
         })
         .build(app)?;
+    remote_assist::set_tray_registered(app);
     Ok(())
 }
 
@@ -451,6 +490,7 @@ pub fn run() {
 
     let builder = builder
         .manage(AudioState::default())
+        .manage(remote_assist::RemoteAssistState::default())
         .manage(ProtectionState::default())
         .manage(LockState::default());
     #[cfg(desktop)]
@@ -463,8 +503,24 @@ pub fn run() {
             get_lock_mode,
             request_screen_capture_access,
             start_native_audio,
-            stop_native_audio
+            stop_native_audio,
+            remote_assist::remote_assist_capabilities,
+            remote_assist::remote_assist_displays,
+            remote_assist::remote_assist_start,
+            remote_assist::remote_assist_heartbeat,
+            remote_assist::remote_assist_set_control,
+            remote_assist::remote_assist_input,
+            remote_assist::remote_assist_stop
         ])
+        .on_window_event(|window, event| {
+            use tauri::Manager;
+            if matches!(
+                event,
+                tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed
+            ) {
+                remote_assist::stop_for_exit(window.app_handle());
+            }
+        })
         // Auto-update the NATIVE SHELL. Note the web UI already updates on every
         // launch (frontendDist is the remote site); this keeps the wrapper current.
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -488,6 +544,24 @@ pub fn run() {
                 #[cfg(not(target_os = "macos"))]
                 let primary = Modifiers::CONTROL;
                 let panic_hide = Shortcut::new(Some(Modifiers::SHIFT | primary), Code::KeyH);
+                // Ctrl+Shift+Escape belongs to Task Manager on Windows. Use an
+                // independent shortcut and keep the tray stop available too.
+                let remote_stop = Shortcut::new(
+                    Some(Modifiers::SHIFT | Modifiers::ALT | primary),
+                    Code::KeyX,
+                );
+                let stop_registered = app
+                    .global_shortcut()
+                    .on_shortcut(remote_stop, move |app, shortcut, event| {
+                        if event.state == ShortcutState::Pressed && shortcut == &remote_stop {
+                            remote_assist::stop_all(
+                                app,
+                                "Stopped with the host's emergency shortcut.",
+                            );
+                        }
+                    })
+                    .is_ok();
+                remote_assist::set_shortcut_registered(app.handle(), stop_registered);
                 app.global_shortcut()
                     .on_shortcut(panic_hide, move |app, shortcut, event| {
                         if event.state == ShortcutState::Pressed && shortcut == &panic_hide {
@@ -548,8 +622,16 @@ pub fn run() {
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running LiveTranscript desktop");
+        .build(tauri::generate_context!())
+        .expect("error while building LiveTranscript desktop")
+        .run(|app, event| {
+            if matches!(
+                event,
+                tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
+            ) {
+                remote_assist::stop_for_exit(app);
+            }
+        });
 }
 
 // Check for a shell update and install it if found. `manual` = triggered from the
@@ -585,7 +667,9 @@ async fn run_update_check(app: tauri::AppHandle, manual: bool) {
     match updater.check().await {
         Ok(Some(update)) => {
             // Newer version available → download + install, then the app relaunches.
-            let _ = update.download_and_install(|_chunk, _total| {}, || {}).await;
+            let _ = update
+                .download_and_install(|_chunk, _total| {}, || remote_assist::stop_for_exit(&app))
+                .await;
         }
         Ok(None) => {
             if manual {

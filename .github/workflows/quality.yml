@@ -13,6 +13,7 @@ on:
       - 'components/**'
       - 'evals/**'
       - 'scripts/*verify_deployment.py'
+      - 'scripts/*brand-desktop.mjs'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - 'proxy.ts'
@@ -25,6 +26,7 @@ on:
       - 'components/**'
       - 'evals/**'
       - 'scripts/*verify_deployment.py'
+      - 'scripts/*brand-desktop.mjs'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - 'proxy.ts'
@@ -53,6 +55,8 @@ jobs:
         run: pnpm exec vitest run
       - name: Release checker tests
         run: python3 -B -m unittest scripts/test_verify_deployment.py
+      - name: Desktop branding configuration tests
+        run: node --test scripts/test-brand-desktop.mjs
       - name: Lint
         run: pnpm run lint
       - name: Production build

@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { logError } from '@/lib/log'
 import { AnalyticsIdentity } from '@/components/AnalyticsIdentity'
 import { DisplayNameBridge } from '@/lib/auth/useDisplayName'
+import { filterPrivateAnalytics, isRemoteLocation } from '@/lib/analyticsPrivacy'
 
 // NEXT_PUBLIC_* is inlined at build time, so this is safe on the client and
 // matches the flag layout.tsx uses to decide whether to mount ClerkProvider.
@@ -33,6 +34,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
         // captured, never the words. Do NOT set these false.
         mask_all_text: true,
         mask_all_element_attributes: true,
+        before_send: filterPrivateAnalytics,
+        // The application now displays and controls a remote desktop. Never
+        // record its pixels, credentials, or typed input in analytics replays.
+        disable_session_recording: true,
       })
     }
     // Mark ready whether or not PostHog loaded — if there's no key, identify()
@@ -51,8 +56,8 @@ export function Providers({ children }: { children: React.ReactNode }) {
   // it surface as an uncaught console error. Non-breaking by definition — the app
   // keeps running; we just record what slipped through (e.g. a realtime hiccup).
   useEffect(() => {
-    const onRejection = (e: PromiseRejectionEvent) => logError('unhandledrejection', e.reason)
-    const onError = (e: ErrorEvent) => logError('window.error', e.error ?? e.message)
+    const onRejection = (e: PromiseRejectionEvent) => logError('unhandledrejection', isRemoteLocation(window.location.pathname) ? 'Remote session error' : e.reason)
+    const onError = (e: ErrorEvent) => logError('window.error', isRemoteLocation(window.location.pathname) ? 'Remote session error' : e.error ?? e.message)
     window.addEventListener('unhandledrejection', onRejection)
     window.addEventListener('error', onError)
     return () => {
