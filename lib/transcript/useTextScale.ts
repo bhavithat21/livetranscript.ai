@@ -1,5 +1,6 @@
 'use client'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback } from 'react'
+import { useStoredPreference } from '@/lib/browser/useStoredPreference'
 
 // Per-device transcript text-size preference. A multiplier applied to the reading
 // body so people can enlarge/shrink captions for comfort. Persisted in
@@ -11,31 +12,17 @@ const STEP = 0.15
 const DEFAULT_SCALE = 1
 
 const clamp = (n: number) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, Math.round(n * 100) / 100))
+const parseScale = (raw: string) => {
+  const parsed = parseFloat(raw)
+  return Number.isFinite(parsed) ? clamp(parsed) : DEFAULT_SCALE
+}
 
 export function useTextScale() {
-  const [scale, setScale] = useState(DEFAULT_SCALE)
-
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(KEY)
-      if (raw) {
-        const parsed = parseFloat(raw)
-        if (Number.isFinite(parsed)) setScale(clamp(parsed))
-      }
-    } catch {
-      /* storage disabled — default scale */
-    }
-  }, [])
+  const { value: scale, setValue } = useStoredPreference(KEY, DEFAULT_SCALE, parseScale)
 
   const set = useCallback((next: number) => {
-    const c = clamp(next)
-    setScale(c)
-    try {
-      localStorage.setItem(KEY, String(c))
-    } catch {
-      /* ignore */
-    }
-  }, [])
+    setValue(Number.isFinite(next) ? clamp(next) : DEFAULT_SCALE)
+  }, [setValue])
 
   const inc = useCallback(() => set(scale + STEP), [scale, set])
   const dec = useCallback(() => set(scale - STEP), [scale, set])

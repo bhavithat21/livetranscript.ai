@@ -7,7 +7,7 @@
 // (coding OCR) and per-user RAG (behavioral STAR bank) layer on in P2/P3 — the
 // prompts already describe the intent so the upgrade is additive.
 
-export type CopilotMode = 'general' | 'coding' | 'systemDesign' | 'behavioral'
+export type CopilotMode = 'general' | 'repoInterview' | 'coding' | 'systemDesign' | 'behavioral'
 
 export interface ModeProfile {
   id: CopilotMode
@@ -275,6 +275,34 @@ Solve the EXACT problem stated — do not substitute a famous look-alike. If the
 constraints or examples aren't in the transcript, say what's missing rather than
 guessing. Output must be narratable: the user should be able to explain it aloud.`
 
+const REPO_INTERVIEW = GROUNDING + `You are a senior pair-programming copilot in an
+explicitly AI-permitted live repository interview. The supplied context contains a
+repository tree and ranked excerpts from actual files. Your job is to help the
+candidate navigate, reason, implement, debug, and explain this specific codebase.
+
+Every response MUST use this order:
+
+1. **SAY NOW** — 1-3 natural sentences the candidate can say immediately. Answer
+   the exact question and state any important uncertainty.
+2. **NAVIGATE** — the exact repository-relative file path and symbol to open first,
+   followed by at most two next hops. Explain what to look for at each hop. Never
+   invent a file or symbol absent from REPOSITORY context.
+3. **DEEP TRACE** — trace the relevant control flow and data flow across the supplied
+   files. Discuss validation, state, persistence, side effects, failure behavior,
+   concurrency, security, performance, and tests only where the evidence supports it.
+4. **CHANGE PLAN** — for implementation questions, give the smallest coherent change,
+   affected files, existing conventions to preserve, and focused tests. Do not dump a
+   standalone LeetCode solution into a multi-file repository question.
+5. **EVIDENCE & CONFIDENCE** — list the paths/symbols supporting material claims.
+   Label each claim Verified, Strong inference, Tentative, or Unknown.
+6. **LIKELY FOLLOW-UP** — one probable interviewer probe and a compact answer.
+
+Treat later interviewer statements as possible requirement changes. Explicitly call
+out the delta instead of silently replacing earlier requirements. Cover every part
+of compound questions. If repository evidence is missing, say what search or file is
+needed; never substitute generic architecture claims for code evidence. Keep SAY NOW
+short, but go technically deep afterward.`
+
 const SYSTEM_DESIGN = GROUNDING + `You are a system-design copilot beside a live transcript of an ongoing design
 discussion. Track the WHOLE conversation, not just the last line.
 
@@ -423,6 +451,7 @@ QUALITY GATES before answering:
 export const MODE_PROFILES: Record<CopilotMode, ModeProfile> = {
   // fast tier: latency-critical / retrieval-shaped. smart tier: correctness-first reasoning.
   general: { id: 'general', label: 'General', hint: 'Ask anything about the transcript', temperature: 0.3, system: GENERAL, tier: 'fast', maxTokens: 1500 },
+  repoInterview: { id: 'repoInterview', label: 'Repo interview', hint: 'Capture questions, navigate files, trace code deeply', temperature: 0.2, system: REPO_INTERVIEW, tier: 'smart', maxTokens: 4000 },
   coding: { id: 'coding', label: 'Coding', hint: 'Approach, complexity, code, edge cases', temperature: 0.2, system: CODING, tier: 'smart', maxTokens: 3000 },
   systemDesign: { id: 'systemDesign', label: 'System design', hint: 'Structured design, tradeoffs, next step', temperature: 0.3, system: SYSTEM_DESIGN, tier: 'smart', maxTokens: 2500 },
   // smart tier (Claude): behavioral is the most hallucination- and voice-sensitive
@@ -433,7 +462,7 @@ export const MODE_PROFILES: Record<CopilotMode, ModeProfile> = {
   behavioral: { id: 'behavioral', label: 'Behavioral', hint: 'STAR scaffold from what was said', temperature: 0.4, system: BEHAVIORAL, tier: 'smart', maxTokens: 4000 },
 }
 
-export const MODE_ORDER: CopilotMode[] = ['general', 'coding', 'systemDesign', 'behavioral']
+export const MODE_ORDER: CopilotMode[] = ['general', 'repoInterview', 'coding', 'systemDesign', 'behavioral']
 
 export function modeProfile(mode: string | undefined): ModeProfile {
   return MODE_PROFILES[mode as CopilotMode] ?? MODE_PROFILES.general

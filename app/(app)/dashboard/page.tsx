@@ -6,6 +6,10 @@ import { logError } from '@/lib/log'
 
 export const dynamic = 'force-dynamic'
 
+function currentTimestamp(): number {
+  return Date.now()
+}
+
 export default async function DashboardPage() {
   let sessions: SessionSummaryRow[]
   try {
@@ -25,7 +29,7 @@ export default async function DashboardPage() {
   const totalSeconds = sessions.reduce((n, s) => n + (s.durationSeconds ?? 0), 0)
   const hours = (totalSeconds / 3600).toFixed(totalSeconds >= 36000 ? 0 : 1)
   const sharedCount = sessions.filter((s) => s.shareToken).length
-  const now = Date.now()
+  const now = currentTimestamp()
 
   return (
     <main className="mx-auto max-w-6xl px-6 pb-24 pt-10">

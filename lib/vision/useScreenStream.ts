@@ -99,5 +99,20 @@ export function useScreenStream() {
     return dataUrl
   }, [])
 
-  return { sharing, error, start, stop, grabFrame }
+  // Code needs legible punctuation and line numbers. Keep this separate from
+  // the low-resolution chat diff gate: a chat grab must not consume repo capture.
+  const grabCodeFrame = useCallback((): string | null => {
+    const video = videoRef.current
+    if (!video?.videoWidth || !video.videoHeight) return null
+    const scale = Math.min(1, 2400 / Math.max(video.videoWidth, video.videoHeight))
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(video.videoWidth * scale))
+    canvas.height = Math.max(1, Math.round(video.videoHeight * scale))
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return null
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+    return canvas.toDataURL('image/jpeg', 0.94)
+  }, [])
+
+  return { sharing, error, start, stop, grabFrame, grabCodeFrame }
 }

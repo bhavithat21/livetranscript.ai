@@ -6,13 +6,16 @@ name: Quality
 # were previously ungated; this makes a quality regression fail like a type error does.
 on:
   push:
-    branches: [master]
+    branches: [main, master]
     paths:
       - 'lib/**'
       - 'app/**'
       - 'components/**'
       - 'evals/**'
       - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'proxy.ts'
+      - 'next.config.ts'
       - '.github/workflows/quality.yml'
   pull_request:
     paths:
@@ -20,6 +23,11 @@ on:
       - 'app/**'
       - 'components/**'
       - 'evals/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'proxy.ts'
+      - 'next.config.ts'
+      - '.github/workflows/quality.yml'
   workflow_dispatch:
 
 jobs:
@@ -41,6 +49,10 @@ jobs:
         run: pnpm exec tsc --noEmit
       - name: Unit tests
         run: pnpm exec vitest run
+      - name: Lint
+        run: pnpm run lint
+      - name: Production build
+        run: pnpm run build
 
       # 2. Question-detection eval — PURE LOGIC, no API key. Hard regression gate:
       #    the eval itself fails if F1 drops below its floor, failing the job.
@@ -49,7 +61,7 @@ jobs:
 
       # 3. Key-dependent evals (coding pass@1, behavioral voice). These SELF-SKIP
       #    when no provider key is present, so they never break CI on a fork/PR
-      #    without secrets — but WHEN secrets exist (push to master) they run and a
+      #    without secrets — but WHEN secrets exist (push to main/master) they run and a
       #    quality regression fails the job. Non-blocking on absence, blocking on
       #    presence-and-fail.
       - name: Answer-quality evals (run if keys present)

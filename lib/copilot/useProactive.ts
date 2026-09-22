@@ -139,9 +139,11 @@ export function useProactive(
   const askedRef = useRef<string[]>([])
   const inFlightRef = useRef(false)
   const onQuestionRef = useRef(onQuestion)
-  onQuestionRef.current = onQuestion
   const getRef = useRef(getTranscript)
-  getRef.current = getTranscript
+  useEffect(() => {
+    onQuestionRef.current = onQuestion
+    getRef.current = getTranscript
+  }, [onQuestion, getTranscript])
   // The candidate question we're WAITING on, its normalized key, and when it last
   // changed — the basis for "has it stopped growing?".
   const pendingRef = useRef<{ q: string; key: string; since: number } | null>(null)

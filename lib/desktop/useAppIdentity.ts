@@ -1,5 +1,6 @@
 'use client'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useSyncExternalStore } from 'react'
+import { useStoredPreference } from '@/lib/browser/useStoredPreference'
 
 // In-app "disguise" picker for the DESKTOP app. Interviewers glancing at a shared
 // screen or a window list clock an obvious name like "LiveTranscript". This lets the
@@ -22,45 +23,34 @@ export const IDENTITY_PRESETS = [
 ] as const
 
 const KEY = 'lt.identity'
+const subscribeToRuntime = () => () => {}
+const desktopAvailable = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+const serverDesktopAvailable = () => false
+const parseIdentity = (id: string) => IDENTITY_PRESETS.some((preset) => preset.id === id) ? id : 'default'
+const serializeIdentity = (id: string) => id
+
+async function applyTitle(id: string): Promise<void> {
+  const preset = IDENTITY_PRESETS.find((p) => p.id === id) ?? IDENTITY_PRESETS[0]
+  try {
+    const { getCurrentWindow } = await import('@tauri-apps/api/window')
+    await getCurrentWindow().setTitle(preset.title)
+  } catch {
+    /* not desktop / API unavailable — no-op */
+  }
+}
 
 export function useAppIdentity() {
-  const [available, setAvailable] = useState(false)
-  const [current, setCurrent] = useState<string>('default')
+  const available = useSyncExternalStore(subscribeToRuntime, desktopAvailable, serverDesktopAvailable)
+  const { value: current, setValue } = useStoredPreference(KEY, 'default', parseIdentity, serializeIdentity)
 
   // Desktop only. Apply the persisted choice on mount so it survives relaunch.
   useEffect(() => {
-    if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) return
-    setAvailable(true)
-    const saved = (() => {
-      try {
-        return localStorage.getItem(KEY) || 'default'
-      } catch {
-        return 'default'
-      }
-    })()
-    setCurrent(saved)
-    void applyTitle(saved)
-  }, [])
-
-  const applyTitle = async (id: string) => {
-    const preset = IDENTITY_PRESETS.find((p) => p.id === id) ?? IDENTITY_PRESETS[0]
-    try {
-      const { getCurrentWindow } = await import('@tauri-apps/api/window')
-      await getCurrentWindow().setTitle(preset.title)
-    } catch {
-      /* not desktop / API unavailable — no-op */
-    }
-  }
+    if (available) void applyTitle(current)
+  }, [available, current])
 
   const setIdentity = useCallback((id: string) => {
-    setCurrent(id)
-    try {
-      localStorage.setItem(KEY, id)
-    } catch {
-      /* ignore */
-    }
-    void applyTitle(id)
-  }, [])
+    setValue(parseIdentity(id))
+  }, [setValue])
 
   return { available, current, presets: IDENTITY_PRESETS, setIdentity }
 }

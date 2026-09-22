@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server'
 // Public: landing, the shared-transcript view (no login), and Clerk's own paths.
 const isPublicRoute = createRouteMatcher([
   '/',
+  '/api/health', // public release identity only; no credentials or user data
   '/sign-in(.*)',
   '/sign-up(.*)',
   '/s/(.*)',

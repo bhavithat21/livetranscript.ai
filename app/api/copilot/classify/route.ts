@@ -6,7 +6,7 @@ import OpenAI from 'openai'
 
 // Fast question CLASSIFIER — the "orchestrator" brain. One cheap call answers the two
 // things the copilot needs to route a heard question:
-//   - mode:      general | coding | systemDesign | behavioral  (auto-switch the tab)
+//   - mode:      general | repoInterview | coding | systemDesign | behavioral
 //   - needsWeb:  does answering correctly need CURRENT facts the model may not know?
 //   - isQuestion:is this actually a question worth answering (vs chatter)?
 // Runs on the fast tier (Groq) with a tiny JSON output so it adds minimal latency
@@ -17,13 +17,13 @@ const GROQ_BASE_URL = 'https://api.groq.com/openai/v1'
 const MAX_Q = 1_000
 
 const SYSTEM = `You classify an interview question for a copilot. Reply with ONLY compact JSON, no prose:
-{"isQuestion": bool, "mode": "general"|"coding"|"systemDesign"|"behavioral", "needsWeb": bool, "confidence": 0..1}
-- mode: "coding" = write/debug an algorithm or code. "systemDesign" = design a system/architecture at scale. "behavioral" = "tell me about a time", leadership, conflict, teamwork. "general" = anything else / small talk / factual.
+{"isQuestion": bool, "mode": "general"|"repoInterview"|"coding"|"systemDesign"|"behavioral", "needsWeb": bool, "confidence": 0..1}
+- mode: "repoInterview" = locate, trace, modify, debug, test, or explain code in an existing multi-file repository. "coding" = a self-contained algorithm/code problem. "systemDesign" = design a system/architecture at scale. "behavioral" = "tell me about a time", leadership, conflict, teamwork. "general" = anything else / small talk / factual.
 - needsWeb: true ONLY if a correct answer needs CURRENT facts a 2024-trained model would get wrong — latest versions, recent events, prices, "as of now/today/this year". false for timeless CS/behavioral.
 - isQuestion: false for statements, filler, or the candidate's own answer; true for a real asked question.
 - confidence: your certainty in mode.`
 
-const VALID_MODES = new Set(['general', 'coding', 'systemDesign', 'behavioral'])
+const VALID_MODES = new Set(['general', 'repoInterview', 'coding', 'systemDesign', 'behavioral'])
 
 export async function POST(req: NextRequest) {
   const userId = await currentUserId()

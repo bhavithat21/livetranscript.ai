@@ -38,7 +38,9 @@ export function FollowAlong({
   // Freshest source for keyterm bias at begin() time, without re-creating begin
   // on every live word.
   const sourceRef = useRef(source)
-  sourceRef.current = source
+  useEffect(() => {
+    sourceRef.current = source
+  }, [source])
 
   // Active word index = how many source words the reader has covered so far.
   const activeIndex = alignIndex(words, spoken)
@@ -72,14 +74,14 @@ export function FollowAlong({
     } finally {
       setStarting(false)
     }
-  }, [start, stop, keyterms])
+  }, [start, stop, keyterms, setListening, setSpoken, setStartError, setStarting])
 
   const end = useCallback(async () => {
     stop()
     await providerRef.current?.disconnect()
     providerRef.current = null
     setListening(false)
-  }, [stop])
+  }, [stop, setListening])
 
   // Tear down the mic + ASR when the panel unmounts.
   useEffect(() => () => void end(), [end])

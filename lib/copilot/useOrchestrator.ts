@@ -43,12 +43,12 @@ export function useOrchestrator(ask: AskFn) {
   const running = useRef(false)
   const retries = useRef(0)
 
-  const executeAndRetry = useCallback(async (
+  const executeAndRetry = useCallback(async function executeAndRetry(
     content: string,
     prob: ExtractedProblem,
     instructions: string | null,
     askFn: AskFn,
-  ): Promise<void> => {
+  ): Promise<void> {
     const codeBlock = extractCode(content)
     const testsBlock = extractTests(content)
 

@@ -32,7 +32,7 @@ self.onmessage = async function (e) {
     try {
       const raw = await pyodide.runPythonAsync(msg.code)
       let rawStr = null
-      try { rawStr = raw === undefined || raw === null ? null : String(raw) } catch (_) { rawStr = null }
+      try { rawStr = raw === undefined || raw === null ? null : String(raw) } catch { rawStr = null }
       self.postMessage({ type: 'result', id: msg.id, ok: true, output: out, raw: rawStr })
     } catch (err) {
       self.postMessage({ type: 'result', id: msg.id, ok: false, output: out, raw: null, error: String((err && err.message) || err) })

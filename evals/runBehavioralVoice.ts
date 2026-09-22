@@ -160,7 +160,6 @@ describe('behavioral voice-compliance eval', () => {
       }
 
       // Report: per-prompt pass/fail per rule + overall voice-compliance score.
-      const mark = (b: boolean) => (b ? 'PASS' : 'FAIL')
       const short = (s: string) => (s.length > 40 ? s.slice(0, 37) + '…' : s).padEnd(42)
       const lines = [
         '',
@@ -180,7 +179,6 @@ describe('behavioral voice-compliance eval', () => {
       const passed = rows.filter((r) => r.ok).length
       const rate = rows.length ? ((passed / rows.length) * 100).toFixed(1) : '0.0'
       lines.push(`overall voice-compliance: ${passed}/${rows.length} answers clean = ${rate}%`, '')
-      // eslint-disable-next-line no-console -- eval report is the whole point of this runner
       console.log(lines.join('\n'))
     },
     300_000,

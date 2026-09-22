@@ -16,6 +16,7 @@ Speak or capture a call and watch the words appear the moment they're said, with
 - **Vocabulary packs** — per-context keyterm boosts (AWS, coding, systems, AI/ML, …) sent once at connection, so accuracy improves with no latency cost.
 - **Share** — expiring public links to any saved transcript.
 - **Mobile-responsive** across phone → desktop.
+- **Repository interview assistance** — capture browser IDE screenshots or import a folder, retain observed source with explicit gaps, track interviewer questions, and get file navigation, code traces, patch suggestions and independent specialist review. See [the screenshot guide](docs/repo-interview-screenshots.md).
 
 ## Tech Stack
 
@@ -56,6 +57,9 @@ Copy `.env.example` to `.env.local` and provide your own values. **Never commit 
 | `DEEPGRAM_API_KEY` | Streaming ASR | yes (transcription) |
 | `ASSEMBLYAI_API_KEY` | Alternate ASR (higher accuracy) | optional |
 | `OPENAI_API_KEY` | Correction + summaries | optional |
+| `ANTHROPIC_API_KEY` | Claude screenshot transcription + default repository specialists | for repository AI |
+| `COPILOT_REPO_MODEL_*` | Per-role vision, requirements, implementation, debugger, reviewer and synthesis models | optional; [configuration and benchmarks](evals/repo/README.md) |
+| `GROQ_API_KEY` | Groq-hosted specialist model overrides | for Groq models |
 | `ABLY_API_KEY` | Realtime for meeting rooms | for rooms |
 | `DATABASE_URL` | Neon Postgres connection | for saved sessions |
 | `NEXT_PUBLIC_APP_URL` | Base URL for share links | recommended |
@@ -106,6 +110,10 @@ The picker in-app shows this guidance inline.
 ## Deployment
 
 Deployed on Vercel. The project's framework must be set to `nextjs` (or App Router routes and `/api/*` 404). Environment variables are configured in the Vercel project settings (encrypted); secrets are marked sensitive.
+
+The Quality workflow checks types, unit tests, lint, production build and question detection on `main` and `master`. Configure `ANTHROPIC_API_KEY` in the target Vercel environment before using screenshot extraction. Model overrides must name IDs available to that provider account; missing keys and provider failures remain visible.
+
+`GET /api/health` returns the running release's commit SHA (when provided by Vercel) and feature identifiers. It confirms deployment identity; provider functionality still requires an authenticated screenshot and analysis test. It returns no API keys or user data.
 
 ## Security
 

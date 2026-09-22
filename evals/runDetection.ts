@@ -65,7 +65,6 @@ describe('question-detection precision/recall eval', () => {
       ...misses.map((m) => `  [expected ${m.expected ? 'Q' : '·'} got ${m.got ? 'Q' : '·'}] ${m.text}`),
       '',
     ]
-    // eslint-disable-next-line no-console -- eval report is the whole point of this runner
     console.log(lines.join('\n'))
 
     expect(f1).toBeGreaterThanOrEqual(F1_FLOOR)

@@ -25,7 +25,7 @@ export type RouteResult = {
   webContext: string | null
 }
 
-const VALID: CopilotMode[] = ['general', 'coding', 'systemDesign', 'behavioral']
+const VALID: CopilotMode[] = ['general', 'repoInterview', 'coding', 'systemDesign', 'behavioral']
 
 export function useOrchestrationRouter() {
   // Guard against overlapping route() calls stacking classifier requests.

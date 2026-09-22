@@ -1,5 +1,6 @@
 'use client'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
+import { useStoredPreference } from '../browser/useStoredPreference'
 
 // Resume + job description as FIRST-CLASS context — distinct from the per-mode doc
 // corpus. A candidate has ONE resume and ONE target JD, and they ground EVERY mode:
@@ -17,65 +18,42 @@ const MAX_JD = 8_000
 
 export type CandidateProfile = { resume: string; jd: string }
 
-function load(): CandidateProfile {
-  try {
-    const raw = localStorage.getItem(KEY)
-    if (!raw) return { resume: '', jd: '' }
-    const p = JSON.parse(raw) as Partial<CandidateProfile>
-    return { resume: p.resume ?? '', jd: p.jd ?? '' }
-  } catch {
-    return { resume: '', jd: '' }
+const EMPTY_PROFILE: CandidateProfile = { resume: '', jd: '' }
+
+function parseProfile(raw: string): CandidateProfile {
+  const p = JSON.parse(raw) as Partial<CandidateProfile> | null
+  return {
+    resume: typeof p?.resume === 'string' ? p.resume.slice(0, MAX_RESUME) : '',
+    jd: typeof p?.jd === 'string' ? p.jd.slice(0, MAX_JD) : '',
   }
 }
 
 export function useCandidateProfile() {
-  const [resume, setResumeState] = useState('')
-  const [jd, setJdState] = useState('')
+  const { value: { resume, jd }, setValue, clear: clearStored } = useStoredPreference(KEY, EMPTY_PROFILE, parseProfile)
   const [savedNote, setSavedNote] = useState<string | null>(null)
-
-  useEffect(() => {
-    const p = load()
-    setResumeState(p.resume)
-    setJdState(p.jd)
-  }, [])
-
-  const persist = useCallback((next: CandidateProfile) => {
-    try {
-      localStorage.setItem(KEY, JSON.stringify(next))
-      setSavedNote(null)
-    } catch {
-      // Resume + JD are small vs embeddings, but be honest if it somehow fails.
-      setSavedNote('Too large to save — it won’t survive a reload.')
-    }
-  }, [])
 
   const setResume = useCallback(
     (text: string) => {
       const capped = text.slice(0, MAX_RESUME)
-      setResumeState(capped)
-      persist({ resume: capped, jd })
+      const saved = setValue((current) => ({ ...current, resume: capped }))
+      setSavedNote(saved ? null : 'Too large to save — it won’t survive a reload.')
     },
-    [jd, persist],
+    [setValue],
   )
 
   const setJd = useCallback(
     (text: string) => {
       const capped = text.slice(0, MAX_JD)
-      setJdState(capped)
-      persist({ resume, jd: capped })
+      const saved = setValue((current) => ({ ...current, jd: capped }))
+      setSavedNote(saved ? null : 'Too large to save — it won’t survive a reload.')
     },
-    [resume, persist],
+    [setValue],
   )
 
   const clear = useCallback(() => {
-    setResumeState('')
-    setJdState('')
-    try {
-      localStorage.removeItem(KEY)
-    } catch {
-      /* ignore */
-    }
-  }, [])
+    const saved = clearStored()
+    setSavedNote(saved ? null : 'Could not clear saved profile — it may return after a reload.')
+  }, [clearStored])
 
   // The always-injected context block for a prompt, or null if nothing set. Labeled
   // so the model treats it as the candidate's real background (ground answers in it,

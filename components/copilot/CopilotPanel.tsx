@@ -31,6 +31,10 @@ import { useOrchestrator, type OrchestratorStage, type ExtractedProblem } from '
 import { Markdown } from './Markdown'
 import { parseDraftStream } from '@/lib/copilot/draftProtocol'
 import { splitAnswer } from '@/lib/copilot/answerStructure'
+import { useRepoInterview } from '@/lib/repo/useRepoInterview'
+import { RepoInterviewPanel } from './RepoInterviewPanel'
+import { useScreenRepository, type RepoTask } from '@/lib/repo/useScreenRepository'
+import { ScreenRepositoryControls, RepoAnalysisView } from './ScreenRepositoryPanel'
 
 // Ask-your-transcript side panel. Grounded, streaming answers from the live
 // transcript. Matches the app's editorial-glass language: glass surface, emerald
@@ -44,11 +48,11 @@ const QUICK_ACTIONS = [
   'What did I miss?',
 ]
 
-// Screen frames are only useful — and only sent — in the two modes that reason
-// about what's on screen: a coding problem, or a system-design canvas/diagram.
+// Screen frames are sent in modes that reason about visible code or diagrams.
+// Repository mode has its own high-resolution extraction and watch controls.
 // General/behavioral never attach a frame even if screen-sharing is left on, so
 // no image is billed or leaked for a mode that can't use it.
-const SCREEN_MODES: readonly CopilotMode[] = ['coding', 'systemDesign']
+const SCREEN_MODES: readonly CopilotMode[] = ['repoInterview', 'coding', 'systemDesign']
 function usesScreen(mode: CopilotMode): boolean {
   return SCREEN_MODES.includes(mode)
 }
@@ -70,6 +74,8 @@ export function CopilotPanel({
   const screen = useScreenStream()
   const [input, setInput] = useState('')
   const [mode, setMode] = useState<CopilotMode>('general')
+  const repo = useRepoInterview(getTranscript, mode === 'repoInterview')
+  const screenRepo = useScreenRepository(mode === 'repoInterview', screen.sharing, screen.grabCodeFrame)
   const context = useModeContext(mode) // per-mode uploaded documents + answer instructions
   const profile = useCandidateProfile() // resume + JD: global, always-injected grounding
   const router = useOrchestrationRouter() // auto mode-routing + live web search for a question
@@ -81,6 +87,7 @@ export function CopilotPanel({
   const [stealth, setStealth] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false) // overflow sheet for secondary controls
   const [view, setView] = useState<'chat' | 'answers'>('chat')
+  const [repoRequestError, setRepoRequestError] = useState<string | null>(null)
   // Post-interview review: generated on demand from the session's Q&A + transcript.
   const [review, setReview] = useState<{ loading: boolean; text: string | null; error: string | null }>({ loading: false, text: null, error: null })
   const lockMode = useLockMode() // desktop: click-through overlay (unlock via hotkey/tray)
@@ -97,6 +104,56 @@ export function CopilotPanel({
     setAutoTestTurn(orchestrator.testResult ? turns.length - 1 : null)
   }
   const scrollRef = useRef<HTMLDivElement>(null)
+  const repoAnswerBusy = useRef(false)
+  const typedRepoQuestion = input.trim()
+  const repoTaskTarget = typedRepoQuestion
+    ? { question: typedRepoQuestion, questionId: undefined }
+    : screenRepo.displayId && screenRepo.displayAnalysis?.question
+      ? { question: screenRepo.displayAnalysis.question, questionId: screenRepo.displayAnalysis.questionId }
+      : repo.selected
+        ? { question: repo.selected.text, questionId: repo.selected.id }
+        : screenRepo.displayAnalysis?.question
+          ? { question: screenRepo.displayAnalysis.question, questionId: screenRepo.displayAnalysis.questionId }
+          : { question: '', questionId: undefined }
+  const repoTaskQuestion = repoTaskTarget.question
+
+  const answerRepoQuestion = useCallback(async (question: string, id?: string, task: RepoTask = 'plan', automatic = false) => {
+    if (repoAnswerBusy.current) return
+    repoAnswerBusy.current = true
+    setRepoRequestError(null)
+    if (!automatic) screenRepo.setDisplayId(null)
+    if (id) repo.mark(id, 'answering', question)
+    try {
+      const uploaded = context.count > 0 ? await context.retrieve(question) : null
+      const evidence = [
+        context.instructions && `User answer preferences: ${context.instructions}`,
+        uploaded && `Uploaded context: ${uploaded}`,
+        screenRepo.contextFor(question),
+        repo.contextFor(question),
+        `QUESTION LEDGER (include related asks and requirement changes):\n${repo.questions.slice(-12).map((item) => item.text).join('\n')}`,
+        me.getMeContext() && `Candidate discussion: ${me.getMeContext()}`,
+      ].filter(Boolean).join('\n\n')
+      const ok = await screenRepo.analyze(question, evidence, getTranscript(), task, id)
+      if (id) repo.mark(id, ok ? 'answered' : 'failed', question)
+    } catch (error) {
+      if (id) repo.mark(id, 'failed', question)
+      setRepoRequestError(error instanceof Error ? error.message : 'Could not prepare repository context. Retry this question.')
+    } finally {
+      repoAnswerBusy.current = false
+    }
+  }, [repo, screenRepo, me, getTranscript, context])
+
+  // Capture is independent of generation. Drain every settled question in order;
+  // failures stay in the ledger for an explicit retry instead of looping costs.
+  useEffect(() => {
+    if (!auto || mode !== 'repoInterview') return
+    const timer = setInterval(() => {
+      if (repoAnswerBusy.current) return
+      const next = repo.questions.find((item) => item.status === 'captured' && Date.now() - (item.updatedAt ?? item.capturedAt) > 1200)
+      if (next) void answerRepoQuestion(next.text, next.id, 'plan', true)
+    }, 650)
+    return () => clearInterval(timer)
+  }, [auto, mode, repo.questions, answerRepoQuestion])
 
   // Pre-load execution runtime when coding mode is selected so test execution is instant.
   useEffect(() => {
@@ -111,10 +168,12 @@ export function CopilotPanel({
     (q: string, viaButton = false) => {
       setView('answers')
       return (async () => {
+        if (mode === 'repoInterview') { await answerRepoQuestion(q); return }
         const routed = await router.route(q)
         if (!viaButton && routed.classification && !routed.classification.isQuestion) return
         const answerMode: CopilotMode = routed.classification?.mode ?? mode
         if (answerMode !== mode) setMode(answerMode)
+        if (answerMode === 'repoInterview') { await answerRepoQuestion(q); return }
         const sameMode = answerMode === mode
         const retrieved =
           sameMode && answerMode === 'behavioral' && context.storyCount > 0
@@ -135,8 +194,7 @@ export function CopilotPanel({
         await feed.answer(q, answerMode, ctx, image, context.instructions || null, getTranscript())
       })()
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [mode, context, profile, me, screen, router, feed, getTranscript],
+    [mode, context, profile, me, screen, router, feed, getTranscript, answerRepoQuestion],
   )
 
   // Manual "Answer" button: answer the latest question heard in the transcript RIGHT
@@ -149,7 +207,7 @@ export function CopilotPanel({
   // Proactive: while auto is on, a settled (complete) heard question is answered
   // automatically into the navigable answer feed. Returns the promise so the hook's
   // in-flight guard holds until streaming finishes (no stacked duplicates).
-  useProactive(auto, getTranscript, (q) => {
+  useProactive(auto && mode !== 'repoInterview', getTranscript, (q) => {
     return (async () => {
       await answerQuestion(q)
     })()
@@ -186,7 +244,14 @@ export function CopilotPanel({
   const visibleTurns = turns.map((t, i) => ({ t, i })).filter(({ t }) => t.mode === mode)
 
   const submit = async (q: string) => {
-    if (!q.trim() || streaming) return
+    if (!q.trim()) return
+    if (mode === 'repoInterview') {
+      if (screenRepo.analysis?.running) return
+      setInput('')
+      await answerRepoQuestion(q)
+      return
+    }
+    if (streaming) return
     setInput('')
     // Attach a screen frame only when sharing is on AND this mode reasons about
     // the screen (coding / system design) — never for general/behavioral.
@@ -203,7 +268,10 @@ export function CopilotPanel({
           : null
     // Always-on candidate profile (resume + JD) prepended to any retrieved chunk,
     // so every manual answer is grounded in the candidate's real background.
-    const merged = [profile.contextBlock(), retrieved].filter(Boolean).join('\n\n') || null
+    const merged = [
+      profile.contextBlock(),
+      retrieved,
+    ].filter(Boolean).join('\n\n') || null
     ask(q, mode, image, merged, context.instructions || null)
   }
 
@@ -377,7 +445,7 @@ export function CopilotPanel({
 
       {/* Chat vs Answers: the Answers feed holds auto-generated Q&A (proactive),
           paged prev/next — a separate view from the chat thread. */}
-      <div className="flex items-center gap-1 border-b border-black/10 px-3 py-1.5 text-xs">
+      {mode !== 'repoInterview' && <div className="flex items-center gap-1 border-b border-black/10 px-3 py-1.5 text-xs">
         <button
           onClick={() => setView('chat')}
           data-active={view === 'chat'}
@@ -392,7 +460,7 @@ export function CopilotPanel({
         >
           Answers{feed.count > 0 ? ` (${feed.count})` : ''}
         </button>
-      </div>
+      </div>}
 
       {/* Context — upload documents + set instructions for how THIS mode's chat
           should answer. Separate per mode (coding/system design/behavioral/general
@@ -432,12 +500,19 @@ export function CopilotPanel({
         {showContextEditor && <ContextEditor context={context} profile={profile} />}
       </div>
 
-      {/* Visible privacy indicator — the assistant only sees your screen while
-          this is showing, and only the frame at the moment you ask. */}
+      {mode === 'repoInterview' && <div className="max-h-[50%] shrink-0 overflow-y-auto">
+        <ScreenRepositoryControls repo={screenRepo} sharing={screen.sharing} startSharing={screen.start}
+          question={repoTaskQuestion}
+          onAnalyze={(task) => void answerRepoQuestion(repoTaskQuestion, repoTaskTarget.questionId, task)} />
+        <RepoInterviewPanel repo={repo} answering={!!screenRepo.analysis?.running} onSelect={screenRepo.showQuestion} onAnswer={(question, id) => void answerRepoQuestion(question, id)} />
+        {repoRequestError && <p role="alert" className="border-b border-black/10 px-4 py-2 text-xs text-[color:var(--stop)]">{repoRequestError}</p>}
+      </div>}
+
+      {/* Sharing remains visible, including the repository watch schedule. */}
       {screen.sharing && (
         <div className="flex items-center gap-2 border-b border-emerald-700/15 bg-emerald-700/5 px-4 py-1.5 text-xs text-emerald-800">
           <span className="live-dot" aria-hidden />
-          Sharing your screen — a frame is sent only when you ask.
+          {mode === 'repoInterview' ? (screenRepo.watching ? 'IDE capture active — changed views sent every 8 seconds.' : 'IDE shared — use Capture code to read a view.') : 'Screen shared with the assistant.'}
         </div>
       )}
       {screen.error && <p className="border-b border-black/10 px-4 py-1.5 text-xs text-[color:var(--stop)]">{screen.error}</p>}
@@ -453,7 +528,11 @@ export function CopilotPanel({
         <p className="border-b border-black/10 px-4 py-1.5 text-xs text-[color:var(--stop)]">{orchestrator.error}</p>
       )}
 
-      {view === 'answers' ? (
+      {mode === 'repoInterview' ? <RepoAnalysisView repo={screenRepo} onRetry={(question, task, questionId) => void answerRepoQuestion(
+        question,
+        questionId,
+        task,
+      )} /> : view === 'answers' ? (
         <AnswersView feed={feed} auto={auto} review={review} onReview={runReview} onAnswerLatest={answerLatest} />
       ) : (
       <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4">
@@ -520,7 +599,7 @@ export function CopilotPanel({
         />
         <button
           type="submit"
-          disabled={!input.trim() || streaming}
+          disabled={!input.trim() || (mode === 'repoInterview' ? !!screenRepo.analysis?.running : streaming)}
           aria-label="Send"
           className="btn-signal flex h-11 w-11 shrink-0 items-center justify-center p-0 disabled:opacity-40"
         >
@@ -543,13 +622,19 @@ function ContextEditor({
 }) {
   const [pasteText, setPasteText] = useState('')
   const [instructionsDraft, setInstructionsDraft] = useState(context.instructions)
+  const [savedInstructions, setSavedInstructions] = useState(context.instructions)
   const fileInputRef = useRef<HTMLInputElement>(null)
   // Documents list collapses so a long list of uploads doesn't push the composer
   // off-screen. Default open only when there's nothing yet (nudge to add).
   const [docsOpen, setDocsOpen] = useState(true)
 
-  // Switching modes swaps the whole context object — keep the draft in sync.
-  useEffect(() => setInstructionsDraft(context.instructions), [context.instructions])
+  // Keep external changes (mode switches / Clear) in sync without an Effect that
+  // synchronously sets state. A user's unsaved draft remains intact because the
+  // persisted value is unchanged while they type.
+  if (savedInstructions !== context.instructions) {
+    setSavedInstructions(context.instructions)
+    setInstructionsDraft(context.instructions)
+  }
 
   // The saved instructions are dirty when the draft diverges from what's persisted.
   const instructionsDirty = instructionsDraft !== context.instructions
@@ -985,8 +1070,15 @@ function AssistantTurn({
   useEffect(() => {
     if (!autoRun || streaming || autoRanRef.current) return
     if (!codeBlock || !testsBlock || remote || !canExecute(testsBlock.language)) return
-    autoRanRef.current = true
-    void run()
+    // Schedule the event-like execution outside the Effect body. `run` updates
+    // UI state immediately, which React correctly rejects when called directly
+    // from an Effect under react-hooks/set-state-in-effect.
+    const timer = window.setTimeout(() => {
+      if (autoRanRef.current) return
+      autoRanRef.current = true
+      void run()
+    }, 0)
+    return () => window.clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoRun, streaming, codeBlock, testsBlock, remote])
 

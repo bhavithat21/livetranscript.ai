@@ -1,5 +1,6 @@
 'use client'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect } from 'react'
+import { useStoredPreference } from '@/lib/browser/useStoredPreference'
 
 // Per-device app identity: a display name the user can set, applied to the header
 // wordmark and the browser/desktop-window title. Works identically on web, Mac,
@@ -16,21 +17,13 @@ const MAX_LEN = 40
 // C0 control chars + DEL, built without literal control chars in source.
 const CONTROL_CHARS = new RegExp('[\\u0000-\\u001F\\u007F]', 'g')
 
-function read(): string {
-  try {
-    const v = localStorage.getItem(KEY)?.trim()
-    return v || DEFAULT_APP_NAME
-  } catch {
-    return DEFAULT_APP_NAME
-  }
+function normalizeName(value: string): string {
+  return value.replace(CONTROL_CHARS, '').trim().slice(0, MAX_LEN) || DEFAULT_APP_NAME
 }
+const serializeName = (value: string) => value
 
 export function useAppIdentity() {
-  const [name, setName] = useState(DEFAULT_APP_NAME)
-
-  useEffect(() => {
-    setName(read())
-  }, [])
+  const { value: name, setValue, clear } = useStoredPreference(KEY, DEFAULT_APP_NAME, normalizeName, serializeName)
 
   // Keep the document/window title in sync with the chosen name.
   useEffect(() => {
@@ -38,16 +31,10 @@ export function useAppIdentity() {
   }, [name])
 
   const save = useCallback((next: string) => {
-    const clean = next.replace(CONTROL_CHARS, '').trim().slice(0, MAX_LEN)
-    const value = clean || DEFAULT_APP_NAME
-    setName(value)
-    try {
-      if (clean) localStorage.setItem(KEY, clean)
-      else localStorage.removeItem(KEY)
-    } catch {
-      /* storage disabled — applies for this session only */
-    }
-  }, [])
+    const value = normalizeName(next)
+    if (value === DEFAULT_APP_NAME) clear()
+    else setValue(value)
+  }, [clear, setValue])
 
   const reset = useCallback(() => save(''), [save])
 

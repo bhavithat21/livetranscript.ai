@@ -20,10 +20,6 @@ export type AnswerParts = { lede: string; body: string; reserve: string }
 const RESERVE_HEADING =
   /^\s*(?:#{1,4}\s*|\*\*)?\s*(?:\d+\.\s*)?(glossary|likely follow-?ups?|follow-?ups?|metric defense|edge cases|reference only|do not say)\b/i
 
-// A markdown heading/label line (used to find where the lede ends if there's no
-// blank line — e.g. the lede is immediately followed by "**Approach**").
-const HEADING_LINE = /^\s*(?:#{1,4}\s|>\s|\*\*[^*]+\*\*\s*:?\s*$|[A-Z][A-Za-z ]{0,30}:\s*$)/
-
 // Find the first line index that starts the reserve section, or -1.
 function reserveStart(lines: string[]): number {
   for (let i = 0; i < lines.length; i++) {
@@ -40,8 +36,6 @@ export function splitAnswer(raw: string): AnswerParts {
   const rs = reserveStart(lines)
   const reserve = rs >= 0 ? lines.slice(rs).join('\n').trim() : ''
   const mainLines = rs >= 0 ? lines.slice(0, rs) : lines
-  const main = mainLines.join('\n')
-
   // Lede = the first non-empty block: either the first sentence-ish opener, or up to
   // the first blank line / first heading after it, whichever comes first. We keep it
   // short (one glanceable line) — the hero is the say-this-now line, not a paragraph.

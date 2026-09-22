@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useSyncExternalStore } from 'react'
 import Link from 'next/link'
 import { Apple, Monitor } from 'lucide-react'
 import { SiteFooter } from '@/components/site/SiteFooter'
@@ -14,13 +14,7 @@ const WIN_URL = process.env.NEXT_PUBLIC_DOWNLOAD_WIN_URL || '/downloads/LiveTran
 type OS = 'mac' | 'windows' | 'other'
 
 export default function DownloadPage() {
-  const [os, setOs] = useState<OS>('other')
-  useEffect(() => {
-    const p = navigator.platform?.toLowerCase() ?? ''
-    const ua = navigator.userAgent?.toLowerCase() ?? ''
-    if (p.includes('mac') || ua.includes('mac')) setOs('mac')
-    else if (p.includes('win') || ua.includes('win')) setOs('windows')
-  }, [])
+  const os = useSyncExternalStore(subscribeToNavigator, detectOS, () => 'other')
 
   return (
     <main className="min-h-dvh bg-[#faf9f7] text-[#16151a]">
@@ -93,6 +87,18 @@ export default function DownloadPage() {
       <SiteFooter />
     </main>
   )
+}
+
+function subscribeToNavigator(): () => void {
+  return () => {}
+}
+
+function detectOS(): OS {
+  const p = navigator.platform?.toLowerCase() ?? ''
+  const ua = navigator.userAgent?.toLowerCase() ?? ''
+  if (p.includes('mac') || ua.includes('mac')) return 'mac'
+  if (p.includes('win') || ua.includes('win')) return 'windows'
+  return 'other'
 }
 
 function DownloadCard({

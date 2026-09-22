@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useSyncExternalStore } from 'react'
 import { Minus, Square, X } from 'lucide-react'
 import { isTauri } from '@/lib/audio/useNativeCapture'
 
@@ -13,11 +13,7 @@ import { isTauri } from '@/lib/audio/useNativeCapture'
 // lt-desktop theme wires that up in globals.css.
 
 export function TitleBar() {
-  const [show, setShow] = useState(false)
-
-  useEffect(() => {
-    setShow(isTauri())
-  }, [])
+  const show = useSyncExternalStore(subscribeToDesktopRuntime, isTauri, () => false)
 
   if (!show) return null
 
@@ -52,6 +48,10 @@ export function TitleBar() {
       </div>
     </div>
   )
+}
+
+function subscribeToDesktopRuntime(): () => void {
+  return () => {}
 }
 
 function TitleBarButton({

@@ -4,6 +4,7 @@ import { PostHogProvider } from 'posthog-js/react'
 import { useEffect, useState } from 'react'
 import { logError } from '@/lib/log'
 import { AnalyticsIdentity } from '@/components/AnalyticsIdentity'
+import { DisplayNameBridge } from '@/lib/auth/useDisplayName'
 
 // NEXT_PUBLIC_* is inlined at build time, so this is safe on the client and
 // matches the flag layout.tsx uses to decide whether to mount ClerkProvider.
@@ -37,7 +38,13 @@ export function Providers({ children }: { children: React.ReactNode }) {
     // Mark ready whether or not PostHog loaded — if there's no key, identify()
     // has nothing to attach to and its own posthog.__loaded guard would no-op
     // anyway; flipping ready lets the effect settle instead of hanging.
-    if (posthog.__loaded) setAnalyticsReady(true)
+    let cancelled = false
+    queueMicrotask(() => {
+      if (!cancelled && posthog.__loaded) setAnalyticsReady(true)
+    })
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   // Safety net: log any stray promise rejection / global error instead of letting
@@ -59,7 +66,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
       {/* Only mount when Clerk is configured — AnalyticsIdentity calls useUser()
           unconditionally, so it must live inside a guaranteed ClerkProvider. */}
       {clerkConfigured && <AnalyticsIdentity ready={analyticsReady} />}
-      {children}
+      <DisplayNameBridge clerkConfigured={clerkConfigured}>{children}</DisplayNameBridge>
     </PostHogProvider>
   )
 }

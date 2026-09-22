@@ -146,7 +146,6 @@ describe('coding pass@1 eval', () => {
       const passed = rows.filter((r) => r.pass1).length
       const rate = rows.length ? ((passed / rows.length) * 100).toFixed(1) : '0.0'
       lines.push(`overall pass@1: ${passed}/${rows.length} = ${rate}%`, '')
-      // eslint-disable-next-line no-console -- eval report is the whole point of this runner
       console.log(lines.join('\n'))
     },
     300_000,

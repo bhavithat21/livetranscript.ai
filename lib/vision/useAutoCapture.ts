@@ -29,9 +29,11 @@ export function useAutoCapture(
   intervalMs = DEFAULT_INTERVAL_MS,
 ) {
   const onChangeRef = useRef(onChange)
-  onChangeRef.current = onChange
   const grabRef = useRef(grabFrame)
-  grabRef.current = grabFrame
+  useEffect(() => {
+    onChangeRef.current = onChange
+    grabRef.current = grabFrame
+  }, [onChange, grabFrame])
   const cooldownUntilRef = useRef(0)
   // The most recent changed frame, awaiting the screen to go quiet before we fire.
   const pendingRef = useRef<string | null>(null)

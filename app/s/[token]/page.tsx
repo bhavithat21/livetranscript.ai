@@ -9,6 +9,10 @@ import type { Segment } from '@/lib/transcript/store'
 
 type Summary = { summary?: string } | null
 
+function currentTimestamp(): number {
+  return Date.now()
+}
+
 // Brand bar on the public share view — recipients land here first, so it should
 // feel like a real product, with a subtle path to try it.
 function ShareTopBar() {
@@ -48,7 +52,7 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
   if (!db) return <Expired />
 
   const [row] = await db.select().from(sessions).where(eq(sessions.shareToken, token)).limit(1)
-  if (!row || !isShareValid(row, Date.now())) return <Expired />
+  if (!row || !isShareValid(row, currentTimestamp())) return <Expired />
 
   const segments = (row.segments as Segment[]) ?? []
   const summary = row.summary as Summary

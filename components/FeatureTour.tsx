@@ -161,7 +161,8 @@ function TourView({ ready, seenRemote, onSeen }: TourViewProps) {
   useEffect(() => {
     if (!ready) return
     if (!seenRemote && !hasSeenLocal() && resolve(0, 1)) {
-      setActive(true)
+      const frame = requestAnimationFrame(() => setActive(true))
+      return () => cancelAnimationFrame(frame)
     }
   }, [ready, seenRemote, resolve])
 
@@ -184,7 +185,7 @@ function TourView({ ready, seenRemote, onSeen }: TourViewProps) {
   // key handler would linger over a page the tour can't point at.
   useEffect(() => {
     if (!active) return
-    goTo(step, 1)
+    const initialFrame = requestAnimationFrame(() => goTo(step, 1))
     const reposition = () => {
       const el = document.querySelector(`[data-tour="${STEPS[step].target}"]`)
       if (!el || !isVisible(el)) return
@@ -194,6 +195,7 @@ function TourView({ ready, seenRemote, onSeen }: TourViewProps) {
     window.addEventListener('resize', reposition)
     window.addEventListener('scroll', reposition, true)
     return () => {
+      cancelAnimationFrame(initialFrame)
       window.removeEventListener('resize', reposition)
       window.removeEventListener('scroll', reposition, true)
     }

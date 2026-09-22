@@ -79,16 +79,23 @@ export default function RecordPage() {
   const [startError, setStartError] = useState<string | null>(null)
   const providerRef = useRef<TranscriptionProvider | null>(null)
   const startedAtRef = useRef<number>(0)
+  const [startedAt, setStartedAt] = useState(0)
   const mutedRef = useRef(false)
-  mutedRef.current = muted
   // Latest segments, kept outside the render cycle so onStop reads the final
   // state (not a stale closure snapshot from when the callback was created).
   const segmentsRef = useRef<Segment[]>([])
-  segmentsRef.current = segments
   // Latest keyterms outside the render cycle, so the onFinal closure uses the
   // current pack selection without being recreated.
   const keytermsRef = useRef<string[]>(keyterms)
-  keytermsRef.current = keyterms
+  useEffect(() => {
+    mutedRef.current = muted
+  }, [muted])
+  useEffect(() => {
+    segmentsRef.current = segments
+  }, [segments])
+  useEffect(() => {
+    keytermsRef.current = keyterms
+  }, [keyterms])
 
   const onStart = useCallback(async () => {
     setSegments([])
@@ -96,7 +103,9 @@ export default function RecordPage() {
     setSavedId(null)
     setShareMsg(null)
     setStartError(null)
-    startedAtRef.current = Date.now()
+    const startedAtNow = Date.now()
+    startedAtRef.current = startedAtNow
+    setStartedAt(startedAtNow)
     setBusy(true)
     try {
       // Open the source first so we know the REAL sample rate, then tell the provider.
@@ -293,7 +302,7 @@ export default function RecordPage() {
   }, [recording, busy, reader, onStart, onStop, onCopyTranscript, onNew])
 
   const idle = !recording && segments.length === 0
-  const elapsed = useElapsed(recording, startedAtRef.current)
+  const elapsed = useElapsed(recording, startedAt)
   const words = useMemo(
     () =>
       segments
@@ -510,7 +519,6 @@ function useElapsed(active: boolean, startedAt: number): string {
   const [now, setNow] = useState(startedAt)
   useEffect(() => {
     if (!active) return
-    setNow(Date.now())
     const id = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(id)
   }, [active, startedAt])

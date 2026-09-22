@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { cosine, chunkCorpus } from './useModeContext'
+import { cleanup, renderHook } from '@testing-library/react'
+import { cosine, chunkCorpus, useModeContext } from './useModeContext'
 
 describe('cosine', () => {
   it('is 1 for identical vectors, 0 for orthogonal', () => {
@@ -22,5 +23,28 @@ describe('chunkCorpus', () => {
     const chunks = chunkCorpus(raw)
     expect(chunks).toHaveLength(2) // "ok" is < 20 chars, dropped
     expect(chunks[0]).toMatch(/requirements/)
+  })
+})
+
+describe('saved mode context', () => {
+  it('discards malformed documents and embeddings before rendering or retrieval', () => {
+    localStorage.setItem('lt.context.validation-test', JSON.stringify({
+      instructions: 'Use the current repository.',
+      docs: [null, { id: 'missing-chunks', name: 'Broken' }, {
+        id: 'valid', name: 'Context', chunks: [null, { text: 'bad', embedding: ['x'] }, { text: 'usable', embedding: [1, 0] }],
+      }],
+      stories: [null, { id: 'broken', title: 'Bad', fullText: 'Bad', embedding: [null] },
+        { id: 'valid', title: 'Story', fullText: 'Story content', embedding: [1, 0] }],
+    }))
+    try {
+      const { result } = renderHook(() => useModeContext('validation-test'))
+      expect(result.current.docs).toHaveLength(1)
+      expect(result.current.count).toBe(1)
+      expect(result.current.storyCount).toBe(1)
+      expect(result.current.instructions).toBe('Use the current repository.')
+    } finally {
+      cleanup()
+      localStorage.removeItem('lt.context.validation-test')
+    }
   })
 })

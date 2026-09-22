@@ -10,6 +10,12 @@ describe('localClassify', () => {
     expect(localClassify('What is the time complexity here?')?.mode).toBe('coding')
   })
 
+  it('routes repository-grounded questions to repo interview mode', () => {
+    expect(localClassify('Where is authentication handled in this repository?')?.mode).toBe('repoInterview')
+    expect(localClassify('Walk me through this codebase and trace the request flow.')?.mode).toBe('repoInterview')
+    expect(localClassify('What did we change in the git diff?')?.mode).toBe('repoInterview')
+  })
+
   it('routes unambiguous behavioral questions locally', () => {
     expect(localClassify('Tell me about a time you disagreed with your manager.')?.mode).toBe('behavioral')
     expect(localClassify('Describe a situation where you failed.')?.mode).toBe('behavioral')

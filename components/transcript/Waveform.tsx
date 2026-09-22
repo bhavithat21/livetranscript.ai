@@ -24,13 +24,12 @@ export function Waveform({ level, active }: { level: number; active: boolean }) 
 
   const [bars, setBars] = useState<number[]>(() => Array(BARS_DESKTOP).fill(0))
   const levelRef = useRef(level)
-  levelRef.current = level
+  useEffect(() => {
+    levelRef.current = level
+  }, [level])
 
   useEffect(() => {
-    if (!active) {
-      setBars(Array(barCount).fill(0))
-      return
-    }
+    if (!active) return
     const id = setInterval(() => {
       setBars((prev) => {
         // RMS is small (~0..0.3 typical speech); scale to a visible 0..1 height.
@@ -41,6 +40,8 @@ export function Waveform({ level, active }: { level: number; active: boolean }) 
     }, 60)
     return () => clearInterval(id)
   }, [active, barCount])
+
+  const visibleBars = active ? bars : Array<number>(barCount).fill(0)
 
   return (
     <div
@@ -54,7 +55,7 @@ export function Waveform({ level, active }: { level: number; active: boolean }) 
         aria-hidden
       />
       <div className="flex h-full items-center gap-[3px]">
-        {bars.map((h, i) => (
+        {visibleBars.map((h, i) => (
           <span
             key={i}
             className="w-[3px] rounded-full transition-[height,opacity] duration-75"

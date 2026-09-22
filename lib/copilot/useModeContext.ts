@@ -1,5 +1,6 @@
 'use client'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
+import { useStoredPreference } from '../browser/useStoredPreference'
 import { cosine } from './vector'
 import { mmrSelect } from './rerank'
 
@@ -23,7 +24,8 @@ export type ContextDoc = { id: string; name: string; chunks: StoryChunk[] }
 // embedded to match a question; fullText is fed to the model to answer. Kept
 // separate from generic chunks so we can rank + spend STORIES, not paragraphs.
 export type StoryEntry = { id: string; title: string; embedding: number[]; fullText: string }
-type Persisted = { instructions: string; docs: ContextDoc[]; stories?: StoryEntry[] }
+type Persisted = { instructions: string; docs: ContextDoc[]; stories: StoryEntry[] }
+const EMPTY_CONTEXT: Persisted = { instructions: '', docs: [], stories: [] }
 
 const MAX_DOCS = 20
 const MAX_INSTRUCTIONS = 4_000
@@ -59,55 +61,53 @@ async function embed(texts: string[]): Promise<number[][]> {
   return embeddings
 }
 
-function load(mode: string): Persisted {
-  try {
-    const raw = localStorage.getItem(keyFor(mode))
-    if (!raw) return { instructions: '', docs: [], stories: [] }
-    const parsed = JSON.parse(raw) as Partial<Persisted>
-    return { instructions: parsed.instructions ?? '', docs: parsed.docs ?? [], stories: parsed.stories ?? [] }
-  } catch {
-    return { instructions: '', docs: [], stories: [] } // corrupt/absent — empty context
-  }
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
 }
 
-// Returns false if the write failed (e.g. localStorage quota — embeddings are
-// large). Caller warns the user their context won't survive a reload, instead of
-// silently dropping it (false confidence in a live interview).
-function persist(mode: string, data: Persisted): boolean {
-  try {
-    localStorage.setItem(keyFor(mode), JSON.stringify(data))
-    return true
-  } catch {
-    return false // storage full — kept in memory this session only
+function isEmbedding(value: unknown): value is number[] {
+  return Array.isArray(value) && value.length > 0 && value.every((n) => typeof n === 'number' && Number.isFinite(n))
+}
+
+function isChunk(value: unknown): value is StoryChunk {
+  return isRecord(value) && typeof value.text === 'string' && isEmbedding(value.embedding)
+}
+
+function isStory(value: unknown): value is StoryEntry {
+  return isRecord(value) && typeof value.id === 'string' && typeof value.title === 'string'
+    && typeof value.fullText === 'string' && isEmbedding(value.embedding)
+}
+
+function parseContext(raw: string): Persisted {
+  const parsed = JSON.parse(raw) as Partial<Persisted> | null
+  const docs = Array.isArray(parsed?.docs) ? parsed.docs.flatMap((doc) => {
+    if (!isRecord(doc) || typeof doc.id !== 'string' || typeof doc.name !== 'string' || !Array.isArray(doc.chunks)) return []
+    return [{ id: doc.id, name: doc.name, chunks: doc.chunks.filter(isChunk) }]
+  }).slice(0, MAX_DOCS) : []
+  return {
+    instructions: typeof parsed?.instructions === 'string' ? parsed.instructions.slice(0, MAX_INSTRUCTIONS) : '',
+    docs,
+    stories: Array.isArray(parsed?.stories) ? parsed.stories.filter(isStory).slice(0, MAX_STORIES) : [],
   }
 }
 
 export function useModeContext(mode: string) {
-  const [docs, setDocs] = useState<ContextDoc[]>([])
-  const [stories, setStories] = useState<StoryEntry[]>([])
-  const [instructions, setInstructionsState] = useState('')
+  const { value: { docs, stories, instructions }, setValue, clear: clearStored } = useStoredPreference(keyFor(mode), EMPTY_CONTEXT, parseContext)
   const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [modeError, setModeError] = useState<{ mode: string; message: string | null } | null>(null)
+  const error = modeError?.mode === mode ? modeError.message : null
+  const setError = useCallback((message: string | null) => setModeError({ mode, message }), [mode])
   // Stories already USED this round — spent once, per the book's rule. Session-only
   // (a ref, not persisted): a new interview round starts fresh. resetSpent() clears it.
   const spentRef = useRef<Set<string>>(new Set())
 
-  // Each mode has its OWN context — reload whenever the active mode changes.
-  useEffect(() => {
-    const data = load(mode)
-    setDocs(data.docs)
-    setStories(data.stories ?? [])
-    setInstructionsState(data.instructions)
-    setError(null)
-  }, [mode])
-
   const setInstructions = useCallback(
     (text: string) => {
       const capped = text.slice(0, MAX_INSTRUCTIONS)
-      setInstructionsState(capped)
-      persist(mode, { instructions: capped, docs, stories })
+      const saved = setValue((current) => ({ ...current, instructions: capped }))
+      setError(saved ? null : 'Instructions updated, but could not be saved — they won’t survive a page reload.')
     },
-    [mode, docs, stories],
+    [setValue, setError],
   )
 
   // Add a document. A structured STORY BOOK (behavioral mode) is parsed into whole
@@ -155,11 +155,8 @@ export function useModeContext(mode: string) {
           // A book replaces the prior book (re-upload = refresh), and also drops it in
           // as a doc entry so the UI shows "1 doc" + the count.
           const doc: ContextDoc = { id: crypto.randomUUID(), name: name || 'Story book', chunks: [] }
-          const nextDocs = [...docs, doc]
           spentRef.current = new Set() // fresh book → nothing spent yet
-          setStories(newStories)
-          setDocs(nextDocs)
-          if (!persist(mode, { instructions, docs: nextDocs, stories: newStories })) {
+          if (!setValue((current) => ({ ...current, docs: [...current.docs, doc], stories: newStories }))) {
             setError('Story book loaded, but too large to save — it won’t survive a page reload.')
           }
           return
@@ -172,9 +169,7 @@ export function useModeContext(mode: string) {
         const vectors = await embed(texts)
         const chunks = texts.map((text, i) => ({ text, embedding: vectors[i] })).filter((c) => Array.isArray(c.embedding) && c.embedding.length > 0)
         const doc: ContextDoc = { id: crypto.randomUUID(), name: name || 'Untitled', chunks }
-        const next = [...docs, doc]
-        setDocs(next)
-        if (!persist(mode, { instructions, docs: next, stories })) {
+        if (!setValue((current) => ({ ...current, docs: [...current.docs, doc] }))) {
           setError('Document loaded, but too large to save — it won’t survive a page reload.')
         }
       } catch (e) {
@@ -183,32 +178,26 @@ export function useModeContext(mode: string) {
         setSaving(false)
       }
     },
-    [mode, docs, instructions, stories],
+    [mode, docs.length, setValue, setError],
   )
 
   const removeDocument = useCallback(
     (id: string) => {
-      const next = docs.filter((d) => d.id !== id)
-      // Removing the last doc also clears any parsed stories (they came from a book).
-      const nextStories = next.length ? stories : []
-      setDocs(next)
-      setStories(nextStories)
-      persist(mode, { instructions, docs: next, stories: nextStories })
+      const saved = setValue((current) => {
+        const next = current.docs.filter((d) => d.id !== id)
+        // Removing the last doc also clears any parsed stories (they came from a book).
+        return { ...current, docs: next, stories: next.length ? current.stories : [] }
+      })
+      setError(saved ? null : 'Could not save the removal — the document may return after a page reload.')
     },
-    [mode, docs, stories, instructions],
+    [setValue, setError],
   )
 
   const clear = useCallback(() => {
-    setDocs([])
-    setStories([])
     spentRef.current = new Set()
-    setInstructionsState('')
-    try {
-      localStorage.removeItem(keyFor(mode))
-    } catch {
-      /* ignore */
-    }
-  }, [mode])
+    const saved = clearStored()
+    setError(saved ? null : 'Could not clear saved context — it may return after a page reload.')
+  }, [clearStored, setError])
 
   const chunkCount = docs.reduce((n, d) => n + d.chunks.length, 0)
 

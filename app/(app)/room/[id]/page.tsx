@@ -1,5 +1,6 @@
 'use client'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import Link from 'next/link'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { ArrowLeft, BookOpen, Check, ChevronDown, ChevronUp, Copy, Info, Lock, Mic, MicOff, Sparkles, Users } from 'lucide-react'
 import { useMicStream, type AudioSource } from '@/lib/audio/useMicStream'
@@ -42,19 +43,11 @@ export default function RoomPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const autoJoin = searchParams.get('join') === '1'
-  const [joined, setJoined] = useState(false)
 
   // "/room/new" → mint a unique meeting id and redirect, so each meeting is its own channel.
   useEffect(() => {
     if (id === 'new') router.replace(`/room/${newRoomId()}`)
   }, [id, router])
-
-  // On id change: if arriving with ?join=1 (Go = open, not just update), go
-  // straight into the meeting; otherwise drop to that meeting's lobby rather than
-  // showing the previous room's live view.
-  useEffect(() => {
-    setJoined(autoJoin)
-  }, [id, autoJoin])
 
   if (id === 'new') {
     return (
@@ -67,8 +60,17 @@ export default function RoomPage() {
   // Reject guessable / enumerable ids — real meetings arrive via a shared random link.
   if (!isStrongRoomId(id)) return <InvalidRoom />
 
-  if (!joined) return <Lobby roomId={id} onJoin={() => setJoined(true)} />
-  return <Meeting roomId={id} />
+  // A room-id or ?join transition must start with fresh join state, while a normal
+  // re-render on the same URL must preserve a manual lobby join. Keying this small
+  // state owner gives both guarantees without synchronously resetting state in an
+  // effect (and avoids reviving A's joined state after A → B → A navigation).
+  return <RoomSession key={`${id}:${autoJoin ? 'join' : 'lobby'}`} roomId={id} autoJoin={autoJoin} />
+}
+
+function RoomSession({ roomId, autoJoin }: { roomId: string; autoJoin: boolean }) {
+  const [joined, setJoined] = useState(autoJoin)
+  if (!joined) return <Lobby roomId={roomId} onJoin={() => setJoined(true)} />
+  return <Meeting roomId={roomId} />
 }
 
 function InvalidRoom() {
@@ -79,11 +81,19 @@ function InvalidRoom() {
         Meeting links are randomly generated. Ask the host to resend their invite, or start a new
         meeting of your own.
       </p>
-      <a href="/room/new" className="btn-signal mt-6 inline-block px-6 py-3">
+      <Link href="/room/new" className="btn-signal mt-6 inline-block px-6 py-3">
         Start a new meeting
-      </a>
+      </Link>
     </main>
   )
+}
+
+function subscribeToLocation(): () => void {
+  return () => {}
+}
+
+function getLocationOrigin(): string {
+  return window.location.origin
 }
 
 function Lobby({ roomId, onJoin }: { roomId: string; onJoin: () => void }) {
@@ -96,10 +106,8 @@ function Lobby({ roomId, onJoin }: { roomId: string; onJoin: () => void }) {
   // Build the invite from the origin + THIS room id (not window.location.href,
   // which can still read "/room/new" right after the redirect). Set after mount
   // so SSR doesn't bake in an empty origin that hydration then freezes.
-  const [link, setLink] = useState('')
-  useEffect(() => {
-    setLink(`${window.location.origin}/room/${roomId}`)
-  }, [roomId])
+  const origin = useSyncExternalStore(subscribeToLocation, getLocationOrigin, () => '')
+  const link = origin ? `${origin}/room/${roomId}` : `/room/${roomId}`
   const copyInvite = () => {
     navigator.clipboard.writeText(link)
     setCopied(true)
@@ -278,7 +286,9 @@ function Meeting({ roomId }: { roomId: string }) {
   const [startError, setStartError] = useState<string | null>(null)
   const providerRef = useRef<TranscriptionProvider | null>(null)
   const mutedRef = useRef(false)
-  mutedRef.current = muted
+  useEffect(() => {
+    mutedRef.current = muted
+  }, [muted])
 
   // Local per-device overrides (custom name + color) keyed by sender clientId.
   const overrides: SpeakerOverrides = prefs

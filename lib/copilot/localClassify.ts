@@ -26,6 +26,8 @@ const CODING_RE =
   /\b(reverse a|implement (?:a |the )?(?:function|algorithm|method|class|stack|queue|hash ?map|linked list|binary)|write (?:a )?(?:function|code|algorithm)|two sum|linked list|binary (?:tree|search)|palindrome|fibonacci|time complexity|big o|leetcode|debug this|refactor this|code this)\b/i
 const SYSTEM_DESIGN_RE =
   /\b(system design|architect(?:ure)?|design (?:a|an|the) (?:system|service|api|pipeline|database|scalable|distributed)|scal(?:e|ing)\b[^.?]*\b(?:to|billion|million|requests|users|traffic|qps)|scalab|throughput|load balanc|shard|url shortener|news feed|microservice|high availability|caching layer)\b/i
+const REPO_INTERVIEW_RE =
+  /\b(?:in (?:this|the) (?:repo|repository|codebase)|which file|where (?:is|does|should) .*\b(?:implemented|defined|handled|live)|trace (?:the|this) (?:flow|call|request)|open the file|existing (?:implementation|pattern|test)|failing (?:test|build)|git diff|what did (?:we|you) change|walk me through (?:this|the) codebase)\b/i
 
 // WEAK signals — bare high-frequency words (conflict, feedback, sort the, design the)
 // that OFTEN mean something else ("resolve a git merge conflict", "design the perfect
@@ -52,6 +54,7 @@ export function localClassify(questionRaw: string): LocalClassification | null {
   // Count STRONG mode signals only. Exactly one = confident local route.
   const hits: CopilotMode[] = []
   if (BEHAVIORAL_RE.test(q)) hits.push('behavioral')
+  if (REPO_INTERVIEW_RE.test(q)) hits.push('repoInterview')
   if (CODING_RE.test(q)) hits.push('coding')
   if (SYSTEM_DESIGN_RE.test(q)) hits.push('systemDesign')
 

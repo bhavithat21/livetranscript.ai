@@ -41,11 +41,9 @@ export function useRoom(roomId: string, displayName?: string) {
   const peerCbRef = useRef<(m: RoomMessage) => void>(() => {})
   const endCbRef = useRef<() => void>(() => {})
   const lastInterimAt = useRef(0)
-  const clientIdRef = useRef<string>('')
-  if (!clientIdRef.current) clientIdRef.current = makeClientId()
-  const myClientId = clientIdRef.current
+  const [myClientId] = useState(makeClientId)
   const nameRef = useRef<string | undefined>(displayName)
-  nameRef.current = displayName
+  useEffect(() => { nameRef.current = displayName }, [displayName])
 
   useEffect(() => {
     if (!roomId) return
