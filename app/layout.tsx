@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import { Fraunces, IBM_Plex_Sans } from 'next/font/google'
+import { IBM_Plex_Sans } from 'next/font/google'
 import { ClerkProvider } from '@clerk/nextjs'
 import { AppNav } from '@/components/nav/AppNav'
 import { DesktopChrome } from '@/components/DesktopChrome'
@@ -7,25 +7,20 @@ import { PermissionPrimer } from '@/components/PermissionPrimer'
 import { FeatureTour } from '@/components/FeatureTour'
 import { TitleBar } from '@/components/TitleBar'
 import { AppIdentityEffects } from '@/lib/appIdentity/AppIdentityEffects'
+import { authAppearance } from '@/components/site/authAppearance'
 import { Providers } from './providers'
 import './globals.css'
 
-const fraunces = Fraunces({
-  variable: '--font-serif',
-  subsets: ['latin'],
-  display: 'swap',
-})
-
 const plexSans = IBM_Plex_Sans({
   variable: '--font-body',
-  weight: ['400', '500', '600'],
+  weight: ['400', '500', '600', '700'],
   subsets: ['latin'],
   display: 'swap',
 })
 
 export const metadata: Metadata = {
-  title: 'LiveTranscript — Real-time AI transcription',
-  description: 'Fast, accurate live transcription with speaker labels and instant summaries.',
+  title: 'LiveTranscript — A clearer way to prepare and work',
+  description: 'Live transcription, grounded AI answers, interview practice, and repository context in one focused workspace.',
 }
 
 const clerkConfigured = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY)
@@ -53,7 +48,7 @@ export default function RootLayout({
     // from what the server rendered. React keeps the DOM, which is what we want.
     <html
       lang="en"
-      className={`${fraunces.variable} ${plexSans.variable} h-full antialiased`}
+      className={`${plexSans.variable} h-full antialiased`}
       suppressHydrationWarning
     >
       <head>
@@ -76,7 +71,7 @@ export default function RootLayout({
         <link rel="preconnect" href="https://api.eu.deepgram.com" crossOrigin="anonymous" />
         <link rel="preconnect" href="https://streaming.assemblyai.com" crossOrigin="anonymous" />
       </head>
-      {clerkConfigured ? <ClerkProvider>{body}</ClerkProvider> : body}
+      {clerkConfigured ? <ClerkProvider appearance={authAppearance}>{body}</ClerkProvider> : body}
     </html>
   )
 }

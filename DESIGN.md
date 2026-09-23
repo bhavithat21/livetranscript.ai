@@ -1,31 +1,32 @@
 ---
 version: alpha
 name: LiveTranscript
-description: A readable conversation workspace with quiet glass controls and precise technical context.
+description: A precise conversation workspace with calm navigation and readable live answers.
 colors:
-  background: '#faf9f7'
-  foreground: '#16151a'
-  reader: '#fffdf9'
-  primary: '#0f766e'
+  background: '#f5f7fb'
+  foreground: '#172033'
+  reader: '#ffffff'
+  primary: '#2563eb'
+  muted: '#5f6d82'
+  line: '#e2e8f0'
   danger: '#b91c1c'
-  dark-background: '#121216'
-  dark-foreground: '#f0efed'
-  dark-primary: '#34d399'
+  dark-background: '#0d1422'
+  dark-foreground: '#e8eef8'
+  dark-primary: '#8bb0ff'
 typography:
   body:
     fontFamily: 'IBM Plex Sans, system-ui, sans-serif'
   display:
-    fontFamily: 'Fraunces, Georgia, serif'
+    fontFamily: 'IBM Plex Sans, system-ui, sans-serif'
   technical:
     fontFamily: 'ui-monospace, monospace'
 rounded:
-  control: '9999px'
-  panel: '1rem'
-  section: '1.5rem'
+  control: '0.5rem'
+  panel: '0.75rem'
 spacing:
   page-inset: '1rem'
   panel-padding: '1.25rem'
-  content-max: '64rem'
+  navigation-width: '224px'
 components:
   primary-button:
     backgroundColor: '{colors.primary}'
@@ -41,125 +42,131 @@ components:
 
 ## Overview
 
-The reference is a technical reading desk: a warm paper surface, a serif heading,
-plain working text, and translucent controls around the document. Technical users
-must read an answer or act on a connection while talking. Product routes favor
-familiar controls, short labels, and persistent status over promotional imagery.
-The home/pricing routes retain their existing marketing register.
+This redesign follows the user's complete-site rebuild request and supplied
+LiveTranscript reference. The product should feel like a careful technical tool:
+compact navigation, strong reading hierarchy, distinct live and preparation
+surfaces, and clear actions. The old warm serif / translucent pill system is
+intentionally replaced across public and product routes in the same release.
 
-The signature is Fraunces with teal accents and glass chrome. Avoid neon dashboards,
-oversized decorative cards, and low-contrast text over the shared screen. Remote
-control and appearance extend the existing Settings/Library patterns.
+The signature is the contrast between a pale, quiet workspace and a navy live
+stage. Blue means an action or selection; green means an actual live/positive
+state. The public site shows an explicitly illustrative product view, never
+fabricated customer statistics, model results, testimonials, or live status.
 
-The standalone AI workspace adds a setup rail beside a bounded reading column.
-Audio context is an optional top rail. On small screens, setup collapses so the
-question composer remains the primary action. Reading surfaces stay solid;
-Focus mode is a visual preference and carries no invisibility guarantee.
+Public routes can use larger typography and spacious sections. Product pages
+prioritize the next action and reading density. English is the UI language;
+user text uses normal Unicode font fallbacks. No new locale or market support
+is implied.
 
-The UI is currently English. System font fallbacks render user-supplied names and
-technical content; this is not a claim of fully localized product flows. No market
-or jurisdiction is inferred from the language.
-
-**Ownership:** model B. `app/globals.css` and `app/layout.tsx` are canonical runtime
-sources. This file records accepted values and their use; it does not generate CSS.
-No rebrand was introduced by the remote-assistance feature.
+**Ownership: model B.** `app/globals.css` owns runtime semantic tokens, controls,
+themes and scrollbars. `app/layout.tsx` owns font loading. This file records
+accepted values and rationale. CSS modules consume those tokens; they do not
+own another copy of the shared palette. The fixed navy live stage and explicitly
+illustrative marketing preview are deliberate business variants.
 
 ## Colors
 
-Paper (`--paper`), ink (`--ink`) and reader (`--reader`) separate reading content
-from controls. `--signal` means a primary action or active state. `--stop` means an
-error or stop action; status always includes words, not only color.
+`--paper` is the surrounding work surface, `--reader` is a solid content panel,
+and `--ink` is main text. `--muted` remains readable at small sizes. `--line` and
+`--line-strong` separate panels and controls. `--surface-soft`, `--sidebar`, and
+`--hover-surface` organize the shell. `--accent-soft` and `--signal` show selection.
 
-`html.lt-dark` switches to a solid dark reading surface. `html.lt-desktop` uses the
-existing transparent dark overlay. Preserve these distinct background models.
-Forced-colors mode uses native scrollbar colors and ordinary focus outlines.
+Buttons consume `--primary-fill`, not the text accent: in dark mode the bright
+text accent must not become a background underneath white text. Dark button fill
+is #315bd1, hover #3b68e1; dark surfaces are #0d1422 / #121d30 and text #e8eef8.
+Semantic red is reserved for failure, stop and destructive actions. State is
+always described in text as well as color.
+
+Web dark mode uses solid surfaces. The native `lt-desktop` overlay retains its
+separate transparent outer background and title-bar reservation. Shared workspace
+navigation remains opaque enough to read. Focus mode is a reading preference;
+the design makes no invisibility or proctoring compatibility claim.
 
 ## Typography
 
-Fraunces is for page titles and the wordmark. IBM Plex Sans, weights 400/500/600,
-is for controls and body copy. Monospace is reserved for helper codes, shortcuts
-and source code. Body copy uses relaxed line height; labels remain sentence case.
-Long custom names wrap in previews and truncate only where navigation is bounded.
+IBM Plex Sans is shared by the wordmark, headings, paragraphs and controls, with
+weights 400/500/600/700. `--font-serif` is retained only as a compatibility alias
+to `--font-body` for focused reading routes. No serif font is loaded.
+
+Page titles are compact and semibold, usually 24–32px. Answer text has a relaxed
+line height and a bounded reading width. Monospace is for code, measured timings,
+and shortcuts. Long titles wrap; bounded navigation may truncate custom identity
+text with the complete name available in its title and appearance settings.
 
 ## Layout
 
-Focused routes use HomeMenu and a natural document scroller. Remote assist uses a
-64rem maximum width with 1rem mobile insets, 2rem at the small breakpoint. The
-selected screen keeps its pixel aspect ratio; input coordinates use that visible
-surface. Forms are natural height, with no viewport-sized clipping shell.
+`WorkspaceShell` is the single navigation owner for Interview, AI workspace,
+Repository, Practice, Transcripts, Remote assist and Settings. It uses a 224px
+sticky sidebar from 1024px, with its own scroll when necessary. On smaller
+screens a labeled in-flow disclosure provides all destinations; it closes on
+Escape/outside pointer and restores keyboard focus on Escape. It is not a modal.
+A skip link reaches the workspace content.
 
-Controls have at least a 44px touch height. Action rows wrap on narrow screens.
-Errors and statuses have dedicated space near the action they explain. App chrome
-respects the native title bar offset. Host approval and stop remain visible as
-separate actions.
+Live, Mock Lab and Feedback are deep-linked views of the same mounted interview
+workspace. Capture continues during view changes. A page-owned navigation guard
+can block departure through shared navigation. The shell must not own audio or
+provider state. Recording, meeting and session reading surfaces retain a compact
+HomeMenu so a large sidebar does not compete with the transcript.
+
+Each page owns content scrolling. Long settings, Mock Lab and review forms keep
+natural document height. Only the standalone desktop AI workspace is bounded to
+the viewport, with an internal conversation scroller and reachable composer.
+The setup rail is 15rem on wide displays and a disclosure at intermediate widths.
+On phones the document scrolls normally. Form/action rows wrap; screen media
+preserves its pixel aspect ratio. Native title-bar offsets remain respected.
 
 ## Elevation & Depth
 
-Use existing `.glass` for chrome and `.reader-surface` for dense reading content.
-The glass token includes a subtle border, blur and shadow. Do not stack additional
-translucent surfaces behind paragraphs. The actual shared screen is unfiltered.
+Solid panels and thin borders carry structure. Shared `.glass` is a compatibility
+class for solid web chrome with a minimal shadow; it no longer causes translucent
+reading layers. Floating menus/dialogs may have stronger elevation. Buttons do
+not jump on hover. The native overlay retains its platform-specific glass rule.
 
 ## Shapes
 
-Pill buttons and inputs match existing settings/navigation. Panels use 1rem or
-1.5rem radii. Display choices are bordered radio rows. The screen has a rounded
-outer frame without distorting its pixels. Icons remain Lucide line icons.
+Shared buttons use 8px corners, panels usually 12px. Small status badges may be
+pills. Do not use the same large pill shape for navigation, text fields, headings,
+and every action. Icons are Lucide line icons paired with text; the waveform
+brand mark uses a small blue square. Custom app names/icons remain user preferences.
 
 ## Components
 
-| Contract token | Runtime owner | Consumers |
+| Semantic value | Runtime owner | Consumers |
 |---|---|---|
-| background / foreground | `--paper` / `--ink` in globals.css | page and body text |
-| primary / danger | `--signal` / `--stop` in globals.css | state labels, focus, errors |
-| reader | `--reader`, `.reader-surface` | readable notices |
-| body / display | `--font-body` / `--font-serif` in layout.tsx | forms, titles, wordmark |
-| control | `.btn-signal`, `.btn-ghost`, `.btn-stop` | existing and new actions |
-| scrollbar | `--scroll-thumb`, `--scroll-track`, global baseline | all scroll containers |
+| Background / foreground / reader | `--paper`, `--ink`, `--reader` | pages, panels, text |
+| Muted / border | `--muted`, `--line`, `--line-strong` | secondary text, panel and field edges |
+| Primary action | `--primary-fill`, `--primary-hover` | `.btn-signal` |
+| Selected / focus | `--signal`, `--accent-soft` | navigation, focus outlines, tabs |
+| Danger | `--stop`, `.btn-stop` | error text, stop / final deletion |
+| Fonts | `--font-body`, compatibility `--font-serif` | all routes |
+| Controls | `--radius-control`, shared `.btn-*` | ordinary actions |
+| Navigation | WorkspaceShell and HomeMenu | full and focused product shells |
+| Scrollbar | global scrollbar tokens and baseline | all owned overflow regions |
 
-Buttons retain hover, pressed, keyboard focus, disabled and busy feedback. Disable
-duplicate permission mutations; End session stays actionable. Status and error
-text use live regions. A working operation may use an honest text status without
-an artificial percentage or decorative spinner.
-
-Native radio groups and file pickers are intentional: their platform behavior is
-appropriate for display selection and a local PNG/JPEG icon. No new custom select
-or modal primitive is needed. Inline messages stay visible until corrected.
-
-Lucide icons supplement text; decorative icons are aria-hidden. The shared screen
-is the only application-style keyboard region, with Escape returning to ordinary
-page navigation. Motion follows existing short button transitions and reduced
-motion rules; connection status never depends on animation.
-
-Product copy says what happened, where it happened, and how to recover. Distinguish
-an app/window appearance update from rebuilding the installed desktop identity.
-Never describe an untested connection as live or an unmeasured latency as instant.
+Native select and file picker popups are intentionally platform-owned. Controls
+retain hover/focus/pressed/disabled/busy states, minimum 44px primary touch targets,
+associated labels, and accessible status/error feedback. Reduced motion disables
+decorative animation; meaning never depends on animation. Destructive dialogs
+name the data and consequence, initially focus Cancel and restore focus.
 
 ## Do's and Don'ts
 
-- Do keep complete file names, helper codes and permission outcomes readable.
-- Do reuse the existing CSS and native/browser theme distinction.
-- Do keep remote control visibly revocable from the laptop.
-- Don't use a color or icon as the sole permission indicator.
-- Don't add a marketing hero or unrelated visual system to settings.
-- Don't claim a live native-device test from a mocked browser test.
+- Keep live actions, Stop and permission revocation visible.
+- Distinguish saved sessions from an illustrative preview and actual metrics from promises.
+- Keep source, resume and job-description context discoverable without burying the answer.
+- Use the same labels, settings, navigation and response preferences across routes.
+- Do not add fake scores, testimonials, model-speed guarantees, or active billing without a working flow.
+- Do not report mocked audio or browser-only collaboration as a physical device test.
 
-### Reconciled drift
+## Reconciled visual drift
 
-| Existing inconsistency | Resolution in this feature |
+| Previous rule / drift | Rebuild decision |
 |---|---|
-| Settings and the compact desktop picker owned separate names | One canonical app identity; compatibility wrapper for existing callers |
-| HomeMenu hardcoded the brand while Wordmark used a preference | Both consume the same identity |
-| No shared scrollbar baseline | Global theme tokens, standards CSS plus WebKit fallback |
+| Warm paper, serif headings and teal glass pills | Intentional site-wide migration to cool surfaces, IBM Plex Sans, blue actions and solid borders |
+| Each product route owned a different sidebar or HomeMenu | WorkspaceShell is canonical for tool pages; HomeMenu remains the focused-reading variant |
+| Selected button fill reused a light dark-mode text token | Separate primary-fill from signal text to preserve contrast |
+| Public home described mainly transcription | Explain actual Live / AI / repository / practice / Mock Lab workflows and link directly |
+| Library had an unbounded card collection | Bounded local pages over the 200 rows returned by the current API |
 
-Other existing screens have not undergone a full UI migration. The focused audit
-scope is recorded in `premium-ui.json`.
-
-## Interview reference integration
-
-The supplied product reference informs a quiet sidebar, compact sans-serif
-workspace titles, bordered answer/result cards, and a transcript rail. Live,
-Mock Lab and Feedback share one shell; existing paper/ink/teal runtime tokens
-remain canonical across light and dark themes. Mock controls remain in document
-flow on small screens. Factual session summaries replace illustrative percentages.
-Settings uses the same compact navigation with Profile, AI answers, Audio and
-Appearance sections backed by real preferences.
+The migration preserves storage, permission, provider and capture contracts.
+`UX-CONTRACT.md` owns behavior; `premium-ui.json` scopes static verification.

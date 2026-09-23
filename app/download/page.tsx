@@ -1,160 +1,78 @@
 'use client'
+
 import { useSyncExternalStore } from 'react'
 import Link from 'next/link'
-import { Apple, Monitor } from 'lucide-react'
+import { Apple, ArrowDownToLine, ArrowRight, Check, ExternalLink, Monitor, ShieldCheck } from 'lucide-react'
 import { SiteFooter } from '@/components/site/SiteFooter'
+import styles from '@/components/site/Site.module.css'
 
-// Desktop download page. Installers ship as static assets under /downloads
-// (same origin — no external host needed) so beta users can grab them today.
-// The env vars still OVERRIDE the defaults, so we can later point at a signed
-// build on a CDN / Vercel Blob without touching code.
+// Keep the stable download channel and deployment overrides independent from
+// the explicitly selected 0.1.8 remote-assistance preview.
 const MAC_URL = process.env.NEXT_PUBLIC_DOWNLOAD_MAC_URL || '/downloads/LiveTranscript-mac-arm64.dmg'
 const WIN_URL = process.env.NEXT_PUBLIC_DOWNLOAD_WIN_URL || '/downloads/LiveTranscript-win-x64-setup.exe'
+const PREVIEW_RELEASE = 'https://github.com/bhavithat21/livetranscript.ai/releases/tag/v0.1.8'
+const PREVIEW_MAC = 'https://github.com/bhavithat21/livetranscript.ai/releases/download/v0.1.8/LiveTranscript_0.1.8_universal.dmg'
+const PREVIEW_WINDOWS = 'https://github.com/bhavithat21/livetranscript.ai/releases/download/v0.1.8/LiveTranscript_0.1.8_x64-setup.exe'
 
 type OS = 'mac' | 'windows' | 'other'
 
 export default function DownloadPage() {
   const os = useSyncExternalStore(subscribeToNavigator, detectOS, () => 'other')
-
   return (
-    <main className="min-h-dvh bg-[#faf9f7] text-[#16151a]">
-      <section className="mx-auto max-w-4xl px-5 pb-8 pt-24 sm:px-8">
-        <p className="rise-in text-sm font-medium uppercase tracking-widest text-[color:var(--signal)]">
-          Desktop app
-        </p>
-        <h1
-          className="rise-in mt-3 break-words font-[family-name:var(--font-serif)] leading-[1.05] tracking-[-0.02em]"
-          style={{ animationDelay: '80ms', fontSize: 'var(--text-hero)' }}
-        >
-          LiveTranscript on your desktop.
-        </h1>
-        <p className="rise-in mt-5 max-w-2xl text-lg leading-relaxed text-black/65" style={{ animationDelay: '160ms' }}>
-          A native window for Mac and Windows — the full app in its own window.
-          During beta, grab new versions here; download again when there&rsquo;s an update.
-        </p>
-      </section>
-
-      <section className="mx-auto grid max-w-4xl gap-4 px-5 sm:grid-cols-2 sm:px-8">
-        <DownloadCard
-          href={MAC_URL}
-          icon={<Apple size={22} />}
-          platform="macOS"
-          detail="Apple silicon & Intel · .dmg"
-          highlighted={os === 'mac'}
-        />
-        <DownloadCard
-          href={WIN_URL}
-          icon={<Monitor size={22} />}
-          platform="Windows"
-          detail="Windows 10 & 11 · .exe installer"
-          highlighted={os === 'windows'}
-        />
-      </section>
-
-      <section className="mx-auto max-w-4xl px-5 pt-6 sm:px-8" aria-labelledby="remote-preview-heading">
-        <div className="glass rounded-2xl p-6">
-          <h2 id="remote-preview-heading" className="font-[family-name:var(--font-serif)] text-xl">Remote assistance preview</h2>
-          <p className="mt-2 text-sm leading-relaxed text-black/60">Version 0.1.8 is available for testing approved laptop sharing and control. Both platform builds passed CI; real-device permissions and connections still need a smoke test. Install this preview explicitly; the stable updater stays on the current stable release.</p>
-          <div className="mt-4 flex flex-wrap gap-3">
-            <a href="https://github.com/bhavithat21/livetranscript.ai/releases/download/v0.1.8/LiveTranscript_0.1.8_universal.dmg" className="btn-signal text-sm">Mac preview · 0.1.8</a>
-            <a href="https://github.com/bhavithat21/livetranscript.ai/releases/download/v0.1.8/LiveTranscript_0.1.8_x64-setup.exe" className="btn-ghost text-sm">Windows preview · 0.1.8</a>
-            <a href="https://github.com/bhavithat21/livetranscript.ai/releases/tag/v0.1.8" className="inline-flex min-h-11 items-center px-2 text-sm text-[color:var(--signal)] underline underline-offset-4">Release details</a>
+    <main className={styles.page}>
+      <div className={styles.container}>
+        <header className={styles.shortHero}>
+          <span className={styles.eyebrow}><Monitor size={16} aria-hidden="true" />Desktop app</span>
+          <h1>A dedicated space.<br />Right on your desktop.</h1>
+          <p>Bring LiveTranscript into its own window on Mac or Windows. Keep your conversation, technical context and controls close at hand.</p>
+          <Link href="/copilot" className={`${styles.textLink} mt-3`}>Prefer the browser? Open AI workspace<ArrowRight size={15} aria-hidden="true" /></Link>
+        </header>
+        <section className={styles.downloadLayout} aria-label="Desktop downloads">
+          <DownloadCard href={MAC_URL} icon={<Apple size={24} aria-hidden="true" />} platform="macOS" detail="Mac installer · .dmg" highlighted={os === 'mac'} />
+          <DownloadCard href={WIN_URL} icon={<Monitor size={24} aria-hidden="true" />} platform="Windows" detail="Windows 10 & 11 · .exe installer" highlighted={os === 'windows'} />
+        </section>
+        <section className={styles.releasePanel} aria-labelledby="preview-release-title">
+          <div><span className={styles.badge}>Optional preview · v0.1.8</span><h2 id="preview-release-title">Try approved remote assistance.</h2><p>This preview adds laptop sharing and control with explicit host approval. Both platform builds passed CI; real-device permissions and connections still need a smoke test.</p><p>Install the preview explicitly. The stable updater remains on the stable release.</p></div>
+          <div className={styles.releaseActions}>
+            <a href={PREVIEW_MAC} className={styles.secondary}><Apple size={16} aria-hidden="true" />Download Mac preview<ArrowDownToLine size={15} aria-hidden="true" /></a>
+            <a href={PREVIEW_WINDOWS} className={styles.secondary}><Monitor size={16} aria-hidden="true" />Download Windows preview<ArrowDownToLine size={15} aria-hidden="true" /></a>
+            <a href={PREVIEW_RELEASE} className={styles.textLink}>View v0.1.8 release details<ExternalLink size={13} aria-hidden="true" /></a>
           </div>
-        </div>
-      </section>
-
-      {/* OS publisher signing is separate from updater signatures. */}
-      <div className="mx-auto max-w-4xl px-5 pt-5 sm:px-8">
-        <div className="rounded-xl border border-black/10 bg-black/[0.02] p-4 text-sm leading-relaxed text-black/60">
-          <span className="font-medium text-black/75">Preview installation.</span> The
-          0.1.8 Mac app is signed and notarized. The Windows preview has no publisher
-          signature and may show an installation warning. On Mac, screen sharing
-          and system audio require the relevant recording permissions; remote
-          keyboard and pointer control also requires Accessibility. Prefer no install?{' '}
-          <Link href="/copilot" className="text-[color:var(--signal)] hover:underline">
-            Open AI Copilot in your browser
-          </Link>
-          .
-        </div>
+        </section>
+        <div className={`${styles.notice} mt-5`}><ShieldCheck size={18} aria-hidden="true" /><p><strong>Preview installation.</strong> The v0.1.8 Mac app is signed and notarized. The Windows preview has no publisher signature and may display an installation warning. Review the release details before installing.</p></div>
+        <section className={`${styles.section} ${styles.installGuide}`} aria-labelledby="installation-title">
+          <div><span className={styles.eyebrow}>Getting started</span><h2 id="installation-title" className="mt-3">Set up once.<br />Choose what to share.</h2><p>Audio and screen access depend on your operating system. The app asks for the access needed by the feature you start.</p></div>
+          <ol className={styles.installSteps}>
+            <li><span>1</span><div><h3>Install the version you chose</h3><p>Download the installer for your computer. On Mac, open the DMG and move the app to Applications. On Windows, open the installer and follow its setup steps.</p></div></li>
+            <li><span>2</span><div><h3>Sign in and set your context</h3><p>Open the app and add your profile in Settings. You can also use the standalone AI workspace without starting audio capture.</p></div></li>
+            <li><span>3</span><div><h3>Allow the features you need</h3><p>Mac screen sharing and system audio need recording permissions. Remote keyboard and pointer control also need Accessibility permission. Host approval and stop controls remain part of the session.</p></div></li>
+          </ol>
+        </section>
+        <section className={`${styles.closing}`}>
+          <div><h2>Your browser is a workspace, too.</h2><p>Ask a question, explore your code or practice before you install.</p></div>
+          <Link href="/copilot" className={styles.primary}>Continue on the web<ArrowRight size={16} aria-hidden="true" /></Link>
+        </section>
       </div>
-
-      <section className="mx-auto max-w-4xl px-5 py-14 sm:px-8">
-        <div className="glass rounded-2xl p-6">
-          <h2 className="font-[family-name:var(--font-serif)] text-xl">Staying up to date</h2>
-          <p className="mt-2 text-sm leading-relaxed text-black/60">
-            During beta, download the latest version from this page when a new one
-            ships. Automatic in-app updates are rolling out — until then, a quick
-            re-download keeps you current. Prefer no install?{' '}
-            <Link href="/record" className="text-[color:var(--signal)] hover:underline">
-              Use it right in your browser
-            </Link>
-            .
-          </p>
-        </div>
-      </section>
-
       <SiteFooter />
     </main>
   )
 }
 
-function subscribeToNavigator(): () => void {
-  return () => {}
-}
-
+function subscribeToNavigator(): () => void { return () => {} }
 function detectOS(): OS {
-  const p = navigator.platform?.toLowerCase() ?? ''
-  const ua = navigator.userAgent?.toLowerCase() ?? ''
-  if (p.includes('mac') || ua.includes('mac')) return 'mac'
-  if (p.includes('win') || ua.includes('win')) return 'windows'
+  const platform = navigator.platform?.toLowerCase() ?? ''
+  const userAgent = navigator.userAgent?.toLowerCase() ?? ''
+  if (platform.includes('mac') || userAgent.includes('mac')) return 'mac'
+  if (platform.includes('win') || userAgent.includes('win')) return 'windows'
   return 'other'
 }
 
-function DownloadCard({
-  href,
-  icon,
-  platform,
-  detail,
-  highlighted,
-}: {
-  href: string
-  icon: React.ReactNode
-  platform: string
-  detail: string
-  highlighted: boolean
+function DownloadCard({ href, icon, platform, detail, highlighted }: {
+  href: string; icon: React.ReactNode; platform: string; detail: string; highlighted: boolean
 }) {
-  const available = Boolean(href)
-  const inner = (
-    <>
-      <div className="flex items-center gap-3">
-        <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-black/5">{icon}</span>
-        <div>
-          <div className="font-[family-name:var(--font-serif)] text-xl">{platform}</div>
-          {available && highlighted && (
-            <div className="text-xs font-medium text-emerald-700">Detected — recommended</div>
-          )}
-        </div>
-      </div>
-      <p className="text-sm text-black/55">{detail}</p>
-      {available ? (
-        <span className="btn-signal mt-auto w-full">Download for {platform}</span>
-      ) : (
-        <span className="mt-auto w-full cursor-not-allowed rounded-full border border-black/15 bg-black/5 py-2.5 text-center text-sm font-medium text-black/45">
-          Coming soon
-        </span>
-      )}
-    </>
-  )
-  const cls = `glass flex flex-col gap-4 rounded-3xl p-7 ${
-    available ? 'transition-transform hover:-translate-y-0.5' : 'opacity-80'
-  } ${available && highlighted ? 'ring-2 ring-emerald-700/40' : ''}`
-
-  // Real link only when an installer URL is configured; otherwise a static card.
-  return available ? (
-    <a href={href} className={cls} download>
-      {inner}
-    </a>
-  ) : (
-    <div className={cls}>{inner}</div>
-  )
+  return <article className={styles.downloadCard} data-recommended={highlighted}>
+    <div className={styles.downloadHeading}><span className={styles.iconBox}>{icon}</span><div><h2>{platform}</h2>{highlighted && <span className={styles.badge}><Check size={11} aria-hidden="true" />Detected on this device</span>}</div></div>
+    <p>{detail}</p>
+    {href ? <a href={href} download className={styles.primary}><ArrowDownToLine size={17} aria-hidden="true" />Download for {platform}</a> : <span className={styles.unavailable}>Download coming soon</span>}
+  </article>
 }

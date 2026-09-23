@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { WorkspaceShell } from '@/components/nav/WorkspaceShell'
 import { PracticeWorkspace } from '@/components/practice/PracticeWorkspace'
 
 export const metadata: Metadata = {
@@ -7,5 +8,5 @@ export const metadata: Metadata = {
 }
 
 export default function PracticePage() {
-  return <PracticeWorkspace />
+  return <WorkspaceShell active="practice"><PracticeWorkspace /></WorkspaceShell>
 }

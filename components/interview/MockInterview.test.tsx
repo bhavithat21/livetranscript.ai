@@ -23,7 +23,7 @@ function mount(blocked = false) {
 beforeEach(() => { recorderStop.mockReset().mockResolvedValue([]); fetcher.mockReset(); fetcher.mockImplementation(async () => new Response('Use an atomic sliding window.')); vi.stubGlobal('fetch', fetcher) })
 afterEach(() => { cleanup(); localStorage.clear(); vi.unstubAllGlobals() })
 async function testAnswer() {
-  fireEvent.click(screen.getByText('Open live copilot for mock test'))
+  fireEvent.click(screen.getByText('Open test workspace'))
   fireEvent.click(screen.getByText('Generate test answer'))
   await screen.findByText('Use an atomic sliding window.')
 }
@@ -32,9 +32,9 @@ describe('mock calibrates the live system', () => {
     let finish!: () => void
     recorderStop.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve }))
     mount()
-    fireEvent.click(screen.getByText('Open live copilot for mock test'))
+    fireEvent.click(screen.getByText('Open test workspace'))
     fireEvent.click(screen.getByText('End test & open feedback'))
-    const open = screen.getByText('Open live copilot for mock test') as HTMLButtonElement
+    const open = screen.getByText('Open test workspace') as HTMLButtonElement
     expect(open.disabled).toBe(true)
     finish()
     await waitFor(() => expect(open.disabled).toBe(false))
@@ -56,14 +56,14 @@ describe('mock calibrates the live system', () => {
   it('requires a passed exact-draft test before publication and supports rollback', async () => {
     mount()
     fireEvent.change(screen.getByLabelText('Draft live calibration instructions'), { target: { value: 'Answer concisely.' } })
-    expect((screen.getByText('Apply to Live') as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Apply to Live' }) as HTMLButtonElement).disabled).toBe(true)
     await testAnswer()
-    expect((screen.getByText('Apply to Live') as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Apply to Live' }) as HTMLButtonElement).disabled).toBe(true)
     fireEvent.change(screen.getByLabelText('Review result'), { target: { value: 'pass' } })
-    fireEvent.click(screen.getByText('Apply to Live'))
+    fireEvent.click(screen.getByRole('button', { name: 'Apply to Live' }))
     expect(screen.getByTestId('live-profile').textContent).toBe('1:Answer concisely.')
     fireEvent.change(screen.getByLabelText('Draft live calibration instructions'), { target: { value: 'An untested change.' } })
-    expect((screen.getByText('Apply to Live') as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Apply to Live' }) as HTMLButtonElement).disabled).toBe(true)
     fireEvent.click(screen.getByText('Roll back live profile'))
     expect(screen.getByTestId('live-profile').textContent).toBe('2:')
   })
@@ -81,15 +81,15 @@ describe('mock calibrates the live system', () => {
   it('does not allow a test request error to become an accepted run', async () => {
     fetcher.mockImplementation(async () => new Response('failure', { status: 503 }))
     mount()
-    fireEvent.click(screen.getByText('Open live copilot for mock test'))
+    fireEvent.click(screen.getByText('Open test workspace'))
     fireEvent.click(screen.getByText('Generate test answer'))
     await screen.findByLabelText('Review result')
     expect((screen.getByRole('option', { name: /Pass —/ }) as HTMLOptionElement).disabled).toBe(true)
-    expect((screen.getByText('Apply to Live') as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Apply to Live' }) as HTMLButtonElement).disabled).toBe(true)
   })
   it('blocks mock and profile changes during live capture', () => {
     mount(true)
-    expect((screen.getByText('Open live copilot for mock test') as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByText('Open test workspace') as HTMLButtonElement).disabled).toBe(true)
     expect((screen.getByLabelText('Draft live calibration instructions') as HTMLTextAreaElement).disabled).toBe(true)
   })
   it('does not persist a profile to another account', async () => {
@@ -97,7 +97,7 @@ describe('mock calibrates the live system', () => {
     fireEvent.change(screen.getByLabelText('Draft live calibration instructions'), { target: { value: 'Account one preference.' } })
     await testAnswer()
     fireEvent.change(screen.getByLabelText('Review result'), { target: { value: 'pass' } })
-    fireEvent.click(screen.getByText('Apply to Live'))
+    fireEvent.click(screen.getByRole('button', { name: 'Apply to Live' }))
     cleanup()
     render(<InterviewTuningProvider ownerId="other-account"><LiveProbe /></InterviewTuningProvider>)
     expect(screen.getByTestId('live-profile').textContent).toBe('0:')

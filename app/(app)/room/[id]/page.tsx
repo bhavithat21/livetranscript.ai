@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
-import { ArrowLeft, BookOpen, Check, ChevronDown, ChevronUp, Copy, Info, Lock, Mic, MicOff, Sparkles, Users } from 'lucide-react'
+import { ArrowLeft, AudioLines, BookOpen, Check, ChevronDown, ChevronUp, Copy, Info, Link2, Link2Off, Lock, Mic, MicOff, Sparkles, Users } from 'lucide-react'
 import { useMicStream, type AudioSource } from '@/lib/audio/useMicStream'
 import { useNativeCapture } from '@/lib/audio/useNativeCapture'
 import { logError } from '@/lib/log'
@@ -51,9 +51,7 @@ export default function RoomPage() {
 
   if (id === 'new') {
     return (
-      <main className="mx-auto max-w-md px-6 py-24 text-center text-black/50">
-        Creating your meeting…
-      </main>
+      <main className="mx-auto max-w-md px-6 py-24 text-center"><title>Creating meeting — LiveTranscript</title><p role="status" className="text-sm text-[color:var(--muted)]">Creating your meeting…</p></main>
     )
   }
 
@@ -64,7 +62,7 @@ export default function RoomPage() {
   // re-render on the same URL must preserve a manual lobby join. Keying this small
   // state owner gives both guarantees without synchronously resetting state in an
   // effect (and avoids reviving A's joined state after A → B → A navigation).
-  return <RoomSession key={`${id}:${autoJoin ? 'join' : 'lobby'}`} roomId={id} autoJoin={autoJoin} />
+  return <><title>Meeting — LiveTranscript</title><RoomSession key={`${id}:${autoJoin ? 'join' : 'lobby'}`} roomId={id} autoJoin={autoJoin} /></>
 }
 
 function RoomSession({ roomId, autoJoin }: { roomId: string; autoJoin: boolean }) {
@@ -75,15 +73,14 @@ function RoomSession({ roomId, autoJoin }: { roomId: string; autoJoin: boolean }
 
 function InvalidRoom() {
   return (
-    <main className="mx-auto max-w-md px-6 py-24 text-center">
-      <h1 className="font-[family-name:var(--font-serif)] text-3xl">That meeting link isn&rsquo;t valid</h1>
-      <p className="mt-3 text-black/60">
-        Meeting links are randomly generated. Ask the host to resend their invite, or start a new
-        meeting of your own.
-      </p>
-      <Link href="/room/new" className="btn-signal mt-6 inline-block px-6 py-3">
-        Start a new meeting
-      </Link>
+    <main className="mx-auto max-w-lg px-4 py-10 sm:px-6 sm:py-16"><title>Meeting unavailable — LiveTranscript</title>
+      <HomeMenu />
+      <div className="mt-6 rounded-xl border border-[color:var(--line)] bg-[color:var(--reader)] p-7">
+        <span className="mb-5 inline-flex h-12 w-12 items-center justify-center rounded-xl bg-[color:var(--surface-soft)] text-[color:var(--muted)]"><Link2Off size={22} aria-hidden /></span>
+        <h1 className="text-2xl font-semibold tracking-tight">This meeting link isn’t valid</h1>
+        <p className="mt-3 text-sm leading-6 text-[color:var(--muted)]">Ask the host for their full invitation link, or create a new meeting to share with your group.</p>
+        <Link href="/room/new" className="btn-signal mt-6 gap-2 text-sm"><Users size={16} aria-hidden />Create a meeting</Link>
+      </div>
     </main>
   )
 }
@@ -100,106 +97,64 @@ function Lobby({ roomId, onJoin }: { roomId: string; onJoin: () => void }) {
   const router = useRouter()
   const [copied, setCopied] = useState(false)
   const [idCopied, setIdCopied] = useState(false)
+  const [copyError, setCopyError] = useState<string | null>(null)
   const [joinId, setJoinId] = useState('')
+  const [joinError, setJoinError] = useState<string | null>(null)
+  const joinRef = useRef<HTMLInputElement>(null)
   useThemeMode()
 
-  // Build the invite from the origin + THIS room id (not window.location.href,
-  // which can still read "/room/new" right after the redirect). Set after mount
-  // so SSR doesn't bake in an empty origin that hydration then freezes.
   const origin = useSyncExternalStore(subscribeToLocation, getLocationOrigin, () => '')
   const link = origin ? `${origin}/room/${roomId}` : `/room/${roomId}`
-  const copyInvite = () => {
-    navigator.clipboard.writeText(link)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+  const copyInvite = async () => {
+    setCopyError(null)
+    try { await navigator.clipboard.writeText(link); setCopied(true) }
+    catch { setCopyError('Copying was unavailable. Select and copy the invitation link below.') }
   }
   const mailto =
     `mailto:?subject=${encodeURIComponent('Join my LiveTranscript meeting')}` +
     `&body=${encodeURIComponent(`Join the live transcript meeting:\n${link}\n\nMeeting ID: ${roomId}`)}`
 
   return (
-    <main className="mx-auto max-w-lg px-6 py-20">
-      <div className="mb-6 flex items-center justify-between">
-        {/* Back out of the lobby without joining — otherwise the join screen is a
-            dead end (no nav chrome here). Prefer real history back; fall to dashboard. */}
-        <button
-          onClick={() => (window.history.length > 1 ? router.back() : router.push('/dashboard'))}
-          className="flex items-center gap-1.5 text-sm text-black/50 transition-colors hover:text-ink"
-        >
-          <ArrowLeft size={16} /> Back
-        </button>
-        <ThemeToggle label className="glass glass-interactive" />
+    <main className="mx-auto max-w-5xl px-4 pb-16 pt-5 sm:px-6 sm:pt-8">
+      <div className="mb-10 flex items-center justify-between gap-3">
+        <button type="button" onClick={() => (window.history.length > 1 ? router.back() : router.push('/dashboard'))} className="btn-ghost gap-1.5 text-sm"><ArrowLeft size={15} aria-hidden />Back</button>
+        <ThemeToggle label />
       </div>
-      <p className="text-sm font-medium uppercase tracking-widest text-emerald-700">Live meeting</p>
-      <h1 className="mt-2 font-[family-name:var(--font-serif)] text-3xl leading-tight sm:text-4xl">
-        You&rsquo;re about to join
-      </h1>
-      <div className="glass mt-6 rounded-2xl p-5">
-        <div className="text-xs uppercase tracking-wide text-black/40">Meeting ID</div>
-        <div className="mt-1 flex items-center gap-2">
-          <span className="min-w-0 select-all truncate font-mono text-lg">{roomId}</span>
-          <button
-            onClick={() => {
-              navigator.clipboard.writeText(roomId)
-              setIdCopied(true)
-              setTimeout(() => setIdCopied(false), 2000)
-            }}
-            className="flex h-11 w-11 items-center justify-center rounded-full bg-black/5 text-black/50 transition-colors hover:bg-black/10 hover:text-ink"
-            title="Copy meeting ID"
-            aria-label="Copy meeting ID"
-          >
-            {idCopied ? <Check size={14} className="text-emerald-700" /> : <Copy size={14} />}
-          </button>
+      <div className="grid gap-8 lg:grid-cols-[1fr_1.05fr] lg:gap-14">
+        <div className="lg:pt-5">
+          <span className="mb-6 inline-flex h-12 w-12 items-center justify-center rounded-xl border border-[color:var(--line)] bg-[color:var(--reader)] text-[color:var(--signal)]"><Users size={23} aria-hidden /></span>
+          <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">A shared place for every word.</h1>
+          <p className="mt-4 max-w-md text-base leading-7 text-[color:var(--muted)]">Join the same transcript from your own devices. Each speaker gets a clear identity, so everyone can follow the conversation.</p>
+          <div className="mt-7 flex gap-3 rounded-lg border border-[color:var(--line)] bg-[color:var(--reader)] p-4"><AudioLines size={19} className="mt-0.5 shrink-0 text-[color:var(--signal)]" aria-hidden /><p className="text-sm leading-6 text-[color:var(--muted)]">Keep your voice call open in your meeting app. This room shares the transcript, not the call audio. Up to {MAX_SPEAKERS} participants can transcribe at once.</p></div>
         </div>
-        <p className="mt-3 text-sm leading-relaxed text-black/60">
-          Up to {MAX_SPEAKERS} people can speak — each on their own device. Get everyone on a
-          separate voice call for audio; LiveTranscript syncs the text live and colors each speaker.
-        </p>
-        <div className="mt-4 flex flex-wrap gap-3">
-          <button onClick={copyInvite} className="btn-ghost text-sm">
-            {copied ? 'Link copied ✓' : 'Copy invite link'}
-          </button>
-          <a href={mailto} className="btn-ghost text-sm">
-            Invite by email
-          </a>
+
+        <div>
+          <section aria-labelledby="meeting-invitation" className="rounded-xl border border-[color:var(--line)] bg-[color:var(--reader)] p-5 sm:p-7">
+            <div className="mb-6 flex items-center justify-between gap-2"><h2 id="meeting-invitation" className="text-lg font-semibold tracking-tight">Ready to join</h2><span className="rounded-md bg-[color:var(--surface-soft)] px-2 py-1 text-xs text-[color:var(--muted)]">Not transcribing</span></div>
+            <p className="text-xs font-medium text-[color:var(--muted)]">Meeting ID</p>
+            <div className="mt-2 flex items-center gap-2 rounded-lg border border-[color:var(--line)] bg-[color:var(--surface-soft)] py-1 pl-3 pr-1">
+              <span className="min-w-0 flex-1 select-all break-all font-mono text-sm">{roomId}</span>
+              <button type="button" onClick={async () => { setCopyError(null); try { await navigator.clipboard.writeText(roomId); setIdCopied(true) } catch { setCopyError('Copying was unavailable. Select and copy the invitation link below.') } }} className="btn-ghost h-11 w-11 shrink-0 !px-0" title="Copy meeting ID" aria-label={idCopied ? 'Meeting ID copied' : 'Copy meeting ID'}>{idCopied ? <Check size={15} aria-hidden /> : <Copy size={15} aria-hidden />}</button>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2"><button type="button" onClick={copyInvite} className="btn-ghost gap-2 text-sm"><Link2 size={14} aria-hidden />{copied ? 'Invite link copied' : 'Copy invite link'}</button><a href={mailto} className="btn-ghost text-sm">Invite by email</a></div>
+            {copyError && <div className="mt-3"><p role="status" className="text-xs leading-5 text-[color:var(--muted)]">{copyError}</p><label className="mt-2 block text-xs font-medium">Invitation link<input readOnly value={link} onFocus={(event) => event.target.select()} className="mt-1.5 w-full rounded-lg border border-[color:var(--line)] bg-[color:var(--reader)] px-3 py-2.5 text-sm font-normal" /></label></div>}
+            <div className="mt-6 border-t border-[color:var(--line)] pt-5"><button type="button" onClick={onJoin} className="btn-signal w-full gap-2 py-3 text-sm"><Users size={17} aria-hidden />Join meeting</button><p className="mt-3 text-center text-xs leading-5 text-[color:var(--muted)]">You join as a listener. Start transcription when you’re ready.</p></div>
+          </section>
+
+          <form noValidate className="mt-6" onSubmit={(event) => {
+            event.preventDefault()
+            const raw = (joinId.trim().split(/[?#]/)[0].split('/').filter(Boolean).pop() ?? '')
+            const clean = raw.replace(/[^a-zA-Z0-9_-]/g, '')
+            if (!isStrongRoomId(clean)) { setJoinError('Paste a complete meeting invitation or a valid meeting ID.'); joinRef.current?.focus(); return }
+            if (clean === roomId) return onJoin()
+            router.push(`/room/${clean}?join=1`)
+          }}>
+            <label htmlFor="join-id" className="mb-2 block text-sm font-medium">Joining a different meeting?</label>
+            <div className="flex items-center gap-2"><input ref={joinRef} id="join-id" name="joinId" value={joinId} onChange={(event) => { setJoinId(event.target.value); setJoinError(null) }} placeholder="Paste an invitation link or meeting ID" aria-invalid={Boolean(joinError)} aria-describedby={joinError ? 'join-error' : undefined} className="min-h-11 min-w-0 flex-1 rounded-lg border border-[color:var(--line)] bg-[color:var(--reader)] px-3 text-sm outline-none focus:border-[color:var(--signal)]" /><button type="submit" className="btn-ghost text-sm">Join</button></div>
+            {joinError && <p id="join-error" role="alert" className="mt-2 text-sm text-[color:var(--stop)]">{joinError}</p>}
+          </form>
         </div>
       </div>
-
-      <button onClick={onJoin} className="btn-signal mt-6 w-full py-3 text-base">
-        Join meeting
-      </button>
-
-      <form
-        className="mt-8 flex items-center gap-2"
-        onSubmit={(e) => {
-          e.preventDefault()
-          // Accept a full pasted link, a link with query/hash, or a bare id. Strip
-          // any query/hash, then take the last path segment.
-          const raw = (joinId.trim().split(/[?#]/)[0].split('/').filter(Boolean).pop() ?? '')
-          const clean = raw.replace(/[^a-zA-Z0-9_-]/g, '')
-          if (!clean) return
-          // Pasting the link for THIS room = just join it (don't no-op).
-          if (clean === roomId) return onJoin()
-          // ?join=1 tells the target room to OPEN straight into the meeting
-          // instead of stopping at its lobby (Go = open, not just update).
-          router.push(`/room/${clean}?join=1`)
-        }}
-      >
-        <label htmlFor="join-id" className="sr-only">
-          Join a different meeting ID
-        </label>
-        <input
-          id="join-id"
-          name="joinId"
-          value={joinId}
-          onChange={(e) => setJoinId(e.target.value)}
-          placeholder="Join a different meeting ID"
-          className="min-w-0 flex-1 rounded-full border border-black/15 bg-white/60 px-4 py-2 text-sm outline-none focus:border-emerald-700"
-        />
-        <button type="submit" className="btn-ghost text-sm">
-          Go
-        </button>
-      </form>
     </main>
   )
 }
@@ -208,23 +163,18 @@ function Lobby({ roomId, onJoin }: { roomId: string; onJoin: () => void }) {
 // trivial to paste to whoever should join. Friendly ids read aloud fine too.
 function CopyMeetingId({ roomId }: { roomId: string }) {
   const [copied, setCopied] = useState(false)
-  const copy = () => {
-    const link = typeof window !== 'undefined' ? `${window.location.origin}/room/${roomId}` : roomId
-    navigator.clipboard.writeText(link)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+  const [failedLink, setFailedLink] = useState<string | null>(null)
+  const copy = async () => {
+    const link = `${window.location.origin}/room/${roomId}`
+    setFailedLink(null)
+    try { await navigator.clipboard.writeText(link); setCopied(true) }
+    catch { setFailedLink(link) }
   }
   return (
-    <button
-      onClick={copy}
-      className="glass glass-interactive flex items-center gap-2 rounded-full py-1 pl-3 pr-2 text-sm"
-      title="Copy the join link"
-    >
-      <span className="font-mono text-black/70">{roomId}</span>
-      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-black/5 text-black/50">
-        {copied ? <Check size={13} className="text-emerald-700" /> : <Copy size={13} />}
-      </span>
-    </button>
+    <div className="relative min-w-0 max-w-full">
+      <button type="button" onClick={copy} className="btn-ghost flex max-w-full items-center gap-2 text-sm" title="Copy the join link" aria-label={copied ? 'Meeting invitation copied' : 'Copy meeting invitation'}><span className="min-w-0 truncate font-mono text-xs">{roomId}</span>{copied ? <Check size={14} className="shrink-0 text-[color:var(--signal)]" aria-hidden /> : <Copy size={14} className="shrink-0" aria-hidden />}</button>
+      {failedLink && <div className="absolute left-0 top-full z-50 mt-2 w-72 max-w-[calc(100vw_-_2rem)] rounded-lg border border-[color:var(--line)] bg-[color:var(--reader)] p-3 shadow-lg"><p role="status" className="text-xs text-[color:var(--muted)]">Select and copy this invitation link.</p><label className="mt-2 block text-xs font-medium">Invitation link<input readOnly value={failedLink} onFocus={(event) => event.target.select()} className="mt-1 w-full rounded-lg border border-[color:var(--line)] bg-[color:var(--surface-soft)] px-2 py-2 text-xs font-normal" /></label><button type="button" onClick={() => setFailedLink(null)} className="btn-ghost mt-2 text-xs">Close</button></div>}
+    </div>
   )
 }
 
@@ -511,7 +461,7 @@ function Meeting({ roomId }: { roomId: string }) {
               release is the GLOBAL hotkey Cmd/Ctrl+Shift+L (or the tray). The (i)
               tooltip carries that warning. Desktop only. */}
           {lockMode.available && (
-            <div className="glass flex items-center gap-2 rounded-full px-3 py-1.5 text-sm">
+            <div className="glass flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm">
               <Lock size={14} className={lockMode.locked ? 'text-emerald-600' : 'text-black/50'} />
               <LeverSwitch
                 checked={lockMode.locked}
@@ -539,7 +489,7 @@ function Meeting({ roomId }: { roomId: string }) {
           {!lockMode.locked && (
             <button
               onClick={() => setReader(false)}
-              className="glass flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm"
+              className="glass flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm"
               title="Exit Reader (Esc)"
             >
               <BookOpen size={15} /> Exit Reader
@@ -554,18 +504,19 @@ function Meeting({ roomId }: { roomId: string }) {
         <div className="flex items-center gap-2 px-4 py-1.5 sm:px-6">
           <button
             onClick={() => setHeaderCollapsed(false)}
-            className="glass glass-interactive flex min-h-8 items-center gap-1.5 rounded-full px-3 text-xs text-black/55"
+            className="glass glass-interactive flex min-h-8 items-center gap-1.5 rounded-lg px-3 text-xs text-black/55"
             title="Show meeting controls"
             aria-expanded={false}
           >
             <ChevronDown size={14} /> Controls
           </button>
-          <span className={`text-xs ${connected ? 'text-emerald-700' : 'text-black/40'}`}>{connected ? '●' : '○'}</span>
+          <span className={`text-xs ${connected ? 'text-emerald-700' : 'text-black/40'}`}>{connected ? 'Connected' : 'Connecting…'}</span>
           <div className="ml-auto flex items-center gap-2">
             <button
               onClick={() => setAskOpen((v) => !v)}
               data-active={askOpen}
-              className="glass glass-interactive flex min-h-8 items-center gap-1.5 rounded-full px-3 text-xs text-black/60 data-[active=true]:text-emerald-800"
+              aria-pressed={askOpen}
+              className="glass glass-interactive flex min-h-8 items-center gap-1.5 rounded-lg px-3 text-xs text-black/60 data-[active=true]:text-[color:var(--signal)]"
               title="Ask the transcript"
             >
               <Sparkles size={13} /> Ask
@@ -578,10 +529,10 @@ function Meeting({ roomId }: { roomId: string }) {
       )}
 
       {/* Top bar: home nav + identity + copyable meeting id + status, End on the right. */}
-      <header className={`${headerCollapsed || reader ? 'hidden' : 'flex'} flex-wrap items-center gap-2 px-4 py-3 sm:gap-3 sm:px-6 sm:py-4`}>
+      <header className={`${headerCollapsed || reader ? 'hidden' : 'flex'} shrink-0 flex-wrap items-center gap-2 border-b border-[color:var(--line)] bg-[color:var(--reader)] px-4 py-3 sm:gap-3 sm:px-6 sm:py-4`}>
         <button
           onClick={() => setHeaderCollapsed(true)}
-          className="glass glass-interactive flex min-h-11 w-11 items-center justify-center rounded-full text-black/50"
+          className="glass glass-interactive flex min-h-11 w-11 items-center justify-center rounded-lg text-black/50"
           title="Collapse controls — give the transcript the full screen"
           aria-expanded={true}
         >
@@ -598,7 +549,8 @@ function Meeting({ roomId }: { roomId: string }) {
         <button
           onClick={() => setShowRoster((v) => !v)}
           data-active={showRoster}
-          className="glass glass-interactive flex min-h-11 items-center gap-1.5 rounded-full px-3 text-sm text-black/60 data-[active=true]:text-ink"
+          aria-expanded={showRoster}
+          className="glass glass-interactive flex min-h-11 items-center gap-1.5 rounded-lg px-3 text-sm text-black/60 data-[active=true]:text-ink"
           title="Who's in the meeting"
         >
           <Users size={14} />
@@ -606,11 +558,9 @@ function Meeting({ roomId }: { roomId: string }) {
           {roster.length > MAX_SPEAKERS ? ` (${MAX_SPEAKERS} speaking)` : ''}
         </button>
         <span className={`text-sm ${connected ? 'text-emerald-700' : 'text-black/40'}`} title={connected ? 'Connected' : 'Connecting…'}>
-          {/* Phone: dot only (saves the crowded header). Desktop: dot + label. */}
-          <span className="sm:hidden">{connected ? '●' : '○'}</span>
-          <span className="hidden sm:inline">{connected ? '● connected' : '○ connecting…'}</span>
+          <span>{connected ? 'Connected' : 'Connecting…'}</span>
         </span>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="flex w-full flex-wrap items-center gap-2 border-t border-[color:var(--line)] pt-3 xl:ml-auto xl:w-auto xl:border-0 xl:pt-0">
           <TextSizeControl
             onDec={textScale.dec}
             onInc={textScale.inc}
@@ -622,7 +572,7 @@ function Meeting({ roomId }: { roomId: string }) {
           <button
             onClick={() => setSpeedIdx((i) => (i + 1) % SCROLL_SPEEDS.length)}
             data-active={speedIdx > 0}
-            className="glass glass-interactive flex min-h-10 items-center gap-1.5 rounded-full px-3 text-sm text-black/55 data-[active=true]:text-emerald-800"
+            className="glass glass-interactive flex min-h-10 items-center gap-1.5 rounded-lg px-3 text-sm text-black/55 data-[active=true]:text-[color:var(--signal)]"
             title="Auto-scroll speed (Off / Slow / Medium / Fast)"
           >
             ⇅ {['Off', 'Slow', 'Med', 'Fast'][speedIdx]}
@@ -632,23 +582,25 @@ function Meeting({ roomId }: { roomId: string }) {
           <button
             onClick={() => setReader((v) => !v)}
             data-active={reader}
-            className="glass glass-interactive flex min-h-10 items-center gap-1.5 rounded-full px-3 text-sm text-black/55 data-[active=true]:text-emerald-800"
+            className="glass glass-interactive flex min-h-10 items-center gap-1.5 rounded-lg px-3 text-sm text-black/55 data-[active=true]:text-[color:var(--signal)]"
             title="Reader mode — full-screen transcript"
           >
             <BookOpen size={15} /> Reader
           </button>
-          <div className="glass flex items-center rounded-full p-0.5 text-sm">
+          <div className="glass flex items-center rounded-lg p-0.5 text-sm">
             <button
               onClick={() => setView('transcript')}
               data-active={view === 'transcript'}
-              className="inline-flex min-h-10 items-center rounded-full px-3 text-black/50 data-[active=true]:bg-ink data-[active=true]:text-white"
+              aria-pressed={view === 'transcript'}
+              className="inline-flex min-h-10 items-center rounded-lg px-3 text-black/50 data-[active=true]:bg-ink data-[active=true]:text-white"
             >
               Transcript
             </button>
             <button
               onClick={() => setView('chat')}
               data-active={view === 'chat'}
-              className="inline-flex min-h-10 items-center rounded-full px-3 text-black/50 data-[active=true]:bg-ink data-[active=true]:text-white"
+              aria-pressed={view === 'chat'}
+              className="inline-flex min-h-10 items-center rounded-lg px-3 text-black/50 data-[active=true]:bg-ink data-[active=true]:text-white"
             >
               Chat
             </button>
@@ -656,19 +608,20 @@ function Meeting({ roomId }: { roomId: string }) {
           <button
             onClick={() => setAskOpen((v) => !v)}
             data-active={askOpen}
-            className="glass glass-interactive flex min-h-10 items-center gap-1.5 rounded-full px-3 text-sm text-black/60 data-[active=true]:text-emerald-800"
+              aria-pressed={askOpen}
+            className="glass glass-interactive flex min-h-10 items-center gap-1.5 rounded-lg px-3 text-sm text-black/60 data-[active=true]:text-[color:var(--signal)]"
             title="Ask the transcript"
           >
             <Sparkles size={15} /> Ask
           </button>
-          <button onClick={onEnd} className="btn-stop" title="End meeting for everyone (Esc)">
+          <button onClick={onEnd} className="btn-stop" title="End meeting for everyone">
             End
           </button>
         </div>
       </header>
 
       {(startError || error || roomError) && (
-        <p className="px-6 text-sm text-red-700">{startError ?? error ?? roomError}</p>
+        <p role="alert" className="border-b border-[color:var(--line)] bg-[color:var(--reader)] px-6 py-3 text-sm text-[color:var(--stop)]">{startError ?? error ?? roomError}</p>
       )}
 
       {showRoster && (
@@ -697,7 +650,7 @@ function Meeting({ roomId }: { roomId: string }) {
           remaining viewport (flex-1) instead of a fixed 100dvh cap, so it fits
           under the header + above the dock without a second page scrollbar. */}
       <div className="min-h-0 flex-1">
-        {view === 'chat' ? (
+        {segments.length === 0 && !reader ? <div className="flex h-full flex-col items-center justify-center px-6 pb-40 pt-10 text-center"><span className="mb-5 inline-flex h-12 w-12 items-center justify-center rounded-xl border border-[color:var(--line)] bg-[color:var(--reader)] text-[color:var(--signal)]"><AudioLines size={23} aria-hidden /></span><h1 className="text-2xl font-semibold tracking-tight">{live ? 'Listening for the conversation' : 'Your shared transcript starts here'}</h1><p role="status" className="mt-3 max-w-md text-sm leading-6 text-[color:var(--muted)]">{live ? 'Speak naturally. Finalized words will appear here with each speaker identified.' : full ? 'All speaker slots are in use. The conversation will appear here as participants transcribe.' : 'Choose an audio source below, then start transcription. Other participants’ words will appear here too.'}</p></div> : view === 'chat' ? (
           <ChatView segments={segments} fill overrides={overrides} scale={textScale.scale} />
         ) : (
           <TranscriptView segments={segments} readerMode={reader} autoScroll fade={!reader} fill overrides={overrides} scale={textScale.scale} scrollSpeed={SCROLL_SPEEDS[speedIdx]} />
@@ -709,7 +662,7 @@ function Meeting({ roomId }: { roomId: string }) {
           wrapped multi-row dock still looks intentional.
           Hidden in Reader mode — reading surface only, no chrome. */}
       <div className={`${reader ? 'hidden' : 'flex'} pointer-events-none fixed inset-x-0 bottom-6 z-40 justify-center sm:right-[var(--ask-w,0px)] px-3`}>
-        <div className="glass pointer-events-auto flex max-w-[calc(100vw-1.5rem)] flex-wrap items-center justify-center gap-2 rounded-3xl px-4 py-2.5 sm:gap-3">
+        <div className="glass pointer-events-auto flex max-w-[calc(100vw-1.5rem)] flex-wrap items-center justify-center gap-2 rounded-xl px-4 py-2.5 sm:gap-3">
           {/* Follow along — repeat the latest line aloud, guided word-by-word.
               Available to everyone (a listener repeating the speaker is the point). */}
           <button
@@ -722,7 +675,7 @@ function Meeting({ roomId }: { roomId: string }) {
           </button>
           {!full && <span className="hidden h-5 w-px bg-black/10 sm:block" aria-hidden />}
           {full ? (
-            <span className="px-3 text-sm text-black/60">Meeting full — you’re listening</span>
+            <span className="px-3 text-sm text-black/60">Speaker slots full — reading only</span>
           ) : (
             <>
               {!live && (
@@ -730,7 +683,7 @@ function Meeting({ roomId }: { roomId: string }) {
                   ariaLabel="Audio source"
                   value={source}
                   onChange={(v) => setSource(v)}
-                  title="System sound is a digital loopback — no echo, no conflict with Zoom/Meet. Microphone is for the physical room only."
+                  title="Choose call or browser audio, or use your microphone for the room."
                   options={[
                     { value: 'system', label: 'System sound (recommended)' },
                     { value: 'mic', label: 'Microphone' },
@@ -740,14 +693,14 @@ function Meeting({ roomId }: { roomId: string }) {
               {live && (
                 <div className="flex items-center gap-2 text-sm text-black/60" title="Mute / unmute (M or Space)">
                   {muted ? <MicOff size={16} /> : <Mic size={16} />}
-                  <span className="hidden sm:inline">{muted ? 'Muted' : 'Mic on'}</span>
-                  <LeverSwitch checked={muted} onChange={setMuted} label="Mute microphone" />
+                  <span className="hidden sm:inline">{muted ? 'Muted' : 'Audio on'}</span>
+                  <LeverSwitch checked={muted} onChange={setMuted} label="Mute captured audio" />
                 </div>
               )}
               <Waveform level={level} active={live && !muted} />
               {!live ? (
                 <button onClick={onStart} disabled={starting} className="btn-signal disabled:opacity-50" title="Start (S)">
-                  {starting ? 'Starting…' : 'Start speaking'}
+                  {starting ? 'Starting…' : 'Start transcription'}
                 </button>
               ) : (
                 <button onClick={onStop} className="btn-stop flex items-center gap-2" title="Stop (S)">

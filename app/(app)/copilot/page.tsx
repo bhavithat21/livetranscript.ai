@@ -3,7 +3,7 @@ import type { Metadata } from 'next'
 import { CopilotWorkspace } from '@/components/workspace/CopilotWorkspace'
 
 export const metadata: Metadata = {
-  title: 'AI Copilot — LiveTranscript',
+  title: 'AI workspace — LiveTranscript',
   description: 'A dedicated workspace for interview questions, code and repository context. Start with a question or optionally add live audio.',
 }
 

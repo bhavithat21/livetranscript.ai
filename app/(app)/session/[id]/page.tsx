@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { ArrowLeft, CalendarDays, Clock3, FileText, ListChecks } from 'lucide-react'
 import { notFound } from 'next/navigation'
 import { getSession } from '../../session-actions'
 import { NoSessionContextError } from '@/lib/db/errors'
@@ -10,6 +11,7 @@ import { transcriptText, type Segment } from '@/lib/transcript/store'
 import { formatDate, formatDuration } from '@/lib/format'
 
 export const dynamic = 'force-dynamic'
+export const metadata = { title: 'Transcript — LiveTranscript' }
 
 type Summary = { summary: string; keyPoints?: string[]; actionItems?: string[] } | null
 
@@ -32,67 +34,41 @@ export default async function SessionDetailPage({ params }: { params: Promise<{ 
   const text = transcriptText(segments)
 
   return (
-    <main className="mx-auto max-w-3xl px-4 pb-24 pt-10 sm:px-6">
-      <div className="flex items-center gap-3">
+    <main className="mx-auto max-w-5xl px-4 pb-20 pt-5 sm:px-6 sm:pt-8">
+      <nav aria-label="Transcript navigation" className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <HomeMenu />
-        <Link href="/dashboard" className="text-sm text-black/50 transition-colors hover:text-ink">
-          ← Library
-        </Link>
-      </div>
+        <Link href="/dashboard" className="btn-ghost gap-2 text-sm"><ArrowLeft size={15} aria-hidden />All transcripts</Link>
+      </nav>
 
-      <div className="glass rise-in mt-4 rounded-2xl p-6">
+      <header className="rounded-xl border border-[color:var(--line)] bg-[color:var(--reader)] p-5 sm:p-7">
+        <p className="mb-3 flex items-center gap-2 text-xs font-medium text-[color:var(--muted)]"><FileText size={14} aria-hidden />Saved transcript</p>
         <SessionActions id={row.id} title={row.title} shared={Boolean(row.shareToken)} transcript={text} />
-        <div className="mt-3 flex items-center gap-3 text-xs text-black/40">
-          <span>{formatDate(row.createdAt)}</span>
-          <span aria-hidden>·</span>
-          <span className="tabular-nums">{formatDuration(row.durationSeconds)}</span>
+        <div className="mt-5 flex flex-wrap items-center gap-4 border-t border-[color:var(--line)] pt-4 text-xs text-[color:var(--muted)]">
+          <span className="inline-flex items-center gap-1.5"><CalendarDays size={14} aria-hidden />{formatDate(row.createdAt)}</span>
+          <span className="inline-flex items-center gap-1.5 tabular-nums"><Clock3 size={14} aria-hidden />{formatDuration(row.durationSeconds)}</span>
         </div>
-      </div>
+      </header>
 
       {summary?.summary && (
-        <section className="reader-surface rise-in mt-4 rounded-2xl p-6" style={{ animationDelay: '80ms' }}>
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-black/40">Summary</h2>
-          {/* Serif standfirst lead — treats the summary as editorial, not a form field. */}
-          <p className="font-[family-name:var(--font-serif)] text-xl leading-relaxed text-ink">
-            {summary.summary}
-          </p>
-          {summary.keyPoints && summary.keyPoints.length > 0 && (
-            <div className="mt-5">
-              <h3 className="mb-1.5 text-sm font-semibold uppercase tracking-wide text-black/40">Key points</h3>
-              <ul className="space-y-1 text-black/80">
-                {summary.keyPoints.map((k, i) => (
-                  <li key={i} className="flex gap-2">
-                    <span className="text-[color:var(--signal)]">•</span>
-                    {k}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-          {summary.actionItems && summary.actionItems.length > 0 && (
-            <div className="mt-5">
-              <h3 className="mb-1.5 text-sm font-semibold uppercase tracking-wide text-black/40">Action items</h3>
-              <ul className="space-y-1.5 text-black/80">
-                {summary.actionItems.map((a, i) => (
-                  <li key={i} className="flex items-start gap-2.5">
-                    <span className="mt-0.5 inline-block h-4 w-4 shrink-0 rounded border border-black/25" aria-hidden />
-                    {a}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+        <section aria-labelledby="session-summary" className="mt-5 rounded-xl border border-[color:var(--line)] bg-[color:var(--reader)] p-5 sm:p-7">
+          <h2 id="session-summary" className="mb-3 flex items-center gap-2 text-base font-semibold"><ListChecks size={18} className="text-[color:var(--signal)]" aria-hidden />Summary</h2>
+          <p className="text-base leading-7 text-ink">{summary.summary}</p>
+          {(Boolean(summary.keyPoints?.length) || Boolean(summary.actionItems?.length)) && <div className="mt-6 grid gap-6 border-t border-[color:var(--line)] pt-5 sm:grid-cols-2">
+            {summary.keyPoints && summary.keyPoints.length > 0 && <div>
+              <h3 className="mb-3 text-sm font-semibold">Key points</h3>
+              <ul className="space-y-2.5 text-sm leading-6 text-[color:var(--muted)]">{summary.keyPoints.map((point, index) => <li key={index} className="flex gap-2.5"><span className="mt-2.5 h-1 w-1 shrink-0 rounded-full bg-[color:var(--signal)]" aria-hidden />{point}</li>)}</ul>
+            </div>}
+            {summary.actionItems && summary.actionItems.length > 0 && <div>
+              <h3 className="mb-3 text-sm font-semibold">Action items</h3>
+              <ul className="space-y-2.5 text-sm leading-6 text-[color:var(--muted)]">{summary.actionItems.map((action, index) => <li key={index} className="flex gap-2.5"><span className="mt-2.5 h-1 w-1 shrink-0 rounded-full bg-[color:var(--signal)]" aria-hidden />{action}</li>)}</ul>
+            </div>}
+          </div>}
         </section>
       )}
 
-      <section className="mt-4">
-        <h2 className="mb-1.5 px-1 text-sm font-semibold uppercase tracking-wide text-black/40">
-          Transcript
-        </h2>
-        {/* Solid warm reading surface (not glass) — max contrast for the payload. */}
-        <div className="reader-surface rise-in rounded-2xl" style={{ animationDelay: '160ms' }}>
-          <TranscriptView segments={segments} readerMode flow />
-        </div>
+      <section aria-labelledby="session-transcript" className="mt-5 overflow-hidden rounded-xl border border-[color:var(--line)] bg-[color:var(--reader)]">
+        <div className="border-b border-[color:var(--line)] px-5 py-4 sm:px-7"><h2 id="session-transcript" className="text-base font-semibold">Full transcript</h2><p className="mt-1 text-xs text-[color:var(--muted)]">The conversation, in order.</p></div>
+        {segments.length ? <TranscriptView segments={segments} readerMode flow /> : <p className="px-5 py-14 text-center text-sm text-[color:var(--muted)]">No transcript text was saved for this session.</p>}
       </section>
     </main>
   )

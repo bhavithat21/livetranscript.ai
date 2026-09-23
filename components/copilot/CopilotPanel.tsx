@@ -67,6 +67,7 @@ export function CopilotPanel({
   onResizeStart,
   variant = 'drawer',
   initialMode = 'general',
+  onModeChange,
 }: {
   getTranscript: () => string
   onClose?: () => void
@@ -76,6 +77,7 @@ export function CopilotPanel({
   onResizeStart?: (e: React.PointerEvent) => void
   variant?: 'drawer' | 'workspace'
   initialMode?: CopilotMode
+  onModeChange?: (mode: CopilotMode) => void
 }) {
   const workspace = variant === 'workspace'
   const responsePreferences = useResponsePreferences()
@@ -99,6 +101,7 @@ export function CopilotPanel({
   const [focusMode, setFocusMode] = useState(false)
   const [showAnswerPreferences, setShowAnswerPreferences] = useState(false)
   const [mobileSetupOpen, setMobileSetupOpen] = useState(false)
+  const [railCollapsed, setRailCollapsed] = useState(false)
   const [preparing, setPreparing] = useState(false)
   const [preparingCaptured, setPreparingCaptured] = useState(false)
   const [preparationError, setPreparationError] = useState<string | null>(null)
@@ -121,6 +124,8 @@ export function CopilotPanel({
     setPrevTestResult(orchestrator.testResult)
     setAutoTestTurn(orchestrator.testResult ? turns.length - 1 : null)
   }
+  const setupButtonRef = useRef<HTMLButtonElement>(null)
+  const setupRailRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const composerRef = useRef<HTMLTextAreaElement>(null)
   const questionRefs = useRef(new Map<number, HTMLDivElement>())
@@ -296,17 +301,35 @@ export function CopilotPanel({
     me.stopListening()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    if (!mobileSetupOpen) return
+    const closeOutside = (event: PointerEvent) => {
+      if (event.target instanceof Node && !setupRailRef.current?.contains(event.target) && !setupButtonRef.current?.contains(event.target)) setMobileSetupOpen(false)
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { setMobileSetupOpen(false); setupButtonRef.current?.focus() }
+    }
+    document.addEventListener('pointerdown', closeOutside)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOutside)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [mobileSetupOpen])
+
+  useEffect(() => { onModeChange?.(mode) }, [mode, onModeChange])
+
   // Follow the newest tokens as the answer streams in.
   useEffect(() => {
     const el = scrollRef.current
-    if (el && followsAnswer.current) el.scrollTop = el.scrollHeight
-  }, [turns])
+    if (el && followsAnswer.current && turns.some((turn) => turn.mode === mode)) el.scrollTop = el.scrollHeight
+  }, [turns, mode])
 
   useEffect(() => {
     const el = composerRef.current
     if (!el) return
     el.style.height = 'auto'
-    el.style.height = `${Math.min(240, Math.max(workspace ? 96 : 64, el.scrollHeight))}px`
+    el.style.height = `${Math.min(240, Math.max(workspace ? 72 : 64, el.scrollHeight))}px`
   }, [input, workspace])
 
   // Only this tab's thread — switching modes shows its own Q&A, not a shared one.
@@ -413,16 +436,17 @@ export function CopilotPanel({
 
   return (
     <aside
-      aria-label={workspace ? 'AI Copilot workspace' : 'Assistant panel'}
-      className={`${workspace ? 'reader-surface copilot-workspace relative flex w-full min-w-0 flex-col rounded-3xl' : 'glass copilot-panel relative flex h-full w-full flex-col overflow-hidden border-l border-black/10 sm:w-[var(--panel-w)] sm:rounded-l-3xl'}${focusMode ? ' lt-stealth' : ''}`}
+      aria-label={workspace ? 'AI workspace' : 'Assistant panel'}
+      className={`${workspace ? 'reader-surface copilot-workspace relative flex w-full min-w-0 flex-col rounded-xl' : 'glass copilot-panel relative flex h-full w-full flex-col overflow-hidden border-l border-[color:var(--line)] sm:w-[var(--panel-w)] sm:rounded-l-3xl'}${focusMode ? ' lt-stealth' : ''}`}
       style={workspace ? undefined : { '--panel-w': `${width}px` } as CSSProperties}
     >
       {!workspace && onResizeStart && <div onPointerDown={onResizeStart} role="separator" aria-orientation="vertical" aria-label="Resize assistant panel" title="Drag to resize"
         className="absolute inset-y-0 left-0 z-10 hidden w-1.5 touch-none bg-black/10 hover:bg-emerald-700/30 sm:block" />}
-      <header className="relative flex flex-wrap items-center gap-2 border-b border-black/10 px-4 py-3">
+      <header className="relative flex flex-wrap items-center gap-2 border-b border-[color:var(--line)] px-4 py-2">
         <Sparkles size={16} aria-hidden className="shrink-0 text-[color:var(--signal)]" />
-        <span className="font-[family-name:var(--font-serif)] text-base font-semibold">{workspace ? 'Questions & answers' : 'Ask'}</span>
+        <span className="text-sm font-semibold">{workspace ? 'Questions & answers' : 'Ask'}</span>
         <div className="ml-auto flex items-center gap-1">
+          {workspace && <button type="button" onClick={() => setRailCollapsed((value) => !value)} aria-expanded={!railCollapsed} aria-controls={`${responseId}-setup`} className="hidden min-h-11 items-center gap-1.5 rounded-lg px-2 text-xs text-[color:var(--muted)] hover:bg-[color:var(--paper)] xl:inline-flex"><SlidersHorizontal size={14} aria-hidden />{railCollapsed ? 'Show setup' : 'Hide setup'}</button>}
           <div data-active={auto} title="Answer captured questions automatically. Listening and screen sharing are controlled separately."
             className="flex min-h-11 items-center gap-1.5 rounded-full px-2 text-xs font-medium text-black/70 data-[active=true]:text-emerald-800">
             Auto <LeverSwitch checked={auto} onChange={setAuto} label="Auto-answer questions" />
@@ -438,82 +462,82 @@ export function CopilotPanel({
             <MoreHorizontal size={18} aria-hidden />
             {(me.listening || screen.sharing) && !moreOpen && <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-emerald-700" aria-hidden />}
           </button>
-          {!workspace && onClose && <button type="button" onClick={onClose} aria-label="Close assistant" className="flex h-11 w-11 items-center justify-center rounded-full text-black/50 hover:bg-black/5"><X size={16} aria-hidden /></button>}
+          {!workspace && onClose && <button type="button" onClick={onClose} aria-label="Close assistant" className="flex h-11 w-11 items-center justify-center rounded-full text-[color:var(--muted)] hover:bg-black/5"><X size={16} aria-hidden /></button>}
         </div>
         {moreOpen && <>
           <button type="button" className="fixed inset-0 z-20 cursor-default" aria-hidden tabIndex={-1} onClick={() => setMoreOpen(false)} />
-          <div className="absolute right-3 top-full z-30 mt-1 w-64 max-w-[calc(100vw-2rem)] rounded-2xl border border-black/10 bg-white p-1 shadow-xl" onKeyDown={(event) => { if (event.key === 'Escape') setMoreOpen(false) }}>
+          <div className="absolute right-3 top-full z-30 mt-1 w-64 max-w-[calc(100vw-2rem)] rounded-2xl border border-[color:var(--line)] bg-white p-1 shadow-xl" onKeyDown={(event) => { if (event.key === 'Escape') setMoreOpen(false) }}>
             <SheetItem active={me.listening} toggle icon={me.listening ? <Mic size={15} /> : <MicOff size={15} />}
               label={me.listening ? 'Stop your voice context' : 'Add your voice as context'} onClick={() => me.listening ? me.stopListening() : me.startListening()} />
             <SheetItem active={screen.sharing} toggle icon={screen.sharing ? <Monitor size={15} /> : <MonitorOff size={15} />}
               label={screen.sharing ? 'Stop sharing screen with AI' : 'Share screen with AI'} onClick={() => screen.sharing ? screen.stop() : screen.start()} />
             {lockMode.available && !lockMode.locked && <SheetItem active={false} icon={<Lock size={15} />} label="Lock (click-through)" onClick={() => { lockMode.enable(); setMoreOpen(false) }} />}
             {turns.length > 0 && <SheetItem active={false} icon={<X size={15} />} label="Clear all chat modes" onClick={() => { clear(); setMoreOpen(false) }} />}
-            {identity.available && <div className="mt-1 border-t border-black/10 px-3 py-2">
-              <label htmlFor={`${composerId}-app-name`} className="text-xs font-medium text-black/60">App name</label>
+            {identity.available && <div className="mt-1 border-t border-[color:var(--line)] px-3 py-2">
+              <label htmlFor={`${composerId}-app-name`} className="text-xs font-medium text-[color:var(--muted)]">App name</label>
               <select id={`${composerId}-app-name`} value={identity.current} onChange={(event) => identity.setIdentity(event.target.value)} className="mt-1 min-h-11 w-full rounded-lg border border-black/15 bg-white px-2 py-2 text-xs text-ink">
                 {identity.presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}
               </select>
-              <p className="mt-1 text-[11px] leading-relaxed text-black/50">Updates the header and window title. Custom name and icon are in Settings.</p>
+              <p className="mt-1 text-[11px] leading-relaxed text-[color:var(--muted)]">Updates the header and window title. Custom name and icon are in Settings.</p>
             </div>}
-            <p className="border-t border-black/10 px-3 py-2 text-[11px] leading-relaxed text-black/55">Focus and appearance settings change how the app looks. They do not guarantee invisibility to recording or monitoring.</p>
+            <p className="border-t border-[color:var(--line)] px-3 py-2 text-[11px] leading-relaxed text-[color:var(--muted)]">Focus and appearance settings change how the app looks. They do not guarantee invisibility to recording or monitoring.</p>
           </div>
         </>}
       </header>
-      {focusMode && <p className="border-b border-black/10 px-4 py-2 text-xs text-black/55">Focus mode reduces motion and changes contrast. It does not hide this window.</p>}
-      {workspace && <button type="button" onClick={() => setMobileSetupOpen((value) => !value)} aria-expanded={mobileSetupOpen} aria-controls={`${responseId}-setup`}
-        className="flex min-h-12 items-center gap-2 border-b border-black/10 px-4 text-left text-sm text-black/70 hover:bg-black/5 lg:hidden">
-        <SlidersHorizontal size={16} aria-hidden /><span>{MODE_PROFILES[mode].label} · {responsePreferences.preferences.format}</span><ChevronDown size={15} aria-hidden className={`ml-auto ${mobileSetupOpen ? 'rotate-180' : ''}`} />
+      {focusMode && <p className="border-b border-[color:var(--line)] px-4 py-2 text-xs text-[color:var(--muted)]">Focus mode reduces motion and changes contrast. It does not hide this window.</p>}
+      {workspace && <button ref={setupButtonRef} type="button" onClick={() => setMobileSetupOpen((value) => !value)} aria-expanded={mobileSetupOpen} aria-controls={`${responseId}-setup`}
+        className="flex min-h-12 items-center gap-2 border-b border-[color:var(--line)] px-4 text-left text-sm text-[color:var(--muted)] hover:bg-[color:var(--paper)] xl:hidden">
+        <SlidersHorizontal size={16} aria-hidden /><span className="font-medium">Setup</span><span className="ml-1 text-xs">{MODE_PROFILES[mode].label} · {responsePreferences.preferences.format}</span><ChevronDown size={15} aria-hidden className={`ml-auto ${mobileSetupOpen ? 'rotate-180' : ''}`} />
       </button>}
 
-      <div className={workspace ? 'copilot-workspace-grid grid min-w-0 lg:grid-cols-[17rem_minmax(0,1fr)]' : 'contents'}>
-        <div id={`${responseId}-setup`} className={workspace ? `copilot-workspace-rail ${mobileSetupOpen ? 'block' : 'hidden'} border-b border-black/10 lg:block lg:border-b-0 lg:border-r` : 'contents'}>
-          {workspace ? <WorkspaceModeNavigation mode={mode} onChange={changeMode} /> : <div aria-label="Interview focus" className="flex gap-1 overflow-x-auto border-b border-black/10 px-3 py-2">
+      <div className={workspace ? `copilot-workspace-grid relative grid min-w-0 ${railCollapsed ? '' : 'xl:grid-cols-[15rem_minmax(0,1fr)]'}` : 'contents'}>
+        <div ref={setupRailRef} id={`${responseId}-setup`} className={workspace ? `copilot-workspace-rail absolute inset-x-0 top-0 z-10 max-h-80 overflow-y-auto shadow-lg ${mobileSetupOpen ? 'block' : 'hidden'} border-b border-[color:var(--line)] bg-[color:var(--reader)] xl:static xl:z-auto xl:max-h-none xl:shadow-none ${railCollapsed ? 'xl:hidden' : 'xl:block xl:border-b-0 xl:border-r'}` : 'contents'}>
+          {workspace ? <WorkspaceModeNavigation mode={mode} onChange={changeMode} /> : <div aria-label="Interview focus" className="flex gap-1 overflow-x-auto border-b border-[color:var(--line)] px-3 py-2">
             {MODE_ORDER.map((item) => <button key={item} type="button" onClick={() => changeMode(item)} aria-pressed={mode === item} data-active={mode === item} title={MODE_PROFILES[item].hint}
-              className="min-h-11 shrink-0 rounded-full px-3 text-xs text-black/55 hover:bg-black/5 data-[active=true]:bg-ink data-[active=true]:text-white">{MODE_PROFILES[item].label}</button>)}
+              className="min-h-11 shrink-0 rounded-full px-3 text-xs text-[color:var(--muted)] hover:bg-black/5 data-[active=true]:bg-ink data-[active=true]:text-white">{MODE_PROFILES[item].label}</button>)}
           </div>}
-          {workspace ? <div className="border-t border-black/10"><ResponsePreferencesControls {...responsePreferences} /></div> : <div className="border-b border-black/10 px-4 py-1">
-            <button type="button" onClick={() => setShowAnswerPreferences((value) => !value)} aria-expanded={showAnswerPreferences} aria-controls={responseId} className="flex min-h-11 w-full items-center gap-2 text-xs text-black/60 hover:text-ink">
+          {workspace ? <div className="border-t border-[color:var(--line)]"><ResponsePreferencesControls {...responsePreferences} /></div> : <div className="border-b border-[color:var(--line)] px-4 py-1">
+            <button type="button" onClick={() => setShowAnswerPreferences((value) => !value)} aria-expanded={showAnswerPreferences} aria-controls={responseId} className="flex min-h-11 w-full items-center gap-2 text-xs text-[color:var(--muted)] hover:text-ink">
               <SlidersHorizontal size={14} aria-hidden />Answer style <span className="ml-auto capitalize">{responsePreferences.preferences.format}</span><ChevronDown size={13} aria-hidden />
             </button>
             {showAnswerPreferences && <div id={responseId}><ResponsePreferencesControls {...responsePreferences} compact /></div>}
           </div>}
-          <div className={workspace ? 'border-t border-black/10 px-4 py-4' : 'panel-section px-4 py-2'}>
-            <button type="button" onClick={() => setShowContextEditor((value) => !value)} aria-expanded={showContextEditor} aria-controls={contextId}
+          <div className={workspace ? 'border-t border-[color:var(--line)] px-4 py-4' : 'panel-section px-4 py-2'}>
+            <button type="button" onClick={() => { setShowContextEditor((value) => !value); setMobileSetupOpen(false) }} aria-expanded={showContextEditor} aria-controls={contextId}
               className="flex min-h-11 w-full items-center gap-2 rounded-xl text-left text-sm font-medium text-ink hover:text-[color:var(--signal)]">
               <FileText size={16} aria-hidden />{showContextEditor ? 'Close context' : 'Your context'}<ChevronDown size={14} aria-hidden className={`ml-auto ${showContextEditor ? 'rotate-180' : ''}`} />
             </button>
-            <p className="text-xs leading-relaxed text-black/55">{contextSummary}</p>
-            {context.storyCount > 0 && <div className="mt-2 flex items-center gap-2 text-xs text-black/55"><span>{context.storyCount} stories</span><button type="button" onClick={context.resetSpent} className="min-h-11 px-2 text-emerald-800 hover:underline">New round</button></div>}
+            <p className="text-xs leading-relaxed text-[color:var(--muted)]">{contextSummary}</p>
+            {context.storyCount > 0 && <div className="mt-2 flex items-center gap-2 text-xs text-[color:var(--muted)]"><span>{context.storyCount} stories</span><button type="button" onClick={context.resetSpent} className="min-h-11 px-2 text-emerald-800 hover:underline">New round</button></div>}
           </div>
-          {workspace && questions.length > 0 && <section aria-label="Recent questions" className="border-t border-black/10 px-4 py-4">
-            <h2 className="text-xs font-semibold text-ink">Recent questions <span className="font-normal text-black/50">({questions.length})</span></h2>
+          {workspace && questions.length > 0 && <section aria-label="Recent questions" className="border-t border-[color:var(--line)] px-4 py-4">
+            <h2 className="text-xs font-semibold text-ink">Recent questions <span className="font-normal text-[color:var(--muted)]">({questions.length})</span></h2>
             <ol className="mt-2 space-y-1">{questions.slice(-8).map(({ t, i }) => <li key={i}><button type="button" onClick={() => {
               setView('chat'); requestAnimationFrame(() => questionRefs.current.get(i)?.scrollIntoView({ block: 'center' }))
-            }} className="min-h-11 w-full rounded-lg px-2 py-2 text-left text-xs leading-relaxed text-black/60 hover:bg-black/5">{t.content.length > 110 ? `${t.content.slice(0, 110)}…` : t.content}</button></li>)}</ol>
-            {questions.length > 8 && <p className="mt-2 text-[11px] text-black/50">Latest 8 shown. Earlier questions remain in the conversation.</p>}
+            }} className="min-h-11 w-full rounded-lg px-2 py-2 text-left text-xs leading-relaxed text-[color:var(--muted)] hover:bg-black/5">{t.content.length > 110 ? `${t.content.slice(0, 110)}…` : t.content}</button></li>)}</ol>
+            {questions.length > 8 && <p className="mt-2 text-[11px] text-[color:var(--muted)]">Latest 8 shown. Earlier questions remain in the conversation.</p>}
           </section>}
         </div>
 
         <div className={workspace ? 'copilot-workspace-main flex min-w-0 flex-col' : 'contents'}>
-          {mode !== 'repoInterview' && <div className="flex flex-wrap items-center gap-1 border-b border-black/10 px-4 py-2 text-xs">
-            <button type="button" onClick={() => setView('chat')} aria-pressed={view === 'chat'} data-active={view === 'chat'} className="min-h-11 rounded-full px-3 text-black/60 hover:bg-black/5 data-[active=true]:bg-ink data-[active=true]:text-white">{workspace ? 'Conversation' : 'Chat'}</button>
-            <button type="button" onClick={() => setView('answers')} aria-pressed={view === 'answers'} data-active={view === 'answers'} className="min-h-11 rounded-full px-3 text-black/60 hover:bg-black/5 data-[active=true]:bg-ink data-[active=true]:text-white">{workspace ? 'Captured questions' : 'Answers'}{feed.count > 0 ? ` (${feed.count})` : ''}</button>
+          {mode !== 'repoInterview' && <div className="flex flex-wrap items-center gap-1 border-b border-[color:var(--line)] px-4 py-2 text-xs">
+            <button type="button" onClick={() => setView('chat')} aria-pressed={view === 'chat'} data-active={view === 'chat'} className="min-h-11 rounded-lg px-3 text-[color:var(--muted)] hover:bg-[color:var(--paper)] data-[active=true]:bg-[color:var(--accent-soft)] data-[active=true]:font-medium data-[active=true]:text-[color:var(--signal)]">{workspace ? 'Conversation' : 'Chat'}</button>
+            <button type="button" onClick={() => setView('answers')} aria-pressed={view === 'answers'} data-active={view === 'answers'} className="min-h-11 rounded-lg px-3 text-[color:var(--muted)] hover:bg-[color:var(--paper)] data-[active=true]:bg-[color:var(--accent-soft)] data-[active=true]:font-medium data-[active=true]:text-[color:var(--signal)]">{workspace ? 'Captured questions' : 'Answers'}{feed.count > 0 ? ` (${feed.count})` : ''}</button>
             {workspace && usesScreen(mode) && <button type="button" onClick={() => screen.sharing ? screen.stop() : screen.start()} className="ml-auto flex min-h-11 items-center gap-1.5 rounded-full px-3 text-emerald-800 hover:bg-emerald-700/10"><Monitor size={14} aria-hidden />{screen.sharing ? 'Stop sharing' : 'Share screen'}</button>}
           </div>}
-          {showContextEditor && <section id={contextId} aria-label="Your context" className={`border-b border-black/10 px-4 py-4 ${workspace ? 'sm:px-6' : 'max-h-[45%] shrink-0 overflow-y-auto'}`}>
+          {showContextEditor && <section id={contextId} aria-label="Your context" className={`border-b border-[color:var(--line)] px-4 py-4 ${workspace ? 'sm:px-6' : 'max-h-[45%] shrink-0 overflow-y-auto'}`}>
             <div className="mx-auto max-w-3xl">
-              <div className="mb-3 flex items-center gap-2"><h2 className="font-[family-name:var(--font-serif)] text-lg">Your context</h2><button type="button" onClick={() => setShowContextEditor(false)} aria-label="Close context editor" className="ml-auto flex h-11 w-11 items-center justify-center rounded-full text-black/50 hover:bg-black/5"><X size={16} aria-hidden /></button></div>
-              <p className="mb-4 text-xs leading-relaxed text-black/55">Background and documents are saved on this device. Relevant context is sent to the AI when you ask a question.</p>
+              <div className="mb-3 flex items-center gap-2"><h2 className="font-semibold text-lg">Your context</h2><button type="button" onClick={() => setShowContextEditor(false)} aria-label="Close context editor" className="ml-auto flex h-11 w-11 items-center justify-center rounded-full text-[color:var(--muted)] hover:bg-black/5"><X size={16} aria-hidden /></button></div>
+              <p className="mb-4 text-xs leading-relaxed text-[color:var(--muted)]">Background and documents are saved on this device. Relevant context is sent to the AI when you ask a question.</p>
               <ContextEditor key={mode} context={context} profile={profile} />
-              {(context.docs.length > 0 || context.instructions) && <button type="button" onClick={context.clear} className="mt-4 min-h-11 text-xs text-black/55 hover:text-[color:var(--stop)]">Clear {MODE_PROFILES[mode].label.toLowerCase()} documents and instructions</button>}
+              {(context.docs.length > 0 || context.instructions) && <button type="button" onClick={context.clear} className="mt-4 min-h-11 text-xs text-[color:var(--muted)] hover:text-[color:var(--stop)]">Clear {MODE_PROFILES[mode].label.toLowerCase()} documents and instructions</button>}
             </div>
           </section>}
           {mode === 'repoInterview' && <div className={workspace ? 'shrink-0' : 'max-h-[50%] shrink-0 overflow-y-auto'}>
             <ScreenRepositoryControls repo={screenRepo} sharing={screen.sharing} startSharing={screen.start} question={repoTaskQuestion}
               onAnalyze={(task) => void answerRepoQuestion(repoTaskQuestion, repoTaskTarget.questionId, task)} />
             <RepoInterviewPanel repo={repo} answering={!!screenRepo.analysis?.running} onSelect={screenRepo.showQuestion} onAnswer={(question, id) => void answerRepoQuestion(question, id)} />
-            {repoRequestError && <p role="alert" className="border-b border-black/10 px-4 py-2 text-xs text-[color:var(--stop)]">{repoRequestError}</p>}
+            {repoRequestError && <p role="alert" className="border-b border-[color:var(--line)] px-4 py-2 text-xs text-[color:var(--stop)]">{repoRequestError}</p>}
           </div>}
           {screen.sharing && <div role="status" className="flex flex-wrap items-center gap-2 border-b border-emerald-700/15 bg-emerald-700/5 px-4 py-2 text-xs text-emerald-800">
             <Monitor size={14} aria-hidden /><span className="flex-1">{mode === 'repoInterview' ? (screenRepo.watching ? 'IDE capture active. Changed views sent every 8 seconds.' : 'IDE shared. Use Capture code to read a view.') : auto && mode === 'coding' ? 'Screen shared. Changed coding problems are analyzed automatically.' : 'Screen shared with AI. Captured when you ask in Coding or System design.'}</span>
@@ -527,13 +551,13 @@ export function CopilotPanel({
           {mode === 'repoInterview' ? <RepoAnalysisView repo={screenRepo} onRetry={(question, task, questionId) => void answerRepoQuestion(question, questionId, task)} /> : view === 'answers' ?
             <AnswersView feed={feed} auto={auto} review={review} onReview={runReview} onAnswerLatest={answerLatest} /> :
             <div ref={scrollRef} onScroll={(event) => { const el = event.currentTarget; followsAnswer.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80 }}
-              className={workspace ? 'copilot-workspace-conversation min-h-80 flex-1 px-4 py-4 sm:px-7' : 'min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4'}>
+              className={workspace ? 'copilot-workspace-conversation min-h-64 flex-1 px-4 py-3 sm:px-6' : 'min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4'}>
               <div className={workspace ? 'mx-auto max-w-3xl space-y-6' : 'space-y-4'}>
                 {visibleTurns.length === 0 && !error && (workspace ? <WorkspaceEmptyState mode={mode} onChoose={choosePrompt} onAddContext={() => setShowContextEditor(true)} /> : <div className="pt-6 text-center">
-                  <p className="font-[family-name:var(--font-serif)] text-lg text-black/50">Ask a question, or use the live transcript.</p>
+                  <p className="font-semibold text-lg text-[color:var(--muted)]">Ask a question, or use the live transcript.</p>
                   <div className="mt-4 flex flex-col gap-2">{QUICK_ACTIONS.map((action) => <button key={action} type="button" onClick={() => choosePrompt(action)} className="glass glass-interactive min-h-11 rounded-full px-3 py-2 text-sm text-black/70 hover:text-ink">{action}</button>)}</div>
                 </div>)}
-                {visibleTurns.map(({ t, i }) => t.role === 'user' ? <div key={i} ref={(node) => { if (node) questionRefs.current.set(i, node); else questionRefs.current.delete(i) }} className={workspace ? 'border-b border-black/10 pb-4 pt-3' : 'flex justify-end'}>
+                {visibleTurns.map(({ t, i }) => t.role === 'user' ? <div key={i} ref={(node) => { if (node) questionRefs.current.set(i, node); else questionRefs.current.delete(i) }} className={workspace ? 'border-b border-[color:var(--line)] pb-4 pt-3' : 'flex justify-end'}>
                   {workspace && <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-[color:var(--signal)]">Your question</p>}
                   <div className={workspace ? 'whitespace-pre-wrap break-words text-base font-medium leading-relaxed text-ink' : 'max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-tr-md bg-ink px-3.5 py-2 text-sm text-white'}>{t.content}</div>
                 </div> : <AssistantTurn key={i} content={t.content} streaming={streaming && i === turns.length - 1} autoRun={mode === 'coding' && i === turns.length - 1}
@@ -542,23 +566,23 @@ export function CopilotPanel({
               </div>
             </div>}
 
-          <form noValidate onSubmit={(event) => { event.preventDefault(); void submit(input) }} className={`border-t border-black/10 ${workspace ? 'px-4 py-4 sm:px-7' : 'p-3'}`}>
+          <form noValidate onSubmit={(event) => { event.preventDefault(); void submit(input) }} className={`border-t border-[color:var(--line)] ${workspace ? 'px-4 py-3 sm:px-6' : 'p-3'}`}>
             <div className={workspace ? 'mx-auto max-w-3xl' : ''}>
-              {questionNotice && <p role="status" className="mb-2 text-xs leading-relaxed text-black/60">{questionNotice}</p>}
+              {questionNotice && <p role="status" className="mb-2 text-xs leading-relaxed text-[color:var(--muted)]">{questionNotice}</p>}
               {preparationError && <p id={`${composerId}-error`} role="alert" className="mb-2 text-xs text-[color:var(--stop)]">{preparationError}</p>}
               <label htmlFor={composerId} className="mb-2 block text-xs font-semibold text-ink">{mode === 'repoInterview' ? 'Repository question' : 'Your question'}</label>
-              <div className="rounded-2xl border border-black/15 bg-white/70 p-2 focus-within:border-emerald-700/50">
-                <textarea ref={composerRef} id={composerId} value={input} onChange={(event) => setInput(event.target.value)} rows={workspace ? 4 : 2}
+              <div className="rounded-xl border border-[color:var(--line-strong)] bg-[color:var(--reader)] p-2 focus-within:border-[color:var(--signal)] focus-within:ring-1 focus-within:ring-[color:var(--signal)]/15">
+                <textarea ref={composerRef} id={composerId} value={input} onChange={(event) => setInput(event.target.value)} rows={workspace ? 3 : 2}
                   aria-describedby={`${composerId}-help${preparationError ? ` ${composerId}-error` : ''}`} aria-invalid={!!preparationError}
                   onKeyDown={(event) => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.nativeEvent.isComposing) { event.preventDefault(); void submit(input) } }}
                   placeholder={workspace && mode === 'general' ? 'Type a question, paste code, or describe what you want to understand…' : `${MODE_PROFILES[mode].hint}…`}
                   className="block min-h-16 w-full resize-none border-0 bg-transparent px-2 py-1.5 text-sm leading-relaxed text-ink outline-none" />
                 <div className="flex flex-wrap items-center gap-2 px-1 pt-1">
-                  <p id={`${composerId}-help`} className="min-w-0 flex-1 text-[11px] leading-relaxed text-black/50">{preparing || preparingCaptured ? 'Preparing context…' : streaming ? 'Generating answer…' : 'Enter for a new line · Ctrl / ⌘ + Enter to send'}</p>
+                  <p id={`${composerId}-help`} className="min-w-0 flex-1 text-[11px] leading-relaxed text-[color:var(--muted)]">{preparing || preparingCaptured ? 'Preparing context…' : streaming ? 'Generating answer…' : 'Enter for a new line · Ctrl / ⌘ + Enter to send'}</p>
                   {busy ? <button type="button" onClick={stopAnswer} className="btn-ghost flex min-h-11 items-center gap-2 px-3 text-xs"><Square size={13} aria-hidden />Stop generating</button> : <button type="submit" disabled={!input.trim()} aria-label="Send question" className="btn-signal flex min-h-11 min-w-11 items-center justify-center gap-2 px-4 text-sm disabled:opacity-40"><Send size={15} aria-hidden /><span className={workspace ? '' : 'sr-only'}>Ask AI</span></button>}
                 </div>
               </div>
-              {workspace && <p className="mt-2 text-[11px] leading-relaxed text-black/50">Answers use your question and any context you provide. Check suggestions against the original code and your own experience.</p>}
+              {workspace && <p className="mt-2 text-[11px] leading-relaxed text-[color:var(--muted)]">Answers use your question and any context you provide. Check suggestions against the original code and your own experience.</p>}
             </div>
           </form>
         </div>
@@ -635,7 +659,7 @@ function ContextEditor({
           placeholder="Paste your resume — the AI grounds behavioral stories, coding language, and design domain in your real background…"
           className="mt-1 w-full resize-none rounded-lg border border-black/15 bg-white/80 p-2 text-sm outline-none focus:border-emerald-700"
         />
-        <label htmlFor={`${fieldId}-jd`} className="mt-3 block text-[11px] font-medium uppercase tracking-wide text-black/50">Job description</label>
+        <label htmlFor={`${fieldId}-jd`} className="mt-3 block text-[11px] font-medium uppercase tracking-wide text-[color:var(--muted)]">Job description</label>
         <textarea
           id={`${fieldId}-jd`}
           value={profile.jd}
@@ -680,7 +704,7 @@ function ContextEditor({
         <button
           onClick={() => setDocsOpen((v) => !v)}
           aria-expanded={docsOpen}
-          className="flex w-full items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-black/40 hover:text-black/60"
+          className="flex w-full items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-black/40 hover:text-[color:var(--muted)]"
         >
           <ChevronDown
             size={12}
@@ -729,7 +753,7 @@ function ContextEditor({
           <span className="text-[11px] text-black/40">.txt / .md / .html story book · stored on this device</span>
         </div>
         <div className="mt-2">
-          <label htmlFor={`${fieldId}-paste`} className="mb-1 block text-xs font-medium text-black/60">Paste a document</label>
+          <label htmlFor={`${fieldId}-paste`} className="mb-1 block text-xs font-medium text-[color:var(--muted)]">Paste a document</label>
           <textarea
             id={`${fieldId}-paste`}
             value={pasteText}
@@ -878,7 +902,7 @@ function AnswersView({
   if (feed.count === 0) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-4 overflow-y-auto px-4 py-8 text-center">
-        <p className="font-[family-name:var(--font-serif)] text-lg text-black/40">
+        <p className="font-semibold text-lg text-black/40">
           {auto ? 'Auto is ready. Questions from your transcript will appear here when you start listening.' : 'Captured questions appear here. Start listening, then answer a question manually or turn on Auto.'}
         </p>
         {/* Manual Answer: answer the latest heard question on demand, without waiting
@@ -891,7 +915,7 @@ function AnswersView({
   }
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
-      <div className="flex flex-wrap items-center gap-2 border-b border-black/[0.07] px-4 py-2.5 text-xs text-black/50">
+      <div className="flex flex-wrap items-center gap-2 border-b border-black/[0.07] px-4 py-2.5 text-xs text-[color:var(--muted)]">
         <button onClick={feed.prev} disabled={feed.cursor === 0} className="rounded-full p-1 hover:bg-black/5 disabled:opacity-30" aria-label="Previous">
           <ChevronLeft size={16} />
         </button>
@@ -971,7 +995,7 @@ function AnswersView({
           )
         })()}
         {e?.retrying && (
-          <p className="flex items-center gap-1.5 text-xs text-black/50">
+          <p className="flex items-center gap-1.5 text-xs text-[color:var(--muted)]">
             <span className="live-dot" aria-hidden /> Retrying…
           </p>
         )}
@@ -1113,7 +1137,7 @@ function StructuredAnswer({ content, streaming }: { content: string; streaming: 
       {reserve && (
         // Tier 3 — reserve. Recessed + collapsed; the safety net that must never be
         // read aloud by reflex. Opens on demand when a follow-up actually lands.
-        <details className="rounded-lg border border-black/10 bg-black/[0.02]">
+        <details className="rounded-lg border border-[color:var(--line)] bg-black/[0.02]">
           <summary className="cursor-pointer px-3 py-1.5 text-[11px] font-medium uppercase tracking-wide text-black/45">
             Reserve — don&rsquo;t say aloud (follow-ups, glossary, metrics)
           </summary>
@@ -1207,11 +1231,11 @@ function MermaidDiagram({ code }: { code: string }) {
   }, [code])
 
   if (error) {
-    return <pre className="my-2 rounded-lg border border-black/10 bg-black/[0.03] p-3 text-xs text-black/50">{code}</pre>
+    return <pre className="my-2 rounded-lg border border-[color:var(--line)] bg-black/[0.03] p-3 text-xs text-[color:var(--muted)]">{code}</pre>
   }
 
   return (
-    <div ref={containerRef} className="my-2 overflow-x-auto rounded-lg border border-black/10 bg-white p-3" />
+    <div ref={containerRef} className="my-2 overflow-x-auto rounded-lg border border-[color:var(--line)] bg-white p-3" />
   )
 }
 
@@ -1244,11 +1268,11 @@ function ExtractedProblemBar({
 }) {
   const [expanded, setExpanded] = useState(false)
   return (
-    <div className="border-b border-black/10 bg-black/[0.02] px-4 py-2 text-xs">
+    <div className="border-b border-[color:var(--line)] bg-black/[0.02] px-4 py-2 text-xs">
       <div className="flex items-center gap-2">
         <span className="font-medium text-ink">Problem detected</span>
         {problem.language && (
-          <span className="rounded bg-black/5 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-black/50">
+          <span className="rounded bg-black/5 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[color:var(--muted)]">
             {problem.language}
           </span>
         )}
@@ -1291,7 +1315,7 @@ function ExtractedProblemBar({
 function TestResultsPanel({ result }: { result: TestRunResult }) {
   const allPassed = result.failed === 0
   return (
-    <div className="mt-1.5 w-full rounded-lg border border-black/10 bg-black/[0.02] text-xs">
+    <div className="mt-1.5 w-full rounded-lg border border-[color:var(--line)] bg-black/[0.02] text-xs">
       {/* Summary bar */}
       <div
         className={`flex items-center gap-2 rounded-t-lg px-3 py-2 font-sans font-medium ${

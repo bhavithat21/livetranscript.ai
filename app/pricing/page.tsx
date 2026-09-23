@@ -1,140 +1,63 @@
 import Link from 'next/link'
+import { ArrowRight, Check, Info } from 'lucide-react'
 import { SiteFooter } from '@/components/site/SiteFooter'
+import styles from '@/components/site/Site.module.css'
 
 export const metadata = {
   title: 'Pricing — LiveTranscript',
-  description: 'Simple credit-based pricing. Pay for what you use, or subscribe.',
+  description: 'Transcription plans and credit packs. Paid checkout is coming soon.',
 }
 
-// 1 credit = 1 minute of transcription. Meetings use minutes × speakers.
+// Preserve published transcription prices. Payment actions remain unavailable
+// until the billing backend and checkout are enabled.
 const PACKS = [
-  { name: 'Starter', price: '$10', credits: '500 min', per: '$0.020 / min', blurb: 'A few hours of transcription. Credits never expire.' },
-  { name: 'Value', price: '$20', credits: '1,150 min', per: '$0.017 / min', blurb: 'Best for regular use — 19 hours, better rate.', featured: true },
-  { name: 'Pro pack', price: '$45', credits: '3,000 min', per: '$0.015 / min', blurb: '50 hours at our lowest per-minute rate.' },
+  { name: 'Starter', price: '$10', credits: '500 minutes', per: '$0.020 / minute', blurb: 'For occasional sessions and focused transcription.' },
+  { name: 'Value', price: '$20', credits: '1,150 minutes', per: '$0.017 / minute', blurb: 'More room for regular conversations and interview prep.' },
+  { name: 'Pro pack', price: '$45', credits: '3,000 minutes', per: '$0.015 / minute', blurb: '50 hours for a more active transcription workflow.' },
 ]
 
 export default function PricingPage() {
   return (
-    <main className="min-h-dvh bg-[#faf9f7] text-[#16151a]">
-      <section className="mx-auto max-w-5xl px-5 sm:px-8 pb-8 pt-24">
-        <p className="rise-in text-sm font-medium uppercase tracking-widest text-[color:var(--signal)]">
-          Pricing
-        </p>
-        <h1
-          className="rise-in mt-3 font-[family-name:var(--font-serif)] leading-[1.05] tracking-[-0.02em]"
-          style={{ animationDelay: '80ms', fontSize: 'var(--text-hero)' }}
-        >
-          Pay for what you speak.
-        </h1>
-        <p className="rise-in mt-5 max-w-2xl text-lg leading-relaxed text-black/65" style={{ animationDelay: '160ms' }}>
-          One credit is one minute. Buy credits that never expire, or subscribe for the best rate.
-          Meetings use one credit per speaker-minute. No surprises.
-        </p>
-      </section>
-
-      {/* Free + Membership */}
-      <section className="mx-auto grid max-w-5xl gap-4 px-5 sm:grid-cols-2 sm:px-8">
-        <Tier
-          name="Free"
-          price="$0"
-          cadence="forever"
-          highlight="30 minutes / month"
-          features={['30 min of transcription each month', 'Speaker labels + Reader Mode', 'Join meetings', 'Save & share transcripts']}
-          cta={<Link href="/record" className="btn-ghost block w-full py-2.5 text-center">Start free</Link>}
-        />
-        <Tier
-          name="Member"
-          price="$12"
-          cadence="/ month"
-          featured
-          highlight="1,200 minutes / month"
-          features={['1,200 min every month (20 hrs)', 'AI accuracy correction', 'Host meetings, all exports', 'Best per-minute rate']}
-          cta={<ComingSoon />}
-        />
-      </section>
-
-      {/* Credit packs */}
-      <section className="mx-auto max-w-5xl px-5 sm:px-8 py-14">
-        <h2 className="font-[family-name:var(--font-serif)] text-2xl tracking-[-0.01em]">Or buy credits</h2>
-        <p className="mt-1 text-black/55">Pay once, use anytime. Credits never expire.</p>
-        <div className="mt-6 grid gap-4 sm:grid-cols-3">
-          {PACKS.map((p) => (
-            <div
-              key={p.name}
-              className={`glass flex flex-col rounded-2xl p-6 ${p.featured ? 'ring-1 ring-emerald-700/30' : ''}`}
-            >
-              <div className="flex items-baseline justify-between">
-                <h3 className="font-[family-name:var(--font-serif)] text-xl">{p.name}</h3>
-                <span className="font-[family-name:var(--font-serif)] text-2xl">{p.price}</span>
-              </div>
-              <div className="mt-1 text-sm text-black/50">{p.credits} · {p.per}</div>
-              <p className="mt-3 flex-1 text-sm leading-relaxed text-black/60">{p.blurb}</p>
-              <div className="mt-5">
-                <ComingSoon />
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
+    <main className={styles.page}>
+      <div className={styles.container}>
+        <header className={styles.shortHero}>
+          <span className={styles.eyebrow}>Transcription pricing</span>
+          <h1>Start with a conversation.<br />Choose more when you need it.</h1>
+          <p>One credit covers one minute of transcription. Meetings use one credit per speaker-minute. Explore the free plan and upcoming paid options.</p>
+        </header>
+        <div className={styles.notice}><Info size={17} aria-hidden="true" /><p><strong>Paid checkout is coming soon.</strong> Member subscriptions and credit packs are listed for reference and cannot be purchased here yet. These are transcription prices, not an all-inclusive AI plan.</p></div>
+        <section className={styles.tiers} aria-label="Transcription plans">
+          <Tier name="Free" price="$0" cadence="free plan" highlight="30 minutes / month" features={['30 min of transcription each month', 'Speaker labels and Reader Mode', 'Join meetings', 'Save and share transcripts']}><Link href="/record" className={styles.primary}>Start transcribing<ArrowRight size={16} aria-hidden="true" /></Link></Tier>
+          <Tier name="Member" price="$12" cadence="/ month" highlight="1,200 minutes / month" featured features={['1,200 min every month (20 hours)', 'AI accuracy correction', 'Host meetings and use all exports', 'Subscription transcription rate']}><span className={styles.unavailable}>Subscription coming soon</span></Tier>
+        </section>
+        <section className={styles.section} aria-labelledby="packs-title">
+          <div className={styles.sectionHeader}><div><span className={styles.eyebrow}>One-time credit packs</span><h2 id="packs-title">A little more flexibility.</h2></div><p>The published packs below are coming soon. Purchased credits do not expire.</p></div>
+          <div className={styles.packs}>{PACKS.map((pack) => <article key={pack.name} className={styles.pack}>
+            <h3>{pack.name}</h3><div className={styles.packPrice}><strong>{pack.price}</strong><span>{pack.credits}</span></div><small>{pack.per}</small><p>{pack.blurb}</p><span className={styles.unavailable}>Credit pack coming soon</span>
+          </article>)}</div>
+        </section>
+        <section className={`${styles.section} ${styles.faqLayout}`} aria-labelledby="pricing-questions-title">
+          <div><span className={styles.eyebrow}>How credits work</span><h2 id="pricing-questions-title" className={`${styles.sectionTitle} mt-3`}>Clear before you start.</h2></div>
+          <div>
+            <details className={styles.faq}><summary>How are meeting minutes counted?</summary><p>Meetings use speaker-minutes. For example, two participants connected for ten minutes use twenty minutes of transcription credit.</p></details>
+            <details className={styles.faq}><summary>Can I buy a plan now?</summary><p>Paid subscriptions and credit packs are not available for purchase yet. There is no checkout or payment collection on this page.</p></details>
+            <details className={styles.faq}><summary>Are AI features included in these prices?</summary><p>These published prices describe transcription. They do not establish an AI usage allowance or promise unlimited AI requests. AI feature availability depends on the configured service and account access.</p></details>
+          </div>
+        </section>
+      </div>
       <SiteFooter />
     </main>
   )
 }
 
-function Tier({
-  name,
-  price,
-  cadence,
-  highlight,
-  features,
-  cta,
-  featured = false,
-}: {
-  name: string
-  price: string
-  cadence: string
-  highlight: string
-  features: string[]
-  cta: React.ReactNode
-  featured?: boolean
+function Tier({ name, price, cadence, highlight, features, featured = false, children }: {
+  name: string; price: string; cadence: string; highlight: string; features: string[]; featured?: boolean; children: React.ReactNode
 }) {
-  return (
-    <div className={`glass flex flex-col rounded-3xl p-7 ${featured ? 'ring-1 ring-emerald-700/30' : ''}`}>
-      <div className="flex items-center justify-between">
-        <h2 className="font-[family-name:var(--font-serif)] text-2xl">{name}</h2>
-        {featured && (
-          <span className="rounded-full bg-emerald-700/10 px-2.5 py-0.5 text-xs font-medium text-emerald-700">
-            Best value
-          </span>
-        )}
-      </div>
-      <div className="mt-3 flex items-baseline gap-1.5">
-        <span className="font-[family-name:var(--font-serif)] text-4xl tracking-[-0.01em]">{price}</span>
-        <span className="text-black/45">{cadence}</span>
-      </div>
-      <div className="mt-1 text-sm font-medium text-[color:var(--signal)]">{highlight}</div>
-      <ul className="mt-5 flex-1 space-y-2 text-sm text-black/70">
-        {features.map((f) => (
-          <li key={f} className="flex gap-2">
-            <span className="text-[color:var(--signal)]">✓</span>
-            {f}
-          </li>
-        ))}
-      </ul>
-      <div className="mt-6">{cta}</div>
-    </div>
-  )
-}
-
-// Payments open once the business + Stripe account are live.
-function ComingSoon() {
-  return (
-    <button
-      disabled
-      className="w-full cursor-not-allowed rounded-full border border-black/15 bg-black/5 py-2.5 text-center text-sm font-medium text-black/45"
-    >
-      Coming soon
-    </button>
-  )
+  return <article className={styles.tier} data-featured={featured}>
+    <div className={styles.tierName}><h2>{name}</h2>{featured && <span className={styles.badge}>Coming soon</span>}</div>
+    <div className={styles.tierPrice}><strong>{price}</strong><span>{cadence}</span></div>
+    <div className={styles.tierHighlight}>{highlight}</div>
+    <ul>{features.map((feature) => <li key={feature}><Check size={15} aria-hidden="true" />{feature}</li>)}</ul>
+    {children}
+  </article>
 }

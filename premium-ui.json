@@ -1,7 +1,7 @@
 {
   "profile": "product-admin",
   "canonicalMap": "UX-CONTRACT.md",
-  "scope": "Interview, Mock Lab, Feedback, practice, standalone copilot, settings and approved collaboration UI.",
+  "scope": "Whole-site product UI rebuild, shared navigation, interview, AI workspace, practice, settings, approved collaboration and saved transcripts.",
   "sourceRoots": [
     "components/remote",
     "lib/appIdentity",
@@ -13,7 +13,10 @@
     "components/interview",
     "components/practice",
     "app/(app)/practice",
-    "components/settings"
+    "components/settings",
+    "components/nav",
+    "components/session",
+    "app/(app)/dashboard"
   ],
   "requiredCapabilities": [
     "Form",

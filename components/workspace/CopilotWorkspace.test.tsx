@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
@@ -10,16 +10,17 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('@/lib/copilot/useCopilotCapture', () => ({ useCopilotCapture: () => mocks.capture }))
-vi.mock('@/components/nav/HomeMenu', () => ({ HomeMenu: () => <span>Home</span> }))
+vi.mock('@/components/nav/Wordmark', () => ({ Wordmark: () => <span>LiveTranscript</span> }))
 vi.mock('@/components/ui/ThemeToggle', () => ({ ThemeToggle: () => <span>Theme</span> }))
 vi.mock('@/components/copilot/CopilotPanel', () => ({
-  CopilotPanel: ({ getTranscript, variant }: { getTranscript: () => string; variant: string }) => <div aria-label="AI panel" data-variant={variant}>{getTranscript()}</div>,
+  CopilotPanel: ({ getTranscript, variant, onModeChange }: { getTranscript: () => string; variant: string; onModeChange: (mode: 'general' | 'repoInterview') => void }) => <div aria-label="AI panel" data-variant={variant}>{getTranscript()}<button type="button" onClick={() => onModeChange('general')}>General focus</button><button type="button" onClick={() => onModeChange('repoInterview')}>Repository focus</button></div>,
 }))
 
 import { CopilotWorkspace } from './CopilotWorkspace'
 
 beforeEach(() => {
   vi.clearAllMocks()
+  window.history.replaceState(null, '', '/copilot')
   mocks.capture.status = 'idle'
   mocks.capture.transcript = ''
   mocks.capture.error = null
@@ -32,12 +33,30 @@ describe('standalone AI workspace', () => {
     render(<CopilotWorkspace />)
     expect(screen.getByLabelText('AI panel').getAttribute('data-variant')).toBe('workspace')
     expect(screen.getByText('Type a question to begin. No meeting needed.')).toBeTruthy()
-    expect(screen.getByRole('link', { name: 'AI Copilot' }).getAttribute('aria-current')).toBe('page')
+    expect(screen.getByRole('heading', { name: 'AI workspace' })).toBeTruthy()
     expect(mocks.capture.start).not.toHaveBeenCalled()
     fireEvent.change(screen.getByLabelText('Audio source'), { target: { value: 'system' } })
     expect(mocks.capture.start).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: 'Start listening' }))
     expect(mocks.capture.start).toHaveBeenCalledExactlyOnceWith('system')
+  })
+
+  it('keeps the header, navigation and shareable URL aligned without restarting capture', () => {
+    window.history.replaceState(null, '', '/copilot?mode=repoInterview')
+    render(<CopilotWorkspace initialMode="repoInterview" />)
+    const navigation = within(screen.getByRole('navigation', { name: 'Workspace' }))
+    expect(screen.getByRole('heading', { name: 'Repository' })).toBeTruthy()
+    expect(navigation.getByRole('link', { name: 'Repository' }).getAttribute('aria-current')).toBe('page')
+    fireEvent.click(screen.getByRole('button', { name: 'General focus' }))
+    expect(screen.getByRole('heading', { name: 'AI workspace' })).toBeTruthy()
+    expect(navigation.getByRole('link', { name: 'AI workspace' }).getAttribute('aria-current')).toBe('page')
+    expect(navigation.getByRole('link', { name: 'Repository' }).getAttribute('aria-current')).toBeNull()
+    expect(window.location.search).toBe('')
+    fireEvent.click(screen.getByRole('button', { name: 'Repository focus' }))
+    expect(screen.getByRole('heading', { name: 'Repository' })).toBeTruthy()
+    expect(window.location.search).toBe('?mode=repoInterview')
+    expect(mocks.capture.start).not.toHaveBeenCalled()
+    expect(mocks.capture.stop).not.toHaveBeenCalled()
   })
 
   it('keeps cancellation available while permission or connection is pending', () => {

@@ -1,6 +1,6 @@
 'use client'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react'
+import { AudioLines, ChevronLeft, ChevronRight, Pause, Play, RotateCcw, Settings2, Sparkles } from 'lucide-react'
 import { ResponsePreferencesControls } from '@/components/copilot/CopilotWorkspaceUi'
 import { useResponsePreferences } from '@/lib/copilot/useResponsePreferences'
 import { Markdown } from '@/components/copilot/Markdown'
@@ -11,6 +11,7 @@ import { useCandidateProfile } from '@/lib/copilot/useCandidateProfile'
 import { useMeContext } from '@/lib/copilot/useMeContext'
 import { useModeContexts } from '@/lib/copilot/useModeContexts'
 import type { CopilotMode } from '@/lib/copilot/modes'
+import styles from './Interview.module.css'
 
 const MODE_LABEL: Record<string, string> = { general: 'General', coding: 'Coding', systemDesign: 'System Design', behavioral: 'Behavioral', repoInterview: 'Repository' }
 
@@ -65,32 +66,19 @@ export function LiveAnswerCanvas({ getTranscript, getQuestionTranscript = getTra
     setPaused((value) => !value)
   }
 
-  return <div className="flex min-h-0 flex-1 flex-col">
-    <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
-      <details className="max-w-sm text-xs"><summary className="min-h-9 cursor-pointer py-2 font-medium text-black/55">Answer preferences</summary><ResponsePreferencesControls {...responsePreferences} compact /></details>
-      <button type="button" onClick={toggleAnswers} className="btn-ghost min-h-9 text-xs">{paused ? 'Resume answers' : 'Pause answers'}</button>
+  return <div className={styles.answerCanvas}>
+    <div className={styles.answerToolbar}>
+      <div className={styles.answerTags}><span className={`${styles.answerTag} ${styles.answerTagActive}`}>{paused ? 'Detection paused' : 'Automatic questions'}</span><span className={styles.answerTag}>{MODE_LABEL[mode]}</span></div>
+      <button type="button" onClick={toggleAnswers} className={styles.darkButton}>{paused ? <Play size={12} aria-hidden /> : <Pause size={12} aria-hidden />}{paused ? 'Resume answers' : 'Pause answers'}</button>
     </div>
-    {paused && <p role="status" className="mb-3 text-xs text-black/55">Answers paused. Audio capture continues until you end the interview.</p>}
-    {error && <p role="alert" className="mb-3 text-sm text-[color:var(--stop)]">{error}</p>}
-    <div className="flex flex-wrap items-center gap-2 text-xs">
-      <span className="rounded-full bg-emerald-500/10 px-2.5 py-1 font-semibold text-emerald-700">Question detection</span>
-      <span className="rounded-full bg-black/[0.045] px-2.5 py-1 font-medium text-black/55">{MODE_LABEL[mode]}</span>
-      {(routing || current?.streaming) && <span className="ml-auto inline-flex items-center gap-1.5 text-black/40"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />{routing ? 'Routing…' : 'Answering…'}</span>}
-    </div>
-    <div className="mt-4">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-black/35">Current question</p>
-      <h2 className="mt-2 max-w-3xl text-2xl font-semibold leading-tight tracking-[-0.025em] sm:text-3xl">{activeQuestion || 'Listening for the next question…'}</h2>
-    </div>
-    <div className="mt-5 min-h-0 flex-1 overflow-y-auto rounded-xl border border-black/[0.07] bg-black/[0.018] p-4 sm:p-5">
-      {!current ? <div className="flex min-h-48 items-center justify-center text-sm text-black/35">The answer appears here automatically.</div> :
-        current.failed ? <div className="flex min-h-48 flex-col items-center justify-center gap-3 text-center"><p className="text-sm text-black/50">The answer did not complete.</p><button className="btn-ghost gap-2" onClick={() => feed.retry(current.id)}><RotateCcw size={14} />Retry</button></div> :
-        <div className="max-w-none break-words text-[15px] leading-7 text-ink sm:text-base"><Markdown>{current.answer || 'Preparing answer…'}</Markdown></div>}
-    </div>
-    {feed.count > 0 && <div className="mt-3 flex items-center gap-2 text-xs text-black/45">
-      <button aria-label="Previous answer" disabled={feed.cursor <= 0} onClick={feed.prev} className="rounded-lg p-2 hover:bg-black/[0.04] disabled:opacity-25"><ChevronLeft size={15} /></button>
-      <span>{feed.cursor + 1} / {feed.count}</span>
-      <button aria-label="Next answer" disabled={feed.cursor >= feed.count - 1} onClick={feed.next} className="rounded-lg p-2 hover:bg-black/[0.04] disabled:opacity-25"><ChevronRight size={15} /></button>
-      <span className="ml-auto">{MODE_LABEL[mode]}</span>
-    </div>}
+    {paused && <p role="status" className={styles.livePaused}>Answers paused. Audio capture continues until you end the interview.</p>}
+    {error && <p role="alert" className={styles.error}>{error}</p>}
+    <div className="mt-2"><p className={styles.answerLabel}>Current question</p><h2 className={styles.answerQuestion}>{activeQuestion || 'Listening for the next question…'}</h2></div>
+    <section className={styles.answerCard} aria-label="AI answer">
+      <div className={styles.answerCardHeader}><span><Sparkles size={16} aria-hidden />AI answer</span><span className={styles.answerProgress} role="status">{routing ? 'Finding context…' : current?.streaming ? 'Answering…' : current?.failed ? 'Needs retry' : current ? 'Ready' : 'Waiting for a question'}</span></div>
+      {!current ? <div className={styles.answerEmpty}><AudioLines size={27} aria-hidden /><strong>A little context. A clearer answer.</strong><p>The answer appears here automatically<br />when a question is detected.</p></div> : current.failed ? <div className={styles.answerEmpty}><p>The answer did not complete.</p><button type="button" className={styles.darkButton} onClick={() => feed.retry(current.id)}><RotateCcw size={14} aria-hidden />Retry</button></div> : <div className={styles.answerMarkdown}><Markdown>{current.answer || 'Preparing answer…'}</Markdown></div>}
+    </section>
+    {feed.count > 0 && <div className={styles.answerPagination}><button type="button" aria-label="Previous answer" disabled={feed.cursor <= 0} onClick={feed.prev} className={styles.darkButton}><ChevronLeft size={15} aria-hidden /></button><span>Answer {feed.cursor + 1} of {feed.count}</span><button type="button" aria-label="Next answer" disabled={feed.cursor >= feed.count - 1} onClick={feed.next} className={styles.darkButton}><ChevronRight size={15} aria-hidden /></button><span>{MODE_LABEL[mode]}</span></div>}
+    <details className={styles.preferences}><summary><Settings2 size={13} aria-hidden />Answer preferences</summary><div className={styles.preferencesBody}><ResponsePreferencesControls {...responsePreferences} compact /></div></details>
   </div>
 }

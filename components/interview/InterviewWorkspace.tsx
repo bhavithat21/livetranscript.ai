@@ -1,32 +1,46 @@
 'use client'
-import { useCallback, useEffect, useState, useSyncExternalStore, type KeyboardEvent, type MouseEvent } from 'react'
-import { Activity, FileText, FlaskConical, GitBranch, MessageSquareText, Radio, RotateCcw, Settings2, MonitorUp, Sparkles, GraduationCap } from 'lucide-react'
-import { ThemeToggle } from '@/components/ui/ThemeToggle'
-import { HomeMenu } from '@/components/nav/HomeMenu'
+import { useCallback, useEffect, useState, useSyncExternalStore, type MouseEvent } from 'react'
+import { Activity, ArrowLeft, Check, ShieldCheck } from 'lucide-react'
+import { WorkspaceShell, type InterviewView } from '@/components/nav/WorkspaceShell'
 import { createInterviewHistory } from '@/lib/interview/history'
 import type { InterviewSession } from '@/lib/interview/session'
 import { InterviewTuningProvider, useInterviewTuning } from '@/lib/interview/TuningContext'
 import { LiveInterview } from './LiveInterview'
 import { MockInterview } from './MockInterview'
 import { InterviewFeedback } from './InterviewFeedback'
+import styles from './Interview.module.css'
 
-const TABS = [
-  { id: 'live', label: 'Live Interview', short: 'Live', icon: Radio, description: 'Run the production interview assistant' },
-  { id: 'mock', label: 'Mock Interview', short: 'Mock Lab', icon: FlaskConical, description: 'Test and tune the live system' },
-  { id: 'feedback', label: 'Interview Feedback', short: 'Feedback', icon: MessageSquareText, description: 'Review sessions and system tests' },
-] as const
-type Tab = (typeof TABS)[number]['id']
+const VIEWS = {
+  live: { label: 'Live interview', description: 'Stay with the conversation. Keep the context close.' },
+  mock: { label: 'Mock Lab', description: 'Test an answer. Review the evidence. Improve your live profile.' },
+  feedback: { label: 'Interview feedback', description: 'Every session is a chance to make the next one better.' },
+} satisfies Record<InterviewView, { label: string; description: string }>
 
-function ProfileStatus({ compact = false }: { compact?: boolean }) {
+function currentView(): InterviewView {
+  const value = window.location.hash.slice(1)
+  return value === 'mock' || value === 'feedback' ? value : 'live'
+}
+function subscribeView(listener: () => void) {
+  window.addEventListener('hashchange', listener)
+  window.addEventListener('popstate', listener)
+  return () => { window.removeEventListener('hashchange', listener); window.removeEventListener('popstate', listener) }
+}
+function setView(view: InterviewView) {
+  if (window.location.hash === `#${view}`) return
+  window.history.pushState(window.history.state, '', `#${view}`)
+  window.dispatchEvent(new HashChangeEvent('hashchange'))
+}
+
+function ProfileStatus() {
   const { state, error } = useInterviewTuning()
-  return <div className={compact ? 'text-xs text-black/45' : 'rounded-xl border border-black/[0.07] bg-black/[0.025] px-3 py-2.5 text-xs text-black/55'}>
-    <div className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-emerald-600" /><span>Live profile v{state.active.revision}</span></div>
-    {error && <p role="alert" className="mt-1 text-[color:var(--stop)]">{error}</p>}
+  return <div className={styles.profileStatus}>
+    <span><Check size={13} aria-hidden />Live profile <strong>v{state.active.revision}</strong></span>
+    {error && <p role="alert" className={styles.error}>{error}</p>}
   </div>
 }
 
 function Workspace({ ownerId }: { ownerId: string }) {
-  const [tab, setTab] = useState<Tab>('live')
+  const view = useSyncExternalStore(subscribeView, currentView, () => 'live' as const)
   const [liveActive, setLiveActive] = useState(false)
   const [mockActive, setMockActive] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -43,77 +57,31 @@ function Workspace({ ownerId }: { ownerId: string }) {
   }, [active])
 
   const completed = useCallback((session: InterviewSession) => {
-    store.add(session); setSelectedId(session.id); setTab('feedback'); setNavigationError(null)
+    store.add(session); setSelectedId(session.id); setView('feedback'); setNavigationError(null)
   }, [store])
 
-  function guardNavigation(event: MouseEvent<HTMLDivElement>) {
-    if (!active || !(event.target instanceof Element) || !event.target.closest('a[href]')) return
+  function guardNavigation(event: MouseEvent<HTMLAnchorElement>) {
+    if (!active) return
     event.preventDefault()
     setNavigationError('Finish the active interview before leaving this workspace. Switching between Interview views is safe.')
   }
 
-  function tabKey(event: KeyboardEvent<HTMLButtonElement>, index: number, mobile = false) {
-    let next = index
-    if (event.key === 'ArrowDown' || event.key === 'ArrowRight') next = (index + 1) % TABS.length
-    else if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') next = (index + TABS.length - 1) % TABS.length
-    else if (event.key === 'Home') next = 0
-    else if (event.key === 'End') next = TABS.length - 1
-    else return
-    event.preventDefault(); setTab(TABS[next].id)
-    document.getElementById(`interview-${mobile ? 'mobile-' : ''}tab-${TABS[next].id}`)?.focus()
-  }
-
-  const current = TABS.find((item) => item.id === tab) ?? TABS[0]
-  return <main className="min-h-dvh text-ink">
-    <div className="mx-auto grid min-h-dvh max-w-[1480px] lg:grid-cols-[224px_minmax(0,1fr)]">
-      <aside className="hidden border-r border-black/[0.07] bg-black/[0.018] px-3 py-4 lg:flex lg:flex-col" onClickCapture={guardNavigation}>
-        <div className="px-2"><HomeMenu /></div>
-        <div className="mt-8 px-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-black/35">Interview</div>
-        <div role="tablist" aria-label="Interview modes" aria-orientation="vertical" className="mt-2 space-y-1">
-          {TABS.map((item, index) => {
-            const Icon = item.icon
-            return <button key={item.id} id={`interview-tab-${item.id}`} role="tab" aria-label={item.label} aria-selected={tab === item.id} aria-controls={`interview-panel-${item.id}`} tabIndex={tab === item.id ? 0 : -1} onKeyDown={(event) => tabKey(event, index)} onClick={() => setTab(item.id)} className={`group w-full rounded-lg px-2.5 py-2.5 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--signal)] ${tab === item.id ? 'bg-black/[0.055] text-ink' : 'text-black/50 hover:bg-black/[0.035] hover:text-ink'}`}>
-              <span className="flex items-center gap-2.5 text-sm font-medium"><Icon size={16} strokeWidth={1.8} />{item.short}{(item.id === 'live' && liveActive) || (item.id === 'mock' && mockActive) ? <span className="ml-auto h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-600" /> : null}</span>
-            </button>
-          })}
-        </div>
-        <div className="mt-8 px-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-black/35">Tools</div>
-        <nav aria-label="Interview tools" className="mt-2 space-y-1 text-sm">
-          <a href="/dashboard" className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-black/50 transition hover:bg-black/[0.035] hover:text-ink"><FileText size={15} />Transcripts</a>
-          <a href="/copilot?mode=repoInterview" className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-black/50 transition hover:bg-black/[0.035] hover:text-ink"><GitBranch size={15} />Repository</a>
-          <a href="/copilot" className="flex min-h-11 items-center gap-2.5 rounded-lg px-2.5 py-2 text-black/50 hover:bg-black/[0.035] hover:text-ink"><Sparkles size={15} />AI Copilot</a>
-          <a href="/practice" className="flex min-h-11 items-center gap-2.5 rounded-lg px-2.5 py-2 text-black/50 hover:bg-black/[0.035] hover:text-ink"><GraduationCap size={15} />Practice</a>
-          <a href="/remote" className="flex min-h-11 items-center gap-2.5 rounded-lg px-2.5 py-2 text-black/50 hover:bg-black/[0.035] hover:text-ink"><MonitorUp size={15} />Remote Assist</a>
-        </nav>
-        <div className="mt-auto space-y-3 px-2">
-          <a href="/settings" className="flex items-center gap-2 text-xs font-medium text-black/45 hover:text-ink"><Settings2 size={14} />Settings</a>
-          <ProfileStatus />
-        </div>
-      </aside>
-
-      <section className="min-w-0 px-4 pb-20 pt-4 sm:px-6 lg:px-8 lg:pb-10 lg:pt-6 xl:px-10">
-        <header className="mb-5 flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <div className="lg:hidden" onClickCapture={guardNavigation}><HomeMenu /></div>
-            <div className="mt-5 lg:mt-0"><h1 className="text-xl font-semibold tracking-[-0.02em] sm:text-2xl">{current.short}</h1><p className="mt-1 text-sm text-black/45">{current.description}</p></div>
-          </div>
-          <div className="flex items-center gap-2"><ThemeToggle /><div className="hidden lg:block"><ProfileStatus compact /></div>{active && <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1.5 text-xs font-medium text-emerald-800"><Activity size={13} />Active</span>}</div>
-        </header>
-
-        <div role="group" aria-label="Interview views" className="mb-5 grid grid-cols-3 rounded-xl bg-black/[0.035] p-1 lg:hidden">
-          {TABS.map((item, index) => <button key={item.id} id={`interview-mobile-tab-${item.id}`} aria-controls={`interview-panel-${item.id}`} aria-label={item.label} aria-pressed={tab === item.id} onKeyDown={(event) => tabKey(event, index, true)} onClick={() => setTab(item.id)} className={`min-h-11 rounded-lg px-2 text-sm font-medium transition-colors ${tab === item.id ? 'bg-white text-ink shadow-sm' : 'text-black/45'}`}>{item.short}</button>)}
-        </div>
-
-        {active && ((liveActive && tab !== 'live') || (mockActive && tab !== 'mock')) && <div role="status" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-700/15 bg-emerald-50/50 px-4 py-3 text-sm"><span>{liveActive ? 'Live interview remains active. Audio capture continues while you review another view.' : 'Mock Lab is still running.'}</span><button className="inline-flex items-center gap-1.5 font-medium text-emerald-800" onClick={() => setTab(liveActive ? 'live' : 'mock')}><RotateCcw size={14} />Return</button></div>}
-        {navigationError && <p role="alert" className="mb-4 text-sm text-[color:var(--stop)]">{navigationError}</p>}
-        {history.error && <p role="alert" className="mb-4 rounded-xl border border-black/10 p-4 text-sm">{history.error}</p>}
-
-        <div id="interview-panel-live" role="tabpanel" aria-label="Live Interview" hidden={tab !== 'live'}><LiveInterview visible={tab === 'live'} blocked={mockActive} onActivity={setLiveActive} onComplete={completed} /></div>
-        <div id="interview-panel-mock" role="tabpanel" aria-label="Mock Lab" hidden={tab !== 'mock'}><MockInterview visible={tab === 'mock'} blocked={liveActive} onActivity={setMockActive} onComplete={completed} /></div>
-        <div id="interview-panel-feedback" role="tabpanel" aria-label="Interview Feedback" hidden={tab !== 'feedback'}><InterviewFeedback sessions={history.sessions} selectedId={selectedId} onSelect={setSelectedId} store={store} /></div>
-      </section>
-    </div>
-  </main>
+  const current = VIEWS[view]
+  return <WorkspaceShell active="interview" interviewView={view} onInterviewViewChange={setView} onNavigate={guardNavigation}>
+    <main className={styles.workspace}>
+      <header className={styles.pageHeader}>
+        <div><p className={styles.eyebrow}>Your interview workspace</p><h1>{current.label}</h1><p className={styles.description}>{current.description}</p></div>
+        <div className={styles.headerMeta}><ProfileStatus />{active && <span className={styles.activeLabel}><Activity size={13} aria-hidden />Session active</span>}</div>
+      </header>
+      {active && ((liveActive && view !== 'live') || (mockActive && view !== 'mock')) && <div role="status" className={styles.activityNotice}><span>{liveActive ? 'Live interview remains active. Audio capture continues while you review another view.' : 'Mock Lab is still running.'}</span><button type="button" onClick={() => setView(liveActive ? 'live' : 'mock')}><ArrowLeft size={14} aria-hidden />Return to session</button></div>}
+      {navigationError && <p role="alert" className={styles.errorBanner}>{navigationError}</p>}
+      {history.error && <p role="alert" className={styles.errorBanner}>{history.error}</p>}
+      <section id="interview-panel-live" aria-label="Live Interview" hidden={view !== 'live'}><LiveInterview visible={view === 'live'} blocked={mockActive} onActivity={setLiveActive} onComplete={completed} /></section>
+      <section id="interview-panel-mock" aria-label="Mock Lab" hidden={view !== 'mock'}><MockInterview visible={view === 'mock'} blocked={liveActive} onActivity={setMockActive} onComplete={completed} /></section>
+      <section id="interview-panel-feedback" aria-label="Interview Feedback" hidden={view !== 'feedback'}><InterviewFeedback sessions={history.sessions} selectedId={selectedId} onSelect={setSelectedId} store={store} /></section>
+      <footer className={styles.workspaceFooter}><ShieldCheck size={14} aria-hidden /><span>Session history stays in this browser, separated by account.</span></footer>
+    </main>
+  </WorkspaceShell>
 }
 
 export function InterviewWorkspace({ ownerId }: { ownerId: string }) {

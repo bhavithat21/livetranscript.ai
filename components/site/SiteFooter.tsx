@@ -1,30 +1,33 @@
 import Link from 'next/link'
 import { Wordmark } from '@/components/nav/Wordmark'
+import styles from './Site.module.css'
 
-// Shared footer for the public surfaces (landing + shared-transcript view) — the
-// cheapest "this is a real product" trust signal, and it closes the share-view
-// growth loop by pointing recipients back to the product.
 export function SiteFooter() {
   return (
-    <footer className="border-t border-black/10 px-6 py-10">
-      <div className="mx-auto flex max-w-5xl flex-col items-start justify-between gap-6 sm:flex-row sm:items-center">
-        <div>
-          <Link href="/">
-            <Wordmark className="text-lg" />
-          </Link>
-          <p className="mt-1 max-w-xs text-sm text-black/45">
-            Real-time AI transcription — every word, the moment it&rsquo;s said.
-          </p>
+    <footer className={styles.footer}>
+      <div className={styles.container}>
+        <div className={styles.footerGrid}>
+          <div className={styles.footerIntro}>
+            <Link href="/" className={styles.brand}><Wordmark /></Link>
+            <p>Follow the conversation. Understand the context. Keep improving.</p>
+          </div>
+          <nav className={styles.footerNav} aria-label="Product links">
+            <h2>Workspace</h2>
+            <Link href="/interview">Live interview</Link>
+            <Link href="/copilot">AI workspace</Link>
+            <Link href="/practice">Practice</Link>
+            <Link href="/record">Transcription</Link>
+          </nav>
+          <nav className={styles.footerNav} aria-label="More links">
+            <h2>Explore</h2>
+            <Link href="/download">Desktop app</Link>
+            <Link href="/pricing">Pricing</Link>
+            <Link href="/remote">Remote assist</Link>
+            <Link href="/settings">Settings</Link>
+          </nav>
         </div>
-        <nav className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-black/55">
-          <Link href="/record" className="hover:text-ink">Start transcribing</Link>
-          <Link href="/room/new" className="hover:text-ink">Open a meeting</Link>
-          <Link href="/download" className="hover:text-ink">Desktop app</Link>
-          <Link href="/pricing" className="hover:text-ink">Pricing</Link>
-          <Link href="/sign-up" className="hover:text-ink">Sign up</Link>
-        </nav>
+        <div className={styles.footerBottom}><span>© 2026 LiveTranscript</span><span>Web · macOS · Windows</span></div>
       </div>
-      <p className="mx-auto mt-6 max-w-5xl text-xs text-black/30">© 2026 LiveTranscript</p>
     </footer>
   )
 }
