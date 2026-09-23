@@ -27,13 +27,18 @@ jobs:
           files = sorted((root / '.release').glob('*.json'))
           assert [p.name for p in files] == ['00.json','01.json','02.json','03.json','04.json','05.json']
           entries = [entry for file in files for entry in json.loads(file.read_text())]
-          serialized = json.dumps(entries, ensure_ascii=False, separators=(',', ':')).encode()
-          digest = hashlib.sha256(serialized).hexdigest()
-          assert len(entries) == 49 and len({entry['path'] for entry in entries}) == 49
           sha = lambda text: hashlib.sha256(text.encode()).hexdigest()
-          outputs, errors = [], []
-          for file in files:
-              print('Batch', file.name, sha(json.dumps(json.loads(file.read_text()), ensure_ascii=False, separators=(',', ':'))))
+          encode = lambda value: json.dumps(value, ensure_ascii=False, separators=(',', ':'))
+          # Correct the one diagnosed copy error in transport, not application code.
+          # Exact final source hashes and the original entire-manifest hash remain mandatory.
+          if sha(encode(entries)) == '85d1dab7d479cddd2e3eb26c51e45a46d84f7be1e3ce9669aa8c9ca94a68e7b2':
+              entry = next(item for item in entries if item['path'] == 'lib/transcription/assemblyai.ts')
+              edit = entry['edits'][2]
+              assert edit[:2] == [3657, 3722] and edit[2].endswith("!== 'string'")
+              edit[2] = edit[2][:-1]
+          assert sha(encode(entries)) == '092fd04d503fce76a1c84e12d8e4527a4c475db0f7abf022cfa6e1c9f83288e7'
+          assert len(entries) == 49 and len({entry['path'] for entry in entries}) == 49
+          outputs = []
           for entry in entries:
               relative = pathlib.PurePosixPath(entry['path'])
               assert not relative.is_absolute() and '..' not in relative.parts and '.git' not in relative.parts
@@ -55,12 +60,8 @@ jobs:
                       previous = end
                   for start, end, replacement in reversed(edits):
                       text = text[:start] + replacement + text[end:]
-              if sha(text) != entry['after']:
-                  errors.append(entry['path'])
-                  print('Output mismatch', entry['path'], sha(text), entry['after'])
+              assert sha(text) == entry['after'], ('Output mismatch', entry['path'])
               outputs.append((path, text))
-          assert not errors, errors
-          assert digest == '092fd04d503fce76a1c84e12d8e4527a4c475db0f7abf022cfa6e1c9f83288e7', ('Manifest mismatch', digest)
           for path, text in outputs:
               path.parent.mkdir(parents=True, exist_ok=True)
               path.write_text(text)
