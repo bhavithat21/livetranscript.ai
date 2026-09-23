@@ -29,10 +29,11 @@ jobs:
           entries = [entry for file in files for entry in json.loads(file.read_text())]
           serialized = json.dumps(entries, ensure_ascii=False, separators=(',', ':')).encode()
           digest = hashlib.sha256(serialized).hexdigest()
-          assert digest == '092fd04d503fce76a1c84e12d8e4527a4c475db0f7abf022cfa6e1c9f83288e7', ('Manifest mismatch', digest)
           assert len(entries) == 49 and len({entry['path'] for entry in entries}) == 49
           sha = lambda text: hashlib.sha256(text.encode()).hexdigest()
-          outputs = []
+          outputs, errors = [], []
+          for file in files:
+              print('Batch', file.name, sha(json.dumps(json.loads(file.read_text()), ensure_ascii=False, separators=(',', ':'))))
           for entry in entries:
               relative = pathlib.PurePosixPath(entry['path'])
               assert not relative.is_absolute() and '..' not in relative.parts and '.git' not in relative.parts
@@ -54,8 +55,12 @@ jobs:
                       previous = end
                   for start, end, replacement in reversed(edits):
                       text = text[:start] + replacement + text[end:]
-              assert sha(text) == entry['after'], ('Output mismatch', entry['path'])
+              if sha(text) != entry['after']:
+                  errors.append(entry['path'])
+                  print('Output mismatch', entry['path'], sha(text), entry['after'])
               outputs.append((path, text))
+          assert not errors, errors
+          assert digest == '092fd04d503fce76a1c84e12d8e4527a4c475db0f7abf022cfa6e1c9f83288e7', ('Manifest mismatch', digest)
           for path, text in outputs:
               path.parent.mkdir(parents=True, exist_ok=True)
               path.write_text(text)
