@@ -1,9 +1,8 @@
 import { SignUp } from '@clerk/nextjs'
+import { AuthShell, AuthUnavailable } from '@/components/site/AuthShell'
+
+export const metadata = { title: 'Create an account — LiveTranscript' }
 
 export default function SignUpPage() {
-  return (
-    <main className="flex min-h-dvh items-center justify-center bg-[#faf9f7] px-6 py-16">
-      <SignUp />
-    </main>
-  )
+  return <AuthShell>{process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <SignUp /> : <AuthUnavailable />}</AuthShell>
 }

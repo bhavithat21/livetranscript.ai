@@ -149,3 +149,30 @@ question speech are explicit actions. Quoted feedback evidence must exist in the
 submitted answer. Speech metrics reflect measured capture time and are not a
 validated performance score. Stop/unmount cancels pending work and stale answers.
 The practice surface is excluded from analytics alongside other private workspaces.
+
+## Whole-site navigation rebuild (2026-09-23)
+
+The user's site-wide redesign replaces per-route navigation with WorkspaceShell
+for `/interview`, `/copilot`, `/practice`, `/dashboard`, `/remote`, `/settings`.
+The public site owns a distinct concise AppNav. Recording, meeting and individual
+transcript reading retain HomeMenu as an intentional focused variant.
+
+| Capability | Canonical owner | Observable contract |
+|---|---|---|
+| Product navigation | WorkspaceShell | Same labels and route order, one current destination, skip link |
+| Mobile navigation | WorkspaceShell in-flow details | Native disclosure; Escape closes/restores focus; outside pointer closes; no modal semantics |
+| Focused navigation | HomeMenu | Same core destinations, explicit Escape/outside close |
+| Interview deep links | InterviewWorkspace | `#live`, `#mock`, `#feedback`; mounted capture and page-owned exit guard preserved |
+| Session deletion | DeleteSessionDialog | Explicit destructive confirmation, Cancel first, preserve item and error on failure |
+| Library navigation | LibraryView | 12 rows per page over up to 200 newest API rows; search/filter clamp pages |
+
+Transcript search is deliberately transient rather than URL-persisted: private
+phrases do not belong in browser history or shared URLs. Clear is immediate and
+returns focus. A database/auth setup failure must not masquerade as an empty
+saved library. Pricing must distinguish proposed paid plans from a working
+checkout; this rebuild does not enable billing.
+
+Document titles identify each route through existing Next metadata, preserving
+user-selected app identity. Error views retain a route back and actionable retry;
+raw server stack traces stay out of product copy. Permission/auth boundaries are
+not weakened to make previews or browser tests easier.

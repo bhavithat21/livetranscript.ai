@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import type { InterviewSession } from '@/lib/interview/session'
 
-vi.mock('@/components/nav/HomeMenu', () => ({ HomeMenu: () => <a href="/dashboard">Library</a> }))
+vi.mock('@/components/nav/Wordmark', () => ({ Wordmark: () => <span>LiveTranscript</span> }))
+vi.mock('@/components/ui/ThemeToggle', () => ({ ThemeToggle: () => <span>Theme control</span> }))
 vi.mock('./LiveInterview', () => ({ LiveInterview: ({ onActivity }: { onActivity: (active: boolean) => void }) => <button onClick={() => onActivity(true)}>Start capture test</button> }))
 vi.mock('./MockInterview', () => ({ MockInterview: ({ onComplete }: { onComplete: (session: InterviewSession) => void }) => {
   const [draft, setDraft] = useState('')
@@ -13,54 +14,53 @@ vi.mock('./MockInterview', () => ({ MockInterview: ({ onComplete }: { onComplete
 vi.mock('./InterviewFeedback', () => ({ InterviewFeedback: ({ sessions }: { sessions: InterviewSession[] }) => <div>{sessions.map((session) => <p key={session.id}>{session.title}</p>)}</div> }))
 import { InterviewWorkspace } from './InterviewWorkspace'
 
-afterEach(() => { cleanup(); localStorage.clear() })
-describe('separate interview tabs', () => {
-  it('links to implemented tools and keeps mobile keyboard focus in the visible controls', () => {
+function navLink(name: string) { return within(screen.getByRole('navigation', { name: 'Workspace' })).getByRole('link', { name }) }
+afterEach(() => { cleanup(); localStorage.clear(); window.history.replaceState(null, '', '/') })
+describe('interview views in the shared workspace', () => {
+  it('links to implemented tools through the shared navigation', () => {
     render(<InterviewWorkspace ownerId="alice" />)
-    expect(screen.getByRole('link', { name: 'Transcripts' }).getAttribute('href')).toBe('/dashboard')
-    expect(screen.getByRole('link', { name: 'Repository' }).getAttribute('href')).toBe('/copilot?mode=repoInterview')
-    expect(screen.getByRole('link', { name: 'Remote Assist' }).getAttribute('href')).toBe('/remote')
-    const live = screen.getByRole('button', { name: 'Live Interview' })
-    fireEvent.keyDown(live, { key: 'ArrowRight' })
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Mock Interview' }))
-    expect(screen.getByRole('button', { name: 'Mock Interview' }).getAttribute('aria-pressed')).toBe('true')
+    expect(navLink('Transcripts').getAttribute('href')).toBe('/dashboard')
+    expect(navLink('Repository').getAttribute('href')).toBe('/copilot?mode=repoInterview')
+    expect(navLink('Remote assist').getAttribute('href')).toBe('/remote')
+    expect(navLink('Live interview').getAttribute('aria-current')).toBe('page')
   })
-  it('shows exactly three named tabs and supports keyboard navigation', () => {
+  it('opens a linked view and synchronizes later hash changes without remounting', () => {
+    window.history.replaceState(null, '', '/interview#mock')
     render(<InterviewWorkspace ownerId="alice" />)
-    const live = screen.getByRole('tab', { name: 'Live Interview' })
-    expect(screen.getAllByRole('tab')).toHaveLength(3)
-    expect(live.getAttribute('aria-selected')).toBe('true')
-    fireEvent.keyDown(live, { key: 'ArrowRight' })
-    const mock = screen.getByRole('tab', { name: 'Mock Interview' })
-    expect(mock.getAttribute('aria-selected')).toBe('true')
-    expect(document.activeElement).toBe(mock)
-    fireEvent.keyDown(mock, { key: 'End' })
-    expect(screen.getByRole('tab', { name: 'Interview Feedback' }).getAttribute('aria-selected')).toBe('true')
+    expect(navLink('Mock Lab').getAttribute('aria-current')).toBe('page')
+    fireEvent.change(screen.getByLabelText('Mock draft'), { target: { value: 'Keep this scenario' } })
+    act(() => { window.history.replaceState(null, '', '/interview#feedback'); window.dispatchEvent(new HashChangeEvent('hashchange')) })
+    expect(navLink('Feedback').getAttribute('aria-current')).toBe('page')
+    fireEvent.click(navLink('Mock Lab'))
+    expect(window.location.hash).toBe('#mock')
+    expect((screen.getByLabelText('Mock draft') as HTMLInputElement).value).toBe('Keep this scenario')
   })
-  it('does not discard a mock draft when switching tabs', () => {
+  it('does not discard a mock draft when switching views', () => {
     render(<InterviewWorkspace ownerId="alice" />)
-    fireEvent.click(screen.getByRole('tab', { name: 'Mock Interview' }))
+    fireEvent.click(navLink('Mock Lab'))
     fireEvent.change(screen.getByLabelText('Mock draft'), { target: { value: 'My answer is still here' } })
-    fireEvent.click(screen.getByRole('tab', { name: 'Live Interview' }))
-    fireEvent.click(screen.getByRole('tab', { name: 'Mock Interview' }))
+    fireEvent.click(navLink('Live interview'))
+    fireEvent.click(navLink('Mock Lab'))
     expect((screen.getByLabelText('Mock draft') as HTMLInputElement).value).toBe('My answer is still here')
   })
-  it('keeps active live capture visible as a status on the feedback tab', () => {
+  it('keeps capture active across views and blocks leaving until capture ends', () => {
     render(<InterviewWorkspace ownerId="alice" />)
     fireEvent.click(screen.getByText('Start capture test'))
-    fireEvent.click(screen.getByRole('tab', { name: 'Interview Feedback' }))
+    fireEvent.click(navLink('Feedback'))
     expect(screen.getByText(/Live interview remains active/)).toBeTruthy()
     const event = new MouseEvent('click', { bubbles: true, cancelable: true })
-    fireEvent(screen.getAllByRole('link', { name: 'Library' })[0], event)
+    fireEvent(navLink('Transcripts'), event)
     expect(event.defaultPrevented).toBe(true)
     expect(screen.getByRole('alert').textContent).toContain('Finish the active interview')
+    fireEvent.click(screen.getByRole('button', { name: 'Return to session' }))
+    expect(navLink('Live interview').getAttribute('aria-current')).toBe('page')
   })
-  it('saves completion and opens the feedback tab', () => {
+  it('saves completion and opens Feedback without exposing history to another account', () => {
     render(<InterviewWorkspace ownerId="alice" />)
-    fireEvent.click(screen.getByRole('tab', { name: 'Mock Interview' }))
+    fireEvent.click(navLink('Mock Lab'))
     fireEvent.change(screen.getByLabelText('Mock draft'), { target: { value: 'Candidate answer' } })
     fireEvent.click(screen.getByText('Finish mock test'))
-    expect(screen.getByRole('tab', { name: 'Interview Feedback' }).getAttribute('aria-selected')).toBe('true')
+    expect(navLink('Feedback').getAttribute('aria-current')).toBe('page')
     expect(screen.getByText('Completed practice')).toBeTruthy()
     cleanup()
     render(<InterviewWorkspace ownerId="bob" />)

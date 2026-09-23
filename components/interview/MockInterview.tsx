@@ -1,11 +1,13 @@
 'use client'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { ArrowUpRight, CheckCheck, ClipboardCheck, FlaskConical, Mic, Play, RotateCcw, Square } from 'lucide-react'
 import { CopilotPanel } from '@/components/copilot/CopilotPanel'
 import { Markdown } from '@/components/copilot/Markdown'
 import { CopilotCalibrationContext, useInterviewTuning } from '@/lib/interview/TuningContext'
 import { MAX_CALIBRATION, hasAcceptedRun, tuningSession, type CopilotObservation, type TuningRun } from '@/lib/interview/tuning'
 import { captureText, useInterviewRecorder } from '@/lib/interview/useInterviewRecorder'
 import type { InterviewSession } from '@/lib/interview/session'
+import styles from './Interview.module.css'
 
 const SCENARIOS = [
   { name: 'Direct technical', text: 'Interviewer: What authentication methods can webhooks use?', expected: 'Answer immediately. Cover HMAC signatures, bearer/API tokens, Basic Auth, mTLS, and IP allowlisting as a supporting control. No transcript disclaimer.' },
@@ -112,40 +114,46 @@ export function MockInterview({ blocked, visible = true, onActivity, onComplete 
     setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 
-  return <div className="space-y-5">
-    <section className="space-y-6 rounded-xl border border-black/[0.07] bg-white/50 p-5 sm:p-7">
-      <div><h2 className="font-[family-name:var(--font-serif)] text-2xl">Mock Lab</h2><p className="mt-2 text-sm leading-relaxed text-black/60">Test the exact Live pipeline against realistic interview questions. The expected answer is held out from generation so you can catch regressions in directness, correctness, grounding, and latency.</p></div>
-      <p className="rounded-lg border border-black/[0.06] bg-black/[0.025] px-3 py-2.5 text-sm text-black/60">Live profile: revision {tuning.state.active.revision}. Draft instructions are isolated until you review a successful test and choose Promote to Live.</p>
-      <div className="flex flex-wrap gap-2">{SCENARIOS.map((item) => <button key={item.name} className="btn-ghost text-sm" disabled={answerRunning || micOn || blocked} onClick={() => { setScenario(item.text); setExpected(item.expected) }}>Load {item.name.toLowerCase()} scenario</button>)}</div>
-      <label className="block space-y-2 text-sm">Scenario transcript / interviewer question<textarea rows={5} maxLength={40_000} value={scenario} disabled={answerRunning || micOn || blocked} onChange={(e) => setScenario(e.target.value)} className="resize-none w-full rounded-lg border border-black/10 bg-white/60 px-3 py-2.5 outline-none transition focus:border-emerald-700/30 focus:ring-2 focus:ring-emerald-700/10" /></label>
-      <label className="block space-y-2 text-sm">Expected behavior or reference answer (not sent to the answering model)<textarea rows={3} maxLength={2000} value={expected} disabled={answerRunning || blocked} onChange={(e) => setExpected(e.target.value)} className="resize-none w-full rounded-lg border border-black/10 bg-white/60 px-3 py-2.5 outline-none transition focus:border-emerald-700/30 focus:ring-2 focus:ring-emerald-700/10" placeholder="Describe what a correct, useful response must contain." /></label>
-      <label className="block space-y-2 text-sm">Draft live calibration instructions<textarea rows={4} maxLength={MAX_CALIBRATION} value={instructions} disabled={answerRunning || blocked} onChange={(e) => setDraft(e.target.value)} className="resize-none w-full rounded-lg border border-black/10 bg-white/60 px-3 py-2.5 outline-none transition focus:border-emerald-700/30 focus:ring-2 focus:ring-emerald-700/10" placeholder="For example: Start with a direct answer. State assumptions. Keep the opening under 80 words. Never invent resume facts." /></label>
-      <div className="flex flex-wrap gap-2">
-        {!running ? <button className="btn-signal" disabled={blocked || finishing || !scenario.trim()} onClick={begin}>Open live copilot for mock test</button> : <>
-          <button className="btn-ghost" disabled={micBusy || answerRunning} onClick={() => void toggleMic()}>{micOn ? 'Stop & append interviewer speech' : 'Dictate interviewer input'}</button>
-          <button className="btn-ghost" disabled={answerRunning} onClick={() => setPanelKey((key) => key + 1)}>Reset copilot for clean replay</button>
-          <button className="btn-signal" onClick={() => void finish()}>End test &amp; open feedback</button>
-        </>}
-        <button className="btn-ghost" disabled={blocked || answerRunning || !hasAcceptedRun(runs, instructions)} onClick={publish}>Apply to Live</button>
-        <button className="btn-ghost" disabled={blocked || answerRunning || !tuning.state.previous} onClick={() => { tuning.rollback(); setDraft(null); setNotice('Previous live instructions restored as a new revision.') }}>Roll back live profile</button>
-        <button className="btn-ghost" disabled={answerRunning || blocked} onClick={() => setDraft(null)}>Reset draft</button>
-      </div>
-      {running && <p role="status" className="text-sm">{answerRunning ? 'Live copilot is answering the test input…' : 'Use the copilot panel to select a mode and ask the scenario question, or enable Auto for settled transcript questions. Completed requests appear below.'}</p>}
-      {micOn && <p className="whitespace-pre-wrap text-sm">{micBusy ? 'Connecting microphone…' : captureText(microphone.segments) || 'Speak an interviewer question.'}</p>}
-      <p className="text-xs leading-relaxed text-black/60">Live and Mock share mode routing, uploaded grounding, response preferences, and the answer endpoint. Configure the mode and grounding in that panel. Calibration applies to standard copilot answers; the separate Repository Interview multi-agent pipeline is not calibrated here. Clean replay resets conversation state, not saved documents. Prompt tuning is not model-weight training.</p>
-      {blocked && <p role="status" className="text-sm">End the live interview before running tests or applying calibration changes.</p>}
-      {notice && <p role="status" className="text-sm">{notice}</p>}
-      {(error || tuning.error || microphone.error) && <p role="alert" className="text-sm text-[color:var(--stop)]">{error || tuning.error || microphone.error}</p>}
-    </section>
-    {runs.length > 0 && <section className="space-y-4 rounded-xl border border-black/[0.07] bg-white/50 p-5 sm:p-6"><div className="flex flex-wrap items-center justify-between gap-3"><h3 className="font-semibold">Test results ({runs.length}/20 retained)</h3><button className="btn-ghost" disabled={!runs.some((run) => run.verdict === 'pass' && run.status === 'complete')} onClick={exportExamples}>Export accepted examples</button></div><p className="text-xs text-black/60">Times measure request start to first text and completion, excluding ASR and pre-request orchestration. Use the held-out expectation as the acceptance test. Mark Pass only when the response is correct, direct, speakable, and free of unnecessary transcript/meta disclaimers. Times exclude ASR and pre-request orchestration.</p>{runs.map((run) => <article key={run.id} className="space-y-3 border-t border-black/[0.07] py-5 first:border-t-0 first:pt-0 last:pb-0">
-      <h4 className="font-medium">{run.question}</h4><p className="text-xs text-black/60">{run.mode} · {run.status} · First text: {run.firstTokenMs === null ? 'not observed' : `${Math.round(run.firstTokenMs)} ms`} · Completion: {Math.round(run.totalMs)} ms</p>
-      {run.expected && <p className="whitespace-pre-wrap text-sm"><strong>Expected:</strong> {run.expected}</p>}
-      <div className="max-h-80 overflow-auto break-words"><Markdown>{run.answer || run.error || 'No output'}</Markdown></div>
-      {run.error && <p className="text-sm text-[color:var(--stop)]">{run.error}</p>}
-      <label className="block space-y-1 text-sm">Review result<select value={run.verdict} onChange={(e) => updateRun(run.id, { verdict: e.target.value as TuningRun['verdict'] })} className="w-full rounded-lg border border-black/10 bg-white/60 px-3 py-2.5 outline-none transition focus:border-emerald-700/30 focus:ring-2 focus:ring-emerald-700/10"><option value="unreviewed">Not reviewed</option><option value="pass" disabled={run.status !== 'complete'}>Pass — useful and correct for this test</option><option value="needs-work">Needs work</option></select></label>
-      <label className="block space-y-1 text-sm">System improvement notes<textarea rows={2} maxLength={2000} value={run.notes} onChange={(e) => updateRun(run.id, { notes: e.target.value })} className="resize-none w-full rounded-lg border border-black/10 bg-white/60 px-3 py-2.5 outline-none transition focus:border-emerald-700/30 focus:ring-2 focus:ring-emerald-700/10" /></label>
-      <details className="text-xs"><summary className="cursor-pointer">Calibration used for this request</summary><pre className="mt-2 whitespace-pre-wrap">{run.calibration || '(Live defaults; no calibration override)'}</pre></details>
-    </article>)}</section>}
-    {running && <div hidden={!visible} className="min-h-[36rem] rounded-2xl border border-black/10"><CopilotCalibrationContext.Provider value={{ instructions, revision: tuning.state.active.revision, onResult: observe, onRunning: observeRunning }}><CopilotPanel key={panelKey} variant="workspace" getTranscript={transcript} /></CopilotCalibrationContext.Provider></div>}
+  const accepted = hasAcceptedRun(runs, instructions)
+  return <div>
+    <ol className={styles.labSteps} aria-label="Test workflow"><li className={!runs.length ? styles.stepActive : undefined}><span>1</span>Set up a test</li><li className={runs.length && !accepted ? styles.stepActive : undefined}><span>2</span>Review the answer</li><li className={accepted ? styles.stepActive : undefined}><span>3</span>Apply to Live</li></ol>
+    <div className={styles.labGrid}>
+      <section className={styles.card} aria-labelledby="lab-scenario-heading">
+        <div className={styles.cardHeader}><h2 id="lab-scenario-heading">Test scenario</h2><span className={styles.smallBadge}><FlaskConical size={12} aria-hidden />Live answer pipeline</span></div>
+        <div className={styles.cardBody}>
+          <label className={styles.field}>Scenario transcript / interviewer question<textarea className="resize-none" rows={5} maxLength={40_000} value={scenario} disabled={answerRunning || micOn || blocked} onChange={(e) => setScenario(e.target.value)} /></label>
+          <div className={styles.scenarioChoices}>{SCENARIOS.map((item) => <button type="button" key={item.name} aria-label={`Load ${item.name.toLowerCase()} scenario`} aria-pressed={scenario === item.text} disabled={answerRunning || micOn || blocked} onClick={() => { setScenario(item.text); setExpected(item.expected) }}>{item.name}</button>)}</div>
+          <div className={styles.labDivider}><label className={styles.field}>Expected behavior or reference answer (not sent to the answering model)<textarea className="resize-none" rows={3} maxLength={2000} value={expected} disabled={answerRunning || blocked} onChange={(e) => setExpected(e.target.value)} placeholder="Describe what a correct, useful response must contain." /></label><p className={styles.caption}>Use this checklist to judge the response after the test. The model does not see it.</p></div>
+          {!running ? <button type="button" className={`btn-signal gap-2 ${styles.runButton}`} disabled={blocked || finishing || !scenario.trim()} onClick={begin}><Play size={14} aria-hidden />Open test workspace</button> : <div className={`${styles.actionRow} mt-5`}><button type="button" className="btn-ghost gap-2 text-xs" disabled={micBusy || answerRunning} onClick={() => void toggleMic()}><Mic size={13} aria-hidden />{micOn ? 'Stop & append interviewer speech' : 'Dictate interviewer input'}</button><button type="button" className="btn-ghost gap-2 text-xs" disabled={answerRunning} onClick={() => setPanelKey((key) => key + 1)}><RotateCcw size={13} aria-hidden />Reset copilot for clean replay</button><button type="button" className="btn-signal gap-2 text-xs" onClick={() => void finish()}><Square size={12} aria-hidden />End test &amp; open feedback</button></div>}
+          {running && <p role="status" className={`${styles.labStatus} mt-4`}>{answerRunning ? 'Live copilot is answering the test input…' : 'Ask your scenario question in the workspace below, or enable Auto to detect settled transcript questions.'}</p>}
+          {micOn && <p className={`${styles.labNotice} mt-4 whitespace-pre-wrap`}>{micBusy ? 'Connecting microphone…' : captureText(microphone.segments) || 'Speak an interviewer question.'}</p>}
+        </div>
+      </section>
+      <section className={styles.card} aria-labelledby="lab-tuning-heading">
+        <div className={styles.cardHeader}><h2 id="lab-tuning-heading">Tune your live profile</h2><span className={styles.smallBadge}>Active v{tuning.state.active.revision}</span></div>
+        <div className={styles.cardBody}>
+          <label className={styles.field}>Draft live calibration instructions<textarea className="resize-none" rows={6} maxLength={MAX_CALIBRATION} value={instructions} disabled={answerRunning || blocked} onChange={(e) => setDraft(e.target.value)} placeholder="Start with a direct answer. State assumptions. Keep the opening under 80 words. Never invent resume facts." /></label>
+          <p className={`${styles.caption} mt-3`}>Draft changes stay in Mock Lab until a completed answer passes your review.</p>
+          <div className={styles.labDivider}><p className={styles.labStatus}><CheckCheck size={16} className="shrink-0" aria-hidden />{accepted ? 'A passed test matches these instructions.' : 'Test and approve these instructions to apply them.'}</p><div className={`${styles.actionRow} mt-4`}><button type="button" className="btn-signal gap-2 text-xs" disabled={blocked || answerRunning || !accepted} onClick={publish}><ArrowUpRight size={14} aria-hidden />Apply to Live</button><button type="button" className="btn-ghost text-xs" disabled={answerRunning || blocked} onClick={() => setDraft(null)}>Reset draft</button></div><button type="button" className="btn-ghost mt-3 gap-2 text-xs" disabled={blocked || answerRunning || !tuning.state.previous} onClick={() => { tuning.rollback(); setDraft(null); setNotice('Previous live instructions restored as a new revision.') }}><RotateCcw size={13} aria-hidden />Roll back live profile</button></div>
+        </div>
+      </section>
+    </div>
+    {blocked && <p role="status" className={`${styles.labNotice} mt-4`}>End the live interview before running tests or applying calibration changes.</p>}
+    {notice && <p role="status" className={`${styles.labNotice} mt-4`}>{notice}</p>}
+    {(error || tuning.error || microphone.error) && <p role="alert" className={`${styles.errorBanner} mt-4`}>{error || tuning.error || microphone.error}</p>}
+    {runs.length > 0 ? <section className={`${styles.card} ${styles.results}`} aria-labelledby="lab-results-heading">
+      <div className={styles.cardHeader}><div><h3 id="lab-results-heading">Test results</h3><p className={`${styles.caption} mt-1`}>{runs.length} of 20 retained · Timings exclude transcription and preparation.</p></div><button type="button" className="btn-ghost text-xs" disabled={!runs.some((run) => run.verdict === 'pass' && run.status === 'complete')} onClick={exportExamples}>Export accepted examples</button></div>
+      <div className={styles.resultsList}>{runs.map((run) => <article key={run.id} className={styles.result}>
+        <div className={styles.resultTitle}><h4>{run.question}</h4><span className={`${styles.resultStatus} ${run.verdict === 'pass' ? styles.resultPass : run.verdict === 'needs-work' ? styles.resultNeedsWork : ''}`}>{run.verdict === 'pass' ? 'Pass' : run.verdict === 'needs-work' ? 'Needs work' : 'Awaiting review'}</span></div>
+        <div className={styles.resultMeta}><span>{run.mode} · {run.status}</span><span>First text: {run.firstTokenMs === null ? 'not observed' : `${Math.round(run.firstTokenMs)} ms`}</span><span>Completion: {Math.round(run.totalMs)} ms</span></div>
+        <div className={styles.resultAnswer}><Markdown>{run.answer || run.error || 'No output'}</Markdown></div>
+        {run.error && <p className={`${styles.error} mt-2`}>{run.error}</p>}
+        {run.expected && <p className={`${styles.caption} mt-4 whitespace-pre-wrap`}><strong>Review against:</strong> {run.expected}</p>}
+        <div className={styles.resultReview}><label className={styles.field}>Review result<select value={run.verdict} onChange={(e) => updateRun(run.id, { verdict: e.target.value as TuningRun['verdict'] })}><option value="unreviewed">Not reviewed</option><option value="pass" disabled={run.status !== 'complete'}>Pass — useful and correct for this test</option><option value="needs-work">Needs work</option></select></label><label className={styles.field}>System improvement notes<textarea className="resize-none" rows={2} maxLength={2000} value={run.notes} onChange={(e) => updateRun(run.id, { notes: e.target.value })} /></label></div>
+        <details className={styles.resultDetails}><summary>Calibration used for this request</summary><pre>{run.calibration || '(Live defaults; no calibration override)'}</pre></details>
+      </article>)}</div>
+    </section> : <section className={styles.labEmpty}><ClipboardCheck size={25} aria-hidden /><div><h3>Your test results will appear here</h3><p className={styles.caption}>Run a question, check the response against your criteria, and mark it Pass or Needs work.</p></div></section>}
+    {running && <section hidden={!visible} className={styles.labPanel} aria-label="Live copilot test workspace"><div className={styles.cardHeader}><h3>Test workspace</h3><span className={styles.smallBadge}>Draft profile</span></div><CopilotCalibrationContext.Provider value={{ instructions, revision: tuning.state.active.revision, onResult: observe, onRunning: observeRunning }}><CopilotPanel key={panelKey} variant="workspace" getTranscript={transcript} /></CopilotCalibrationContext.Provider></section>}
+    <details className={`${styles.resultDetails} mt-5`}><summary>What this test measures</summary><p>Live and Mock share mode routing, uploaded grounding, response preferences, and the answer endpoint. Configure the mode and grounding in the test workspace. Calibration applies to standard copilot answers; the separate Repository Interview multi-agent pipeline is not calibrated here. Clean replay resets conversation state, not saved documents. Prompt tuning does not change model weights.</p></details>
   </div>
 }

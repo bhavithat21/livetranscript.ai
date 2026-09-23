@@ -1,6 +1,7 @@
 'use client'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { BookOpen, Mic, MicOff, Sparkles, X } from 'lucide-react'
+import Link from 'next/link'
+import { AudioLines, BookOpen, FileText, Link2, Mic, MicOff, Sparkles, X } from 'lucide-react'
 import { useMicStream, type AudioSource } from '@/lib/audio/useMicStream'
 import { useNativeCapture } from '@/lib/audio/useNativeCapture'
 import { connectWithFallback, type ProviderChoice } from '@/lib/transcription'
@@ -317,9 +318,10 @@ export default function RecordPage() {
       // (sm:pr reads --ask-w, defaulting to 0 when the panel is closed) so the
       // transcript reflows into the remaining space instead of being covered by
       // the overlay. Mobile keeps the full-screen sheet (no sm: padding).
-      className="relative min-h-dvh bg-[#faf9f7] pb-32 text-[#16151a] sm:pr-[var(--ask-w,0px)] sm:transition-[padding] sm:duration-200"
+      className={`relative min-h-dvh bg-[color:var(--paper)] text-ink sm:pr-[var(--ask-w,0px)] sm:transition-[padding] sm:duration-200 ${idle ? 'pb-10' : 'pb-32'}`}
       style={askOpen ? ({ '--ask-w': `${panel.width}px` } as React.CSSProperties) : undefined}
     >
+      <title>Transcript — LiveTranscript</title>
       <ShortcutHelp
         shortcuts={[
           { keys: 'S', label: recording ? 'Stop recording' : 'Start recording' },
@@ -332,15 +334,15 @@ export default function RecordPage() {
           { keys: `${MOD}⇧H`, label: 'Hide / show window (desktop)' },
         ]}
       />
-      {/* Idle has no header — pin nav top-left so the launch screen isn't a dead end. */}
       {idle && (
-        <div className="fixed left-4 top-4 z-50">
+        <header className="flex min-h-18 items-center justify-between gap-4 border-b border-[color:var(--line)] bg-[color:var(--reader)] px-4 py-3 sm:px-6">
           <HomeMenu />
-        </div>
+          <Link href="/dashboard" className="btn-ghost gap-2 text-sm"><FileText size={15} aria-hidden />Transcripts</Link>
+        </header>
       )}
       {/* Live telemetry rail — replaces the orphan status; shows on-air state + numbers. */}
       {!reader && !idle && (
-        <header className="mx-auto flex max-w-3xl flex-wrap items-center gap-x-3 gap-y-2 px-4 py-4 sm:px-6">
+        <header className="mx-auto mb-4 flex max-w-5xl flex-wrap items-center gap-x-3 gap-y-2 border-b border-[color:var(--line)] px-4 py-4 sm:px-6">
           <HomeMenu />
           {recording ? (
             <>
@@ -355,7 +357,7 @@ export default function RecordPage() {
             <span className="text-sm text-black/40">Stopped · {words.toLocaleString()} words</span>
           )}
           {engine && (
-            <span className="rounded-full bg-black/5 px-2.5 py-0.5 text-xs text-black/50">
+            <span className="rounded-md border border-[color:var(--line)] px-2.5 py-1 text-xs text-[color:var(--muted)]">
               {engineLabel(engine)}
             </span>
           )}
@@ -369,7 +371,8 @@ export default function RecordPage() {
             <button
               onClick={() => setAskOpen((v) => !v)}
               data-active={askOpen}
-              className="btn-ghost flex items-center gap-1.5 text-sm data-[active=true]:border-emerald-700/40 data-[active=true]:text-emerald-800"
+              aria-pressed={askOpen}
+              className="btn-ghost flex items-center gap-1.5 text-sm data-[active=true]:border-[color:var(--signal)]/40 data-[active=true]:text-[color:var(--signal)]"
               title="Ask the transcript"
             >
               <Sparkles size={15} /> Ask
@@ -386,7 +389,7 @@ export default function RecordPage() {
       {reader && (
         <button
           onClick={() => setReader(false)}
-          className="glass fixed right-4 top-4 z-50 flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm"
+          className="btn-ghost fixed right-4 top-4 z-50 flex items-center gap-1.5 text-sm"
         >
           <X size={15} /> Exit Reader
         </button>
@@ -417,16 +420,16 @@ export default function RecordPage() {
       )}
 
       {(startError || error) && !reader && !idle && (
-        <p className="mx-auto max-w-3xl px-6 pt-2 text-sm text-[color:var(--stop)]">{startError ?? error}</p>
+        <p role="alert" className="mx-auto max-w-3xl px-6 pt-2 text-sm text-[color:var(--stop)]">{startError ?? error}</p>
       )}
 
       {summary && !reader && (
-        <section className="rise-in mx-auto mb-6 mt-6 max-w-3xl reader-surface rounded-2xl p-6">
-          <h2 className="mb-3 font-[family-name:var(--font-serif)] text-xl">Summary</h2>
+        <section className="reader-surface mx-4 mb-6 mt-6 rounded-xl p-5 sm:mx-auto sm:max-w-3xl sm:p-6">
+          <h2 className="mb-3 text-xl font-semibold tracking-tight">Summary</h2>
           <p className="text-lg leading-relaxed text-black/80">{summary.summary}</p>
           {summary.keyPoints.length > 0 && (
             <div className="mt-5">
-              <h3 className="mb-1.5 text-sm font-semibold uppercase tracking-wide text-black/40">Key points</h3>
+              <h3 className="mb-1.5 text-sm font-semibold text-[color:var(--muted)]">Key points</h3>
               <ul className="space-y-1 text-black/80">
                 {summary.keyPoints.map((k, i) => (
                   <li key={i} className="flex gap-2"><span className="text-[color:var(--signal)]">•</span>{k}</li>
@@ -436,7 +439,7 @@ export default function RecordPage() {
           )}
           {summary.actionItems.length > 0 && (
             <div className="mt-5">
-              <h3 className="mb-1.5 text-sm font-semibold uppercase tracking-wide text-black/40">Action items</h3>
+              <h3 className="mb-1.5 text-sm font-semibold text-[color:var(--muted)]">Action items</h3>
               <ul className="space-y-1 text-black/80">
                 {summary.actionItems.map((a, i) => (
                   <li key={i} className="flex gap-2"><span className="text-[color:var(--signal)]">→</span>{a}</li>
@@ -460,15 +463,17 @@ export default function RecordPage() {
           Post-stop: a single calm "New recording". Absent in idle (console owns it). */}
       {!reader && recording && (
         <div className="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex justify-center sm:right-[var(--ask-w,0px)] px-3">
-          <div className="glass dock-live pointer-events-auto flex max-w-[calc(100vw-1.5rem)] flex-wrap items-center justify-center gap-2 rounded-3xl px-4 py-2.5 sm:gap-3">
+          <div className="glass dock-live pointer-events-auto flex max-w-[calc(100vw-1.5rem)] flex-wrap items-center justify-center gap-2 rounded-xl px-4 py-2.5 sm:gap-3">
             <button
               onClick={() => setMuted((m) => !m)}
               data-active={muted}
+              aria-pressed={muted}
+              aria-label={muted ? 'Unmute audio' : 'Mute audio'}
               className="btn-ghost flex items-center gap-2 text-sm"
               title="Mute / unmute (M or Space)"
             >
               {muted ? <MicOff size={16} /> : <Mic size={16} />}
-              <span className="hidden sm:inline">{muted ? 'Muted' : 'Mic on'}</span>
+              <span className="hidden sm:inline">{muted ? 'Muted' : 'Audio on'}</span>
             </button>
             <span className="hidden h-5 w-px bg-black/10 sm:block" aria-hidden />
             <Waveform level={level} active={recording && !muted} />
@@ -546,76 +551,48 @@ function LaunchConsole({
   error: string | null
 }) {
   return (
-    <div className="grid min-h-[calc(100dvh-4rem)] place-items-center px-6">
-      <div className="flex w-full max-w-md flex-col items-center text-center">
-        <p className="rise-in flex items-center gap-2 text-sm font-medium uppercase tracking-widest text-[color:var(--signal)]">
-          <span className="h-1.5 w-1.5 rounded-full bg-black/25" /> Live transcription · ready
-        </p>
-        <h1
-          className="rise-in mt-3 font-[family-name:var(--font-serif)] text-4xl leading-[1.05] tracking-[-0.01em] sm:text-5xl"
-          style={{ animationDelay: '80ms' }}
-        >
-          Press record.
-          <br />
-          Every word, the moment it&rsquo;s said.
-        </h1>
-
-        <div
-          className="rise-in glass mt-8 flex w-full flex-col gap-3 rounded-3xl p-5 text-left"
-          style={{ animationDelay: '200ms' }}
-        >
-          <label className="flex items-center justify-between gap-3 text-sm">
-            <span className="text-black/50">Source</span>
-            <Select
-              ariaLabel="Audio source"
-              value={source}
-              onChange={(v) => setSource(v)}
-              disabled={busy}
-              options={[
-                { value: 'system', label: 'System sound (recommended)' },
-                { value: 'mic', label: 'Microphone' },
-              ]}
-            />
-          </label>
-          {/* Echo/contention guidance: System sound is a digital loopback — it
-              never grabs the mic/speaker device Zoom is using, so no echo and no
-              device conflict. Mic is only for transcribing the physical room. */}
-          <p className="-mt-1 text-xs leading-relaxed text-black/45">
-            {source === 'system'
-              ? 'Captures the call audio digitally — no echo, and it won’t conflict with Zoom/Meet using your mic or speakers.'
-              : 'Only for the physical room you’re in. In a call this can echo and fight Zoom for the mic — use System sound instead.'}
-          </p>
-          <label className="flex items-center justify-between gap-3 text-sm">
-            <span className="text-black/50">Engine</span>
-            {/* Capability labels — never expose which vendor/model powers each. */}
-            <Select
-              ariaLabel="Transcription engine"
-              value={providerChoice}
-              onChange={(v) => setProviderChoice(v)}
-              disabled={busy}
-              title="How we transcribe — Auto picks the best engine for you"
-              options={[
-                { value: 'auto', label: 'Auto — best available' },
-                { value: 'AssemblyAI', label: 'Highest accuracy' },
-                { value: 'Deepgram', label: 'Fastest / lowest latency' },
-              ]}
-            />
-          </label>
-          <button
-            onClick={onStart}
-            disabled={busy}
-            className="btn-signal mt-1 flex items-center justify-center gap-2 py-3 text-base"
-            title="Start (S)"
-          >
-            <Mic size={18} /> {busy ? 'Starting…' : 'Start recording'}
-          </button>
-          {error && <p className="text-center text-sm text-[color:var(--stop)]">{error}</p>}
+    <div className="mx-auto grid w-full max-w-5xl gap-10 px-4 py-10 sm:px-6 sm:py-16 lg:min-h-[calc(100dvh-9rem)] lg:grid-cols-[1fr_1.1fr] lg:items-center lg:gap-16">
+      <div>
+        <span className="mb-6 inline-flex h-12 w-12 items-center justify-center rounded-xl border border-[color:var(--line)] bg-[color:var(--reader)] text-[color:var(--signal)]"><AudioLines size={24} aria-hidden /></span>
+        <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">New transcript</h1>
+        <p className="mt-3 max-w-md text-base leading-7 text-[color:var(--muted)]">Keep up with the conversation. Capture the audio you choose, read along, then review what matters.</p>
+        <div className="mt-8 space-y-5">
+          {[
+            { icon: AudioLines, title: 'Follow the conversation', text: 'Live text with adjustable type and a focused reading view.' },
+            { icon: FileText, title: 'Review the key details', text: 'A summary, key points and action items after you stop.' },
+            { icon: Link2, title: 'Share on your terms', text: 'Export your transcript or create a link with an expiry.' },
+          ].map(({ icon: Icon, title, text }) => <div key={title} className="flex gap-3"><Icon size={17} className="mt-0.5 shrink-0 text-[color:var(--muted)]" aria-hidden /><div><h2 className="text-sm font-medium">{title}</h2><p className="mt-1 text-sm leading-6 text-[color:var(--muted)]">{text}</p></div></div>)}
         </div>
-
-        <p className="rise-in mt-4 font-mono text-xs text-black/35" style={{ animationDelay: '320ms' }}>
-          <kbd>S</kbd> start/stop · <kbd>M</kbd> mute · <kbd>R</kbd> reader
-        </p>
       </div>
+
+      <section aria-labelledby="recording-setup-title" className="rounded-xl border border-[color:var(--line)] bg-[color:var(--reader)] p-5 sm:p-7">
+        <div className="mb-6 flex items-center justify-between gap-3"><h2 id="recording-setup-title" className="text-lg font-semibold tracking-tight">Recording setup</h2><span className="rounded-md bg-[color:var(--surface-soft)] px-2 py-1 text-xs text-[color:var(--muted)]">{busy ? 'Connecting' : 'Not recording'}</span></div>
+        <div className="space-y-6">
+          <div>
+            <p className="mb-2 text-sm font-medium">Audio source</p>
+            <Select ariaLabel="Audio source" value={source} onChange={setSource} disabled={busy} className="[&>button]:min-h-11 [&>button]:w-full [&>button]:justify-between [&>button]:rounded-lg [&>ul]:w-full" options={[
+              { value: 'system', label: 'System sound' },
+              { value: 'mic', label: 'Microphone' },
+            ]} />
+            <p className="mt-2 text-xs leading-5 text-[color:var(--muted)]">{source === 'system' ? 'For call or browser audio. Your device will ask you to choose what to share; audio support depends on your browser and operating system.' : 'For people speaking in the room. Your device will ask for microphone access.'}</p>
+          </div>
+          <div>
+            <p className="mb-2 text-sm font-medium">Transcription engine</p>
+            <Select ariaLabel="Transcription engine" value={providerChoice} onChange={setProviderChoice} disabled={busy} className="[&>button]:min-h-11 [&>button]:w-full [&>button]:justify-between [&>button]:rounded-lg [&>ul]:w-full" options={[
+              { value: 'auto', label: 'Auto — best available' },
+              { value: 'AssemblyAI', label: 'Prioritize accuracy' },
+              { value: 'Deepgram', label: 'Prioritize speed' },
+            ]} />
+            <p className="mt-2 text-xs leading-5 text-[color:var(--muted)]">Auto connects an available engine and can fall back if it is unavailable.</p>
+          </div>
+        </div>
+        <div className="mt-6 border-t border-[color:var(--line)] pt-5">
+          <button onClick={onStart} disabled={busy} aria-busy={busy} className="btn-signal flex w-full items-center justify-center gap-2 py-3 text-sm" title="Start (S)"><Mic size={17} aria-hidden />{busy ? 'Starting recording…' : 'Start recording'}</button>
+          <p className="mt-3 text-center text-xs leading-5 text-[color:var(--muted)]">Audio starts after you grant access. Make sure everyone involved agrees to transcription.</p>
+          {error && <p role="alert" className="mt-3 text-sm text-[color:var(--stop)]">{error}</p>}
+        </div>
+        <p className="mt-5 flex flex-wrap justify-center gap-x-4 gap-y-2 text-xs text-[color:var(--muted)]"><span><kbd className="font-mono">S</kbd> Start / stop</span><span><kbd className="font-mono">M</kbd> Mute</span><span><kbd className="font-mono">R</kbd> Reader</span></p>
+      </section>
     </div>
   )
 }

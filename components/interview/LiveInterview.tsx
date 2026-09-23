@@ -1,6 +1,6 @@
 'use client'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Download, Mic, Settings2, Square, Waves } from 'lucide-react'
+import { AudioLines, Download, FileText, Headphones, Mic, Monitor, Play, Settings2, ShieldCheck, Sparkles, Square } from 'lucide-react'
 import { LiveAnswerCanvas } from './LiveAnswerCanvas'
 import { useKeytermPrefs } from '@/lib/transcription/useKeytermPrefs'
 import { liveTranscript, useInterviewRecorder } from '@/lib/interview/useInterviewRecorder'
@@ -8,6 +8,7 @@ import { detectionTranscript } from '@/lib/interview/detectionTranscript'
 import { downloadInterview } from '@/lib/interview/client'
 import { useInterviewTuning } from '@/lib/interview/TuningContext'
 import type { InterviewSession } from '@/lib/interview/session'
+import styles from './Interview.module.css'
 
 export function LiveInterview({ blocked, onActivity, onComplete }: {
   visible: boolean; blocked: boolean; onActivity: (active: boolean) => void
@@ -58,7 +59,7 @@ export function LiveInterview({ blocked, onActivity, onComplete }: {
     if (activity.current || blocked || !consent) return
     const token = ++lifecycle.current
     activity.current = true; ending.current = false; sessionId.current = crypto.randomUUID(); startTime.current = Date.now()
-    setCaptureStartedAt(startTime.current); setElapsed(0); setError(null); setBusy(true); setActive(true); setTranscriptOpen(false); onActivity(true)
+    setCaptureStartedAt(startTime.current); setElapsed(0); setError(null); setBusy(true); setActive(true); setTranscriptOpen(true); onActivity(true)
     try {
       if (source !== 'mic') await call.start('system', keyterms)
       if (token === lifecycle.current && !ending.current && source !== 'system') await microphone.start('mic', keyterms)
@@ -100,60 +101,73 @@ export function LiveInterview({ blocked, onActivity, onComplete }: {
   const captured = (source !== 'mic' && callRows.length > 0) || (source !== 'system' && micRows.length > 0)
   const hasRecording = call.phase === 'recording' || microphone.phase === 'recording'
   const formatTime = (seconds: number) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
-  if (!active) return <div className="mx-auto max-w-2xl py-5 sm:py-12">
-    <section className="rounded-2xl border border-black/[0.07] bg-white/60 px-5 py-8 text-center sm:px-10 sm:py-12">
-      <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-emerald-50 text-emerald-800"><Waves size={20} /></div>
-      <h2 className="mt-5 text-2xl font-semibold tracking-[-0.025em]">Ready when the interview starts</h2>
-      <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-black/45">Live keeps setup out of the way once recording begins. The assistant opens automatically and the transcript stays available on demand.</p>
-      <div className="mx-auto mt-7 max-w-md rounded-xl border border-black/[0.07] bg-black/[0.018] p-4 text-left">
-        <div className="flex items-center justify-between gap-4 py-1.5 text-sm"><span className="text-black/45">Audio</span><span className="font-medium">{source === 'both' ? 'Microphone + system' : source === 'system' ? 'System audio' : 'Microphone'}</span></div>
-        <div className="flex items-center justify-between gap-4 py-1.5 text-sm"><span className="text-black/45">Live profile</span><span className="font-medium">v{tuning.state.active.revision}</span></div>
-        <div className="flex items-center justify-between gap-4 py-1.5 text-sm"><span className="text-black/45">Assistant</span><span className="font-medium">Opens on start</span></div>
+  const transcriptRows = [
+    ...(source === 'mic' ? [] : callRows.map((row) => ({ ...row, channel: 'call', label: 'Interviewer / call' }))),
+    ...(source === 'system' ? [] : micRows.map((row) => ({ ...row, channel: 'mic', label: 'You / microphone' }))),
+  ].sort((a, b) => a.capturedAt - b.capturedAt).slice(-24)
+  const captureStatus = finishing ? 'Saving transcript…' : busy ? 'Connecting audio…' : hasRecording ? 'Listening' : 'Audio paused'
+  if (!active) return <div>
+    <section className={styles.liveStage} aria-labelledby="live-setup-heading">
+      <div className={styles.liveTopbar}><span className={styles.liveMark}><AudioLines size={17} aria-hidden /></span><span className={styles.liveTitle}>A clear space for your next conversation</span><span className={styles.sessionTime}>Ready to set up</span></div>
+      <div className={styles.setupGrid}>
+        <div className={styles.setupMain}>
+          <span className={styles.answerTag}>Live interview</span>
+          <h2 id="live-setup-heading">Focus on the conversation.</h2>
+          <p>Questions, grounded answers, and the live transcript stay together. Start your audio when everyone is ready.</p>
+          <label className={styles.setupPermission}><input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} /><span>I have permission to record this conversation and use AI assistance where permitted.</span></label>
+          <div className={styles.setupActions}>
+            <button type="button" className={styles.startButton} disabled={blocked || !consent} onClick={() => void begin()}><Play size={15} aria-hidden />Start interview</button>
+            <button type="button" className={styles.darkButton} aria-expanded={setupOpen} aria-controls="live-setup-fields" onClick={() => setSetupOpen((open) => !open)}><Settings2 size={15} aria-hidden />Configure</button>
+          </div>
+          {setupOpen && <fieldset id="live-setup-fields" className={styles.setupFields}>
+            <legend className="sr-only">Interview configuration</legend>
+            <label className={styles.field}>Session title<input maxLength={180} value={title} onChange={(event) => setTitle(event.target.value)} /></label>
+            <label className={styles.field}>Audio source<select value={source} onChange={(event) => setSource(event.target.value as typeof source)}><option value="both">Call audio + my microphone</option><option value="system">Call / system audio only</option><option value="mic">My microphone only</option></select></label>
+            <p className={styles.setupNote}><Headphones size={14} aria-hidden />Use headphones with dual-channel capture to reduce echo.</p>
+          </fieldset>}
+          {blocked && <p role="status" className={styles.livePaused}>End Mock Lab before starting Live.</p>}
+          {(error || call.error || microphone.error) && <p role="alert" className={styles.error}>{error || call.error || microphone.error}</p>}
+        </div>
+        <aside className={styles.setupAside} aria-label="Session setup summary">
+          <h3>Set up for this session</h3>
+          <dl className={styles.setupFacts}>
+            <div className={styles.setupFact}><Monitor size={20} aria-hidden /><div><dt>{source === 'both' ? 'Microphone + system audio' : source === 'system' ? 'System audio' : 'Microphone'}</dt><dd>{source === 'both' ? 'Separate channels keep the interviewer’s questions and your responses in context.' : source === 'system' ? 'Capture the call. Your microphone will not be recorded separately.' : 'Capture speech near your microphone. Remote questions may be missing.'}</dd></div></div>
+            <div className={styles.setupFact}><Sparkles size={20} aria-hidden /><div><dt>Live profile v{tuning.state.active.revision}</dt><dd>Your live instructions, answer preferences, and saved background guide each response.</dd></div></div>
+            <div className={styles.setupFact}><FileText size={20} aria-hidden /><div><dt>A transcript to come back to</dt><dd>End the session to save its transcript in Feedback. Raw audio is not saved by this workspace.</dd></div></div>
+          </dl>
+        </aside>
       </div>
-      <label className="mx-auto mt-5 flex max-w-md items-start gap-3 text-left text-sm text-black/60"><input type="checkbox" className="mt-0.5 h-4 w-4" checked={consent} onChange={(event) => setConsent(event.target.checked)} /><span>I have permission to record this conversation and use AI assistance where permitted.</span></label>
-      <div className="mt-7 flex flex-wrap items-center justify-center gap-2">
-        <button className="btn-signal gap-2 px-5" disabled={blocked || !consent} onClick={() => void begin()}><Mic size={16} />Start interview</button>
-        <button className="btn-ghost gap-2" onClick={() => setSetupOpen((open) => !open)}><Settings2 size={15} />Configure</button>
-      </div>
-      {setupOpen && <fieldset className="mx-auto mt-6 grid max-w-md gap-4 border-t border-black/[0.07] pt-5 text-left">
-        <label className="space-y-1.5 text-sm"><span className="text-black/55">Session title</span><input className="w-full rounded-lg border border-black/10 bg-white/70 px-3 py-2.5" maxLength={180} value={title} onChange={(event) => setTitle(event.target.value)} /></label>
-        <label className="space-y-1.5 text-sm"><span className="text-black/55">Audio source</span><select className="w-full rounded-lg border border-black/10 bg-white/70 px-3 py-2.5" value={source} onChange={(event) => setSource(event.target.value as typeof source)}><option value="both">Call audio + my microphone</option><option value="system">Call / system audio only</option><option value="mic">My microphone only</option></select></label>
-        <p className="text-xs leading-relaxed text-black/40">Use headphones with dual-channel capture to reduce echo. Raw audio is not saved by this workspace.</p>
-      </fieldset>}
-      {blocked && <p role="status" className="mt-4 text-sm">End Mock Lab before starting Live.</p>}
-      {(error || call.error || microphone.error) && <p role="alert" className="mt-4 text-sm text-[color:var(--stop)]">{error || call.error || microphone.error}</p>}
     </section>
+    <div className={styles.liveHelp}><span><ShieldCheck size={14} className="mr-1.5 inline" aria-hidden />Audio starts only after you choose Start interview.</span><span>Test your instructions in Mock Lab before going live.</span></div>
   </div>
 
-  return <div className="space-y-4">
-    <section className="overflow-hidden rounded-2xl border border-black/[0.08] bg-white/70 shadow-[0_18px_50px_rgba(0,0,0,0.06)]">
-      <div className="flex flex-wrap items-center gap-3 border-b border-black/[0.07] px-4 py-3 sm:px-5">
-        <span className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.1em] text-emerald-700"><span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" />Live</span>
-        <span className="min-w-0 truncate text-sm font-semibold">{title || 'Live interview'}</span>
-        <span className="ml-auto text-sm font-medium tabular-nums text-black/45">{formatTime(elapsed)}</span>
-        <button className="inline-flex min-h-9 items-center gap-1.5 rounded-full bg-red-500 px-3.5 text-xs font-semibold text-white shadow-sm hover:bg-red-600 disabled:opacity-50" disabled={finishing} onClick={() => void finish()}><Square size={12} />End</button>
+  return <div>
+    <section className={styles.liveStage} aria-label="Active interview">
+      <div className={styles.liveTopbar}>
+        <span className={styles.liveMark}><AudioLines size={17} aria-hidden /></span>
+        <span className={styles.liveTitle}>{title || 'Live interview'}</span>
+        <span className={styles.liveStatus}>{captureStatus}</span>
+        <span className={styles.sessionTime}>{formatTime(elapsed)}</span>
+        <button type="button" className={styles.endButton} disabled={finishing} onClick={() => void finish()}><Square size={12} aria-hidden />End</button>
       </div>
-
-      <div className={`grid min-h-[68vh] min-w-0 ${transcriptOpen ? '2xl:grid-cols-[minmax(560px,1fr)_340px]' : 'grid-cols-1'}`}>
-        <div className="flex min-w-0 flex-col p-4 sm:p-6">
+      <div className={`${styles.liveGrid} ${!transcriptOpen ? styles.liveGridNoRail : ''}`}>
+        <div className={styles.answerColumn}>
           <LiveAnswerCanvas getTranscript={text} getQuestionTranscript={questionText} />
-          <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-black/[0.06] pt-3 text-xs text-black/45">
-            {source !== 'system' && <span className="inline-flex items-center gap-1.5"><span className={`h-1.5 w-1.5 rounded-full ${microphone.phase === 'recording' ? 'bg-emerald-500' : 'bg-black/20'}`} />Mic</span>}
-            {source !== 'mic' && <span className="inline-flex items-center gap-1.5"><span className={`h-1.5 w-1.5 rounded-full ${call.phase === 'recording' ? 'bg-emerald-500' : 'bg-black/20'}`} />System</span>}
-            <span>{busy ? 'Connecting…' : hasRecording ? 'Listening' : 'Paused'}</span>
-            <button className="ml-auto rounded-md px-2 py-1.5 font-medium hover:bg-black/[0.04]" onClick={() => setTranscriptOpen((open) => !open)}>{transcriptOpen ? 'Hide transcript' : 'Transcript'}</button>
-            <button className="inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 font-medium hover:bg-black/[0.04]" disabled={!captured} onClick={() => downloadInterview(title, text())}><Download size={13} />Export</button>
+          <div className={styles.captureBar}>
+            {source !== 'system' && <span className={styles.channel}><span className={`${styles.channelDot} ${microphone.phase === 'recording' ? styles.channelDotOn : ''}`} /><Mic size={12} aria-hidden />Mic · {microphone.phase === 'recording' ? 'on' : 'waiting'}</span>}
+            {source !== 'mic' && <span className={styles.channel}><span className={`${styles.channelDot} ${call.phase === 'recording' ? styles.channelDotOn : ''}`} /><Monitor size={12} aria-hidden />System · {call.phase === 'recording' ? 'on' : 'waiting'}</span>}
+            <div className={styles.captureActions}><button type="button" className={styles.darkButton} aria-expanded={transcriptOpen} aria-controls="live-transcript" onClick={() => setTranscriptOpen((open) => !open)}><FileText size={13} aria-hidden />{transcriptOpen ? 'Hide transcript' : 'Transcript'}</button><button type="button" className={styles.darkButton} disabled={!captured} onClick={() => downloadInterview(title, text())}><Download size={13} aria-hidden />Export</button></div>
           </div>
         </div>
-
-        {transcriptOpen && <aside className="border-t border-black/[0.07] bg-black/[0.018] p-4 2xl:border-l 2xl:border-t-0">
-          <div className="flex items-center justify-between"><div><h3 className="text-sm font-semibold">Transcript</h3><p className="mt-0.5 text-[11px] text-black/40">Live context</p></div><button className="text-xs text-black/40 hover:text-ink" onClick={() => setTranscriptOpen(false)}>Close</button></div>
-          <div className="mt-4 max-h-[48vh] space-y-5 overflow-y-auto pr-1 2xl:max-h-[60vh]">
-            {([{ name: 'Interviewer', rows: callRows, enabled: source !== 'mic' }, { name: 'You', rows: micRows, enabled: source !== 'system' }] as const).filter((channel) => channel.enabled).map(({ name, rows }) => <div key={name}><h4 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-black/35">{name}</h4><div className="space-y-2 text-xs leading-5">{rows.length === 0 ? <p className="text-black/30">Waiting for speech…</p> : rows.slice(-12).map((row) => <p key={row.id} className={row.isFinal ? 'text-black/65' : 'italic text-black/35'}>{row.text}</p>)}</div></div>)}
+        {transcriptOpen && <aside id="live-transcript" className={styles.transcriptRail}>
+          <div className={styles.railHeader}><h3>Transcript</h3><button type="button" onClick={() => setTranscriptOpen(false)}>Close</button></div>
+          <div className={styles.transcriptList}>
+            {!transcriptRows.length ? <div className={styles.transcriptEmpty}><AudioLines size={23} aria-hidden /><p>{busy ? 'Connect your audio to begin.' : 'Speech will appear here as it is transcribed.'}</p></div> : transcriptRows.map((row) => <div key={`${row.channel}-${row.id}`} className={styles.transcriptTurn}><div className={styles.turnLabel}><span>{formatTime(Math.max(0, Math.floor((row.capturedAt - captureStartedAt) / 1000)))}</span><strong>{row.label}</strong></div><p className={row.isFinal ? undefined : styles.interim}>{row.text}</p></div>)}
           </div>
+          <div className={styles.railFooter}><div><span className={styles.waveform} aria-hidden><i /><i /><i /><i /><i /><i /><i /></span><span>{captureStatus}</span></div><p>Recent speech, ordered by arrival. Export to keep the full transcript.</p></div>
         </aside>}
       </div>
     </section>
-    {(error || call.error || microphone.error) && <p role="alert" className="text-sm text-[color:var(--stop)]">{error || call.error || microphone.error}</p>}
+    {(error || call.error || microphone.error) && <p role="alert" className={`${styles.errorBanner} mt-4`}>{error || call.error || microphone.error}</p>}
   </div>
 }

@@ -251,10 +251,18 @@ describe('standalone AI workspace', () => {
     expect(mocks.useCopilot.mock.lastCall?.[0]()).toBe('')
   })
 
+  it('keeps the empty conversation at the top instead of scrolling past its starter prompts', () => {
+    const height = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(1200)
+    try {
+      const { container } = openWorkspace()
+      expect(container.querySelector('.copilot-workspace-conversation')?.scrollTop).toBe(0)
+    } finally { height.mockRestore() }
+  })
+
   it('populates and focuses a suggested question without generating an answer', () => {
     openWorkspace()
     const prompt = 'Help me explain a technical decision. Ask me for the context first.'
-    fireEvent.click(screen.getByRole('button', { name: prompt }))
+    fireEvent.click(screen.getByRole('button', { name: /Explain a decision/ }))
     const field = screen.getByRole('textbox', { name: 'Your question' }) as HTMLTextAreaElement
     expect(field.value).toBe(prompt)
     expect(document.activeElement).toBe(field)

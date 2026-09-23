@@ -1,85 +1,62 @@
 'use client'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useState, useTransition } from 'react'
-import { Trash2 } from 'lucide-react'
+import { useRef, useState, useTransition } from 'react'
+import { ArrowUpRight, FileText, Trash2 } from 'lucide-react'
 import { formatDate, formatDuration } from '@/lib/format'
 import { deleteSession, type SessionSummaryRow } from '@/app/(app)/session-actions'
+import { DeleteSessionDialog } from './DeleteSessionDialog'
 
 type Summary = { summary?: string; keyPoints?: string[]; actionItems?: string[] } | null
 
 export function SessionCard({ session }: { session: SessionSummaryRow }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
+  const deletingRef = useRef(false)
   const [gone, setGone] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const summary = session.summary as Summary
   const shared = Boolean(session.shareToken)
   const keyPoints = summary?.keyPoints?.length ?? 0
   const actions = summary?.actionItems?.length ?? 0
 
-  // Delete without opening the session. preventDefault stops the wrapping Link nav.
-  const onDelete = (e: React.MouseEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    if (!confirm(`Delete “${session.title}”? This can’t be undone.`)) return
-    setGone(true)
+  const onDelete = () => {
+    if (deletingRef.current) return
+    deletingRef.current = true
+    setError(null)
     startTransition(async () => {
-      await deleteSession(session.id)
-      router.refresh()
+      try {
+        await deleteSession(session.id)
+        setConfirmDelete(false)
+        setGone(true)
+        router.refresh()
+      } catch {
+        setError('The transcript could not be deleted. It has been kept here; try again.')
+      } finally { deletingRef.current = false }
     })
   }
 
   if (gone) return null
 
   return (
-    <Link
-      href={`/session/${session.id}`}
-      className="glass glass-interactive group relative flex h-full flex-col overflow-hidden rounded-2xl p-5"
-    >
-      {/* Hover accent — a signal-colored rule that scales in from the left. */}
-      <span
-        className="absolute inset-x-0 top-0 h-0.5 origin-left scale-x-0 bg-[color:var(--signal)] transition-transform duration-300 group-hover:scale-x-100"
-        aria-hidden
-      />
-      <div className="flex items-start justify-between gap-3">
-        <h3 className="font-[family-name:var(--font-serif)] text-lg leading-snug tracking-[-0.01em]">
-          {session.title}
-        </h3>
-        <div className="flex shrink-0 items-center gap-1.5">
-          {shared && (
-            <span className="rounded-full bg-emerald-700/10 px-2 py-0.5 text-xs font-medium text-emerald-700">
-              Shared
-            </span>
-          )}
-          {/* Hover/focus-revealed delete — kept off the tap target's main body. */}
-          <button
-            onClick={onDelete}
-            disabled={pending}
-            aria-label={`Delete ${session.title}`}
-            title="Delete"
-            className="flex h-11 w-11 items-center justify-center rounded-full text-black/30 opacity-100 transition-opacity hover:bg-[color:var(--stop)]/10 hover:text-[color:var(--stop)] focus:opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
-          >
-            <Trash2 size={15} />
-          </button>
+    <article className="group flex h-full flex-col rounded-xl border border-[color:var(--line)] bg-[color:var(--reader)] p-5 transition-colors hover:border-[color:var(--signal)]/40">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-[color:var(--line)] bg-[color:var(--surface-soft)] text-[color:var(--signal)]"><FileText size={18} aria-hidden /></span>
+        <div className="flex items-center gap-2">
+          {shared && <span className="rounded-md border border-[color:var(--line)] px-2 py-1 text-xs font-medium text-[color:var(--muted)]">Shared link</span>}
+          <button type="button" onClick={() => setConfirmDelete(true)} disabled={pending} aria-label={`Delete ${session.title}`} title="Delete transcript" className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-[color:var(--muted)] transition-colors hover:bg-[color:var(--stop)]/10 hover:text-[color:var(--stop)]"><Trash2 size={15} aria-hidden /></button>
         </div>
       </div>
-      {summary?.summary && (
-        <p className="mt-2 line-clamp-2 text-sm leading-relaxed text-black/55">{summary.summary}</p>
-      )}
-      {(keyPoints > 0 || actions > 0) && (
-        <div className="mt-3 flex flex-wrap gap-1.5 text-xs text-black/45">
-          {keyPoints > 0 && <span className="rounded-full bg-black/5 px-2 py-0.5">{keyPoints} points</span>}
-          {actions > 0 && <span className="rounded-full bg-black/5 px-2 py-0.5">{actions} actions</span>}
-        </div>
-      )}
-      <div className="mt-auto flex items-center gap-3 pt-4 text-xs text-black/40">
+      <h3 className="break-words text-base font-semibold leading-snug"><Link href={`/session/${session.id}`} className="transition-colors hover:text-[color:var(--signal)]">{session.title}</Link></h3>
+      <p className="mt-2 line-clamp-3 text-sm leading-6 text-[color:var(--muted)]">{summary?.summary || 'Open this transcript to review the conversation.'}</p>
+      {(keyPoints > 0 || actions > 0) && <div className="mt-3 flex flex-wrap gap-3 text-xs text-[color:var(--muted)]">{keyPoints > 0 && <span>{keyPoints} key points</span>}{actions > 0 && <span>{actions} action items</span>}</div>}
+      <div className="mt-auto pt-5"><div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-[color:var(--line)] pt-2 text-xs text-[color:var(--muted)]">
         <span>{formatDate(session.createdAt)}</span>
-        <span aria-hidden>·</span>
         <span className="tabular-nums">{formatDuration(session.durationSeconds)}</span>
-        <span className="ml-auto text-[color:var(--signal)] transition-transform group-hover:translate-x-0.5">
-          Open →
-        </span>
-      </div>
-    </Link>
+        <Link href={`/session/${session.id}`} className="ml-auto inline-flex min-h-11 items-center gap-1 font-medium text-[color:var(--signal)] hover:underline" aria-label={`Open ${session.title}`}>Open<ArrowUpRight size={14} aria-hidden /></Link>
+      </div></div>
+      <DeleteSessionDialog open={confirmDelete} title={session.title} pending={pending} error={error} onCancel={() => { setConfirmDelete(false); setError(null) }} onDelete={onDelete} />
+    </article>
   )
 }

@@ -22,10 +22,11 @@ export function ThemeToggle({
       onClick={toggle}
       data-active={isDark}
       className={cn(
-        'inline-flex min-h-10 items-center gap-1.5 rounded-full px-3 text-sm text-black/55 data-[active=true]:text-emerald-800',
+        'inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-lg px-3 text-sm text-[color:var(--muted)] transition-colors hover:bg-[color:var(--hover-surface)] hover:text-[color:var(--ink)]',
         className,
       )}
       title={`Switch to ${next} mode`}
+      aria-label={`Switch to ${next} mode`}
       aria-pressed={isDark}
     >
       {isDark ? <Sun size={15} /> : <Moon size={15} />}

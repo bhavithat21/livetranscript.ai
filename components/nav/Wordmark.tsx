@@ -1,21 +1,20 @@
 'use client'
 import { useAppIdentity, DEFAULT_APP_NAME } from '@/lib/appIdentity/useAppIdentity'
 import { AppIconImage } from '@/lib/appIdentity/AppIconImage'
+import { AudioLines } from 'lucide-react'
 
-// The app wordmark, honoring the user's custom app name (useAppIdentity). At the
-// default name we keep the branded "Live" + emerald "Transcript" split; a custom
-// name renders plainly with the accent on its trailing part so it still feels
-// like a logo. Same component on web + Mac + Windows (desktop loads the web app).
+// Shared wordmark honors the user's device-local name and icon.
 export function Wordmark({ className = '', compact = false }: { className?: string; compact?: boolean }) {
   const { name, icon } = useAppIdentity()
-  const base = 'font-[family-name:var(--font-serif)] font-semibold tracking-[-0.01em]'
+  const base = 'font-[family-name:var(--font-body)] font-semibold tracking-[-0.035em]'
   const customIcon = icon.kind !== 'preset' || icon.id !== 'default'
+  const mark = customIcon ? <AppIconImage icon={icon} size={compact ? 22 : 28} /> : <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[color:var(--primary-fill)] text-white"><AudioLines size={17} strokeWidth={2} aria-hidden /></span>
 
   if (name === DEFAULT_APP_NAME) {
     return (
       <span className={`inline-flex min-w-0 items-center gap-2 ${base} ${className}`} title={name}>
-        {customIcon && <AppIconImage icon={icon} size={compact ? 22 : 26} />}
-        <span>Live<span className="text-[color:var(--signal)]">{compact ? 'T' : 'Transcript'}</span></span>
+        {mark}
+        <span>Live{compact ? 'T' : 'Transcript'}</span>
       </span>
     )
   }
@@ -27,7 +26,7 @@ export function Wordmark({ className = '', compact = false }: { className?: stri
   const tail = lastSpace > 0 ? trimmed.slice(lastSpace + 1) : trimmed.slice(-1)
   return (
     <span className={`inline-flex min-w-0 items-center gap-2 ${base} ${className}`} title={name}>
-      {customIcon && <AppIconImage icon={icon} size={compact ? 22 : 26} />}
+      {mark}
       <span className="max-w-[min(35vw,14rem)] truncate">{head}<span className="text-[color:var(--signal)]">{tail}</span></span>
     </span>
   )
