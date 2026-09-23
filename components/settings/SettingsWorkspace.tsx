@@ -39,7 +39,7 @@ function AnswerSettings() {
         setTone={(tone) => { setTone(tone); setChanged(true) }}
         setFollowups={(followups) => { setFollowups(followups); setChanged(true) }} />
     </div>
-    <p role="status" className="mt-4 min-h-5 text-xs text-[color:var(--muted)]">{changed ? 'Applied to your next answer.' : 'These controls are also available in AI Copilot.'}</p>
+    <p role="status" className="mt-4 min-h-5 text-xs text-[color:var(--muted)]">{changed ? 'Applied to your next answer.' : 'These controls are also available in AI workspace.'}</p>
     <p className="mt-1 text-xs leading-relaxed text-[color:var(--muted)]">Preferences are saved on this device when browser storage is available.</p>
   </section>
 }

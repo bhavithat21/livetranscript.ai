@@ -3,7 +3,6 @@
 import Link from 'next/link'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowRight, ArrowUpRight, BookOpen, Check, Code2, Download, MessageSquareText, MessagesSquare, Mic, Network, Shield, Square, Volume2 } from 'lucide-react'
-import { ThemeToggle } from '@/components/ui/ThemeToggle'
 import { useCandidateProfile } from '@/lib/copilot/useCandidateProfile'
 import { useCopilotCapture } from '@/lib/copilot/useCopilotCapture'
 import { AnswerClock, deliveryMetrics, practiceReportText } from '@/lib/practice/metrics'
@@ -235,7 +234,7 @@ export function PracticeWorkspace() {
         <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[color:var(--accent-soft)] text-signal"><MessagesSquare size={21} aria-hidden /></span>
         <div><h1 className="text-xl font-semibold tracking-tight">Practice interview</h1><p className="mt-0.5 text-xs text-[color:var(--muted)]">Build confidence with questions and feedback grounded in your answers.</p></div>
       </div>
-      <div className="ml-auto flex items-center gap-2"><Link href="/interview#mock" className="btn-ghost min-h-11 text-xs">Test the AI in Mock Lab<ArrowUpRight size={14} aria-hidden /></Link><ThemeToggle /></div>
+      <div className="ml-auto flex items-center gap-2"><Link href="/interview#mock" className="btn-ghost min-h-11 text-xs">Test the AI in Mock Lab<ArrowUpRight size={14} aria-hidden /></Link></div>
     </header>
     <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
       <ol aria-label="Practice steps" className="mb-6 grid grid-cols-4 gap-2 border-b border-[color:var(--line)] pb-5">

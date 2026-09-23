@@ -1,8 +1,8 @@
 .page { min-height: 100dvh; background: var(--paper); color: var(--ink); }
 .container { width: min(100% - 3rem, 1160px); margin-inline: auto; }
 .eyebrow { display: inline-flex; align-items: center; gap: .55rem; color: var(--signal); font-size: .78rem; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; }
-.hero { padding-block: 5.5rem 3rem; text-align: center; }
-.hero h1 { max-width: 850px; margin: 1.2rem auto 0; font-size: clamp(2.7rem, 5.7vw, 4.8rem); font-weight: 600; line-height: 1.05; letter-spacing: -.05em; text-wrap: balance; }
+.hero { padding-block: 4rem 3rem; text-align: center; }
+.hero h1 { max-width: 980px; margin: 1.2rem auto 0; font-size: clamp(2.7rem, 5.2vw, 4.3rem); font-weight: 600; line-height: 1.05; letter-spacing: -.05em; text-wrap: balance; }
 .hero h1 em { color: var(--signal); font-style: normal; }
 .hero p { max-width: 650px; margin: 1.5rem auto 0; font-size: 1.12rem; line-height: 1.7; color: color-mix(in srgb, var(--ink) 66%, transparent); text-wrap: pretty; }
 .heroActions { display: flex; justify-content: center; flex-wrap: wrap; align-items: center; gap: .7rem; margin-top: 1.8rem; }
