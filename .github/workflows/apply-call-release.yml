@@ -1,0 +1,94 @@
+name: Validate call release source
+on:
+  push:
+    branches: [codex/complete-speakers-voice]
+    paths: ['.github/workflows/apply-call-release.yml']
+permissions:
+  contents: write
+jobs:
+  validate:
+    if: github.repository == 'bhavithat21/livetranscript.ai' && github.ref == 'refs/heads/codex/complete-speakers-voice'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Apply only the hash-verified release manifest
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, pathlib, shutil
+          root = pathlib.Path.cwd()
+          files = sorted((root / '.release').glob('*.json'))
+          assert [p.name for p in files] == ['00.json','01.json','02.json','03.json','04.json','05.json']
+          entries = [entry for file in files for entry in json.loads(file.read_text())]
+          serialized = json.dumps(entries, ensure_ascii=False, separators=(',', ':')).encode()
+          digest = hashlib.sha256(serialized).hexdigest()
+          assert digest == '092fd04d503fce76a1c84e12d8e4527a4c475db0f7abf022cfa6e1c9f83288e7', ('Manifest mismatch', digest)
+          assert len(entries) == 49 and len({entry['path'] for entry in entries}) == 49
+          sha = lambda text: hashlib.sha256(text.encode()).hexdigest()
+          outputs = []
+          for entry in entries:
+              relative = pathlib.PurePosixPath(entry['path'])
+              assert not relative.is_absolute() and '..' not in relative.parts and '.git' not in relative.parts
+              assert relative.parts[0] in {'.env.example','.github','.gitignore','DESIGN.md','UX-CONTRACT.md','app','components','docs','evals','lib','scripts'}
+              path = root.joinpath(*relative.parts)
+              assert path.resolve().is_relative_to(root) and not path.is_symlink()
+              if entry['before'] is None:
+                  assert not path.exists(), entry['path']
+                  text = entry['content']
+              else:
+                  text = path.read_text()
+                  assert sha(text) == entry['before'], ('Base mismatch', entry['path'])
+                  edits = entry['edits']
+                  assert edits == sorted(edits, key=lambda edit: edit[0])
+                  previous = 0
+                  for start, end, replacement in edits:
+                      assert isinstance(start, int) and isinstance(end, int) and isinstance(replacement, str)
+                      assert previous <= start <= end <= len(text)
+                      previous = end
+                  for start, end, replacement in reversed(edits):
+                      text = text[:start] + replacement + text[end:]
+              assert sha(text) == entry['after'], ('Output mismatch', entry['path'])
+              outputs.append((path, text))
+          for path, text in outputs:
+              path.parent.mkdir(parents=True, exist_ok=True)
+              path.write_text(text)
+          shutil.rmtree(root / '.release')
+          (root / '.github/workflows/workspace-review.yml').unlink()
+          (root / '.github/workflows/apply-call-release.yml').unlink()
+          print('Verified exact contents of all 49 release files; removed temporary transport files.')
+          PY
+      - run: pnpm install --frozen-lockfile
+      - name: Type check
+        run: pnpm exec tsc --noEmit
+      - name: Unit and component tests
+        run: pnpm exec vitest run --maxWorkers=2
+      - name: Release and desktop configuration tests
+        run: |
+          python3 -B -m unittest scripts/test_verify_deployment.py
+          node --test scripts/test-brand-desktop.mjs
+      - name: Lint
+        run: pnpm run lint
+      - name: Production build
+        run: pnpm run build
+      - name: Question detection evaluation
+        run: pnpm run eval:detection
+      - name: Publish verified source to feature branch only
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git ls-remote origin refs/heads/codex/complete-speakers-voice | cut -f1)" = "$EXPECTED_SHA"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'Complete warm-palette call workspace, speaker attribution and OpenRouter routing'
+          git push origin HEAD:refs/heads/codex/complete-speakers-voice
+          git log -1 --format='%H %s'
