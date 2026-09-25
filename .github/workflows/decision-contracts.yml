@@ -1,0 +1,30 @@
+name: Decision model contracts (offline)
+on:
+  pull_request:
+    paths:
+      - 'evals/decisions/**'
+      - '.github/workflows/decision-contracts.yml'
+  push:
+    branches: [main, master]
+    paths:
+      - 'evals/decisions/**'
+      - '.github/workflows/decision-contracts.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: decision-contracts-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check protocol, budgets, secret isolation and metrics without models
+        run: node --test evals/decisions/benchmark.test.mjs
+      - name: Confirm smoke plan is not a model evaluation
+        run: node evals/decisions/benchmark.mjs --plan
