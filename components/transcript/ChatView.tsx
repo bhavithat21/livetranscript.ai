@@ -1,5 +1,6 @@
 'use client'
-import { useEffect, useMemo, useRef } from 'react'
+import { useMemo } from 'react'
+import { LiveScrollArea } from './LiveScrollArea'
 import { speakerColor } from '@/lib/speakers/palette'
 import { colorMap, segmentSlot } from '@/lib/room/roomStore'
 import { paragraphize, splitSentences, type Segment } from '@/lib/transcript/store'
@@ -26,15 +27,6 @@ export function ChatView({
 }) {
   const globalTheme = useThemeMode().theme
   const theme = themeProp ?? globalTheme
-  const scrollRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    const el = scrollRef.current
-    if (!el) return
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 160
-    if (nearBottom) el.scrollTop = el.scrollHeight
-  }, [segments])
-
   // Color by SENDER identity, exactly as TranscriptView does. The wire `speaker`
   // field races the roster and can arrive equal for everyone — coloring by it
   // painted every bubble with slot 0, so the chat tab lost speaker distinction
@@ -52,11 +44,8 @@ export function ChatView({
   const groups = groupBySpeaker(segments)
 
   return (
-    <div
-      ref={scrollRef}
-      className={fill ? 'h-full overflow-y-auto overscroll-contain' : 'overflow-y-auto overscroll-contain'}
-      style={fill ? undefined : { maxHeight: 'calc(100dvh - 160px)' }}
-    >
+    <LiveScrollArea updateKey={segments} className={fill ? 'h-full' : undefined} label="Live conversation"
+      style={fill ? undefined : { maxHeight: 'calc(100dvh - 160px)' }}>
       {/* pb-40 so the last bubble clears the fixed bottom control dock. */}
       <div className="mx-auto flex max-w-3xl flex-col gap-4 px-6 pt-8 pb-40">
         {groups.map((g) => {
@@ -92,7 +81,7 @@ export function ChatView({
           )
         })}
       </div>
-    </div>
+    </LiveScrollArea>
   )
 }
 

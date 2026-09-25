@@ -111,6 +111,19 @@ with sync_playwright() as p:
     live.evaluate('window.__liveQA.speak("Should we change the repository next?")')
     live.wait_for_timeout(1200)
     assert live.evaluate('window.__liveQA.calls().length') == count
+    # Capture keeps following even while the coding coach is paused.
+    live.evaluate('''() => {for(let i=0;i<30;i++)window.__liveQA.speak("Scroll fixture " + i + ": " + "Newly recognized speech remains at the live edge. ".repeat(18));}''')
+    for width in WIDTHS:
+        live.set_viewport_size({'width':width,'height':1000})
+        live.wait_for_function("() => {const s=document.querySelector('#live-transcript .live-scroll-viewport');return s && s.scrollHeight>s.clientHeight && s.scrollHeight-s.scrollTop-s.clientHeight<2}")
+        live.evaluate('window.__liveQA.speak("Newest ASR burst: " + "Latest speech at this viewport. ".repeat(20))')
+        live.wait_for_function("() => {const s=document.querySelector('#live-transcript .live-scroll-viewport');return s.scrollHeight-s.scrollTop-s.clientHeight<2}")
+    live.get_by_role('button',name='Hide transcript',exact=True).click()
+    live.evaluate('window.__liveQA.speak("Hidden tab latest ASR text remains current")')
+    live.get_by_role('button',name='Transcript',exact=True).click()
+    live.wait_for_function("() => {const s=document.querySelector('#live-transcript .live-scroll-viewport');return s && s.scrollHeight-s.scrollTop-s.clientHeight<2}")
+    assert live.get_by_text('Hidden tab latest ASR text remains current',exact=True).is_visible()
+    report['checks'].append('Actual Live transcript rail follows burst speech and resize at seven widths; reopening shows newest captured speech')
     live.get_by_role('button', name='End', exact=True).click()
     live.get_by_role('button', name='Start interview', exact=True).wait_for()
     assert live.get_by_test_id('repository-coach').count() == 0

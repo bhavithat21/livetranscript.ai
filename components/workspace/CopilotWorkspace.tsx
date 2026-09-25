@@ -1,5 +1,6 @@
 'use client'
 
+import { LiveScrollArea } from '@/components/transcript/LiveScrollArea'
 import { memo, useCallback, useRef, useState } from 'react'
 import Link from 'next/link'
 import { ChevronDown, FileCode2, Mic, Monitor, Shield, Sparkles, Square, X } from 'lucide-react'
@@ -103,9 +104,9 @@ export function CopilotWorkspace({ initialMode = 'general' }: { initialMode?: Co
             <p className="text-xs font-medium text-[color:var(--muted)]">Live context · kept in this tab</p>
             <button type="button" onClick={capture.clear} disabled={active || !capture.transcript} className="min-h-9 rounded-lg px-2 text-xs text-[color:var(--muted)] hover:bg-[color:var(--paper)] disabled:opacity-40">Clear audio context</button>
           </div>
-          <div className="max-h-40 overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed" tabIndex={0} aria-label="Audio transcript">
+          <LiveScrollArea updateKey={capture.segments ?? capture.transcript} enabled={active} className="max-h-40 whitespace-pre-wrap text-sm leading-relaxed" label="Audio transcript">
             {capture.segments?.map((segment) => segment.text).join(' ') || capture.transcript || 'Questions you hear will appear here after you start listening. You can also type directly into the copilot below.'}
-          </div>
+          </LiveScrollArea>
         </section>
       )}
 

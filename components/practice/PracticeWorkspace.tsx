@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { ArrowRight, ArrowUpRight, BookOpen, Check, Code2, Download, MessageSquareText, MessagesSquare, Mic, Network, Shield, Square, Volume2 } from 'lucide-react'
 import { useCandidateProfile } from '@/lib/copilot/useCandidateProfile'
 import { useCopilotCapture } from '@/lib/copilot/useCopilotCapture'
@@ -108,10 +108,13 @@ export function PracticeWorkspace() {
     return () => { active = false; window.removeEventListener('pagehide', stopVoice); stopVoice() }
   }, [])
 
+  // Focus new questions before paint; unrelated voice callback changes must not
+  // steal focus from an answer or its validation error.
+  useLayoutEffect(() => { if (phase) heading.current?.focus() }, [phase, currentQuestion])
+
   useEffect(() => {
     if (!phase) return
     let active = true
-    heading.current?.focus()
     if (phase === 'answering' && currentQuestion && readAloud && lastSpokenQuestion.current !== currentQuestion) {
       queueMicrotask(() => {
         if (active) { lastSpokenQuestion.current = currentQuestion; speak(currentQuestion) }

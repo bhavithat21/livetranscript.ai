@@ -2,13 +2,13 @@
 // backgrounds and checked against deuteranopia/protanopia. Re-validate if bg changes.
 export const SPEAKER_PALETTE = {
   speakers: [
-    { name: 'Speaker 1', light: '#1d4ed8', dark: '#93c5fd' }, // ink blue
-    { name: 'Speaker 2', light: '#b45309', dark: '#fdba74' }, // rust orange
-    { name: 'Speaker 3', light: '#0f766e', dark: '#5eead4' }, // teal green
-    { name: 'Speaker 4', light: '#7c3aed', dark: '#c4b5fd' }, // violet
-    { name: 'Speaker 5', light: '#a16207', dark: '#fde047' }, // amber/ochre
+    { name: 'Speaker 1', light: '#a53c25', dark: '#ffb397' }, // terracotta
+    { name: 'Speaker 2', light: '#526127', dark: '#d6e384' }, // olive/citrus
+    { name: 'Speaker 3', light: '#8a5820', dark: '#efd08b' }, // ochre
+    { name: 'Speaker 4', light: '#9b3651', dark: '#f2a9b8' }, // rose
+    { name: 'Speaker 5', light: '#425b42', dark: '#b6d3a7' }, // moss
   ],
-  neutral: { light: '#3f3f46', dark: '#d4d4d8' },
+  neutral: { light: '#494c40', dark: '#d2d5c7' },
 } as const
 
 export function speakerColor(index: number, theme: 'light' | 'dark') {

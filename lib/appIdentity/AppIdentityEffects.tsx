@@ -51,7 +51,7 @@ export function AppIdentityEffects() {
     link.dataset.ltAppIcon = 'true'
     document.head.appendChild(link)
     // Keep the chosen favicon last if a later metadata chunk adds the framework
-    // favicon. The default is the same shipped PNG used by the native app.
+    // favicon. The browser default is the canonical caption-mark artwork.
     const observer = new MutationObserver(() => {
       const icons = document.head.querySelectorAll('link[rel~="icon"]')
       if (icons.item(icons.length - 1) !== link) document.head.appendChild(link)
