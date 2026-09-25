@@ -63,6 +63,21 @@ describe('live edge preference', () => {
     const { el, height, update } = setup(); update('First'); height(1800); fireEvent.scroll(el); update('Large burst'); expect(el.scrollTop).toBe(1600)
     fireEvent.pointerDown(el); el.scrollTop = 300; fireEvent.scroll(el); update('Later'); expect(el.scrollTop).toBe(300)
   })
+  it('does not mistake text reflow after Jump to latest for another history gesture', () => {
+    const { el, height, update } = setup(); update('First'); fireEvent.scroll(el)
+    fireEvent.wheel(el, { deltaY: -80 }); el.scrollTop = 400; fireEvent.scroll(el)
+    fireEvent.click(screen.getByRole('button', { name: 'Jump to latest live transcript' })); fireEvent.scroll(el)
+    // Browser anchoring shifts the old offset while the enlarged text is laid out.
+    height(2500); el.scrollTop = 800; fireEvent.scroll(el); resize()
+    expect(el.scrollTop).toBe(2300)
+    expect(screen.queryByRole('button', { name: 'Jump to latest live transcript' })).toBeNull()
+  })
+  it('stops attributing later geometry changes to a released scrollbar pointer', () => {
+    const { el, height, update } = setup(); update('First'); fireEvent.scroll(el)
+    fireEvent.pointerDown(el); fireEvent.pointerUp(document)
+    height(2500); el.scrollTop = 800; fireEvent.scroll(el); resize()
+    expect(el.scrollTop).toBe(2300)
+  })
   it('keeps archived documents stationary and retains ordinary page scrolling', () => {
     const { el, update } = setup(false, true); update('Archived line'); expect(el.scrollTop).toBe(0); expect(screen.queryByRole('button')).toBeNull()
   })

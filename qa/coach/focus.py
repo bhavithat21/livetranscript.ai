@@ -62,6 +62,7 @@ with sync_playwright() as p:
   page.locator('#live-transcript summary').click()
   for theme in ['light','dark']:
     page.evaluate('(v)=>document.documentElement.classList.toggle("lt-dark",v)',theme=='dark')
+    page.wait_for_timeout(200)  # Let the 140ms theme transitions settle before the screenshot.
     page.screenshot(path=str(ROOT/f'dialogue-{theme}-1440.png'),full_page=True)
   page.get_by_role('button',name='Pause answers',exact=True).click()
   # Burst text while paused tests grouping and latest-edge scrolling independently.
