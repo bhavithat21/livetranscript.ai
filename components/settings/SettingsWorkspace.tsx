@@ -8,6 +8,7 @@ import { AppearanceSettings } from '@/lib/appIdentity/AppearanceSettings'
 import { useResponsePreferences } from '@/lib/copilot/useResponsePreferences'
 import { PACKS } from '@/lib/transcription/keytermPacks'
 import { useKeytermPrefs } from '@/lib/transcription/useKeytermPrefs'
+import { RecognitionSettings } from './RecognitionSettings'
 import { CandidateProfileSettings } from './CandidateProfileSettings'
 
 const TABS = [
@@ -54,19 +55,20 @@ function AudioSettings() {
       <div><h3 className="text-sm font-semibold">Recording setup</h3><p className="mt-1 text-xs leading-relaxed text-[color:var(--muted)]">Microphone and system audio connect from the recording screen.</p></div>
       <Link href="/record" className="btn-ghost min-h-11 gap-2 px-3 text-xs">Open audio setup<ArrowUpRight size={14} aria-hidden /></Link>
     </div>
+    <RecognitionSettings />
     <div className="mt-7 flex flex-wrap items-center justify-between gap-2"><h3 className="text-sm font-semibold">Vocabulary packs</h3><span className="text-xs tabular-nums text-[color:var(--muted)]">{keyterms.length} / 100 terms active</span></div>
-    <p className="mt-1 text-xs leading-relaxed text-[color:var(--muted)]">Packs apply when the next recording starts. Core tech is always included.</p>
+    <p className="mt-1 text-xs leading-relaxed text-[color:var(--muted)]">Packs apply when the next recording starts. Your own terms take priority within the provider’s vocabulary budget.</p>
     <div className="mt-3 grid gap-2 sm:grid-cols-2">
       {PACKS.map((pack) => {
         const active = Boolean(pack.base || enabledIds.includes(pack.id))
         return <button key={pack.id} type="button" disabled={pack.base} aria-pressed={active} onClick={() => { toggle(pack.id); setChanged(true) }}
           className={`flex min-h-24 cursor-pointer items-start justify-between gap-3 rounded-xl border bg-[color:var(--reader)] p-4 text-left transition-colors hover:bg-[color:var(--surface-soft)] disabled:cursor-default ${active ? 'border-[color:var(--signal)]' : 'border-[color:var(--line)]'}`}>
           <span><span className="block text-sm font-medium">{pack.name}</span><span className="mt-1 block text-xs leading-relaxed text-[color:var(--muted)]">{pack.description}</span>{pack.base && <span className="mt-2 block text-[11px] font-medium text-[color:var(--signal)]">Always on</span>}</span>
-          <span aria-hidden className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${active ? 'bg-[color:var(--signal)] text-white' : 'border border-[color:var(--line)]'}`}>{active && <Check size={12} />}</span>
+          <span aria-hidden className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${active ? 'bg-[color:var(--primary-fill)] text-white' : 'border border-[color:var(--line)]'}`}>{active && <Check size={12} />}</span>
         </button>
       })}
     </div>
-    <p role="status" className="mt-4 min-h-5 text-xs text-[color:var(--muted)]">{changed ? 'Vocabulary updated for your next recording.' : 'Your choices are remembered on this device when browser storage is available.'}{keyterms.length >= 100 ? ' At the limit — turn off a pack to include more terms from another.' : ''}</p>
+    <p role="status" className="mt-4 min-h-5 text-xs text-[color:var(--muted)]">{changed ? 'Vocabulary updated for your next recording.' : 'Your choices are remembered on this device when browser storage is available.'}{keyterms.length >= 100 ? ' At the term limit — turn off unrelated packs to prioritize this session.' : ''}</p>
   </section>
 }
 

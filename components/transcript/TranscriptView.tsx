@@ -1,4 +1,6 @@
 'use client'
+import { readingBlocks, sameSpeaker, transcriptTime } from '@/lib/transcript/reading'
+import styles from './TranscriptReader.module.css'
 import { memo, useEffect, useMemo, useRef } from 'react'
 import { speakerColor } from '@/lib/speakers/palette'
 import { colorMap, segmentSlot } from '@/lib/room/roomStore'
@@ -150,12 +152,15 @@ export function TranscriptView({
       turn = []
     }
     for (const s of segments) {
-      if (turn.length && turn[0].sender !== s.sender) flush()
+      if (turn.length && !sameSpeaker(turn[0], s)) flush()
       turn.push(s)
     }
     flush()
     return ids
   }, [segments])
+
+  const blocks = useMemo(() => readingBlocks(segments), [segments])
+  const turnStarts = useMemo(() => new Set(blocks.map(block => block.key)), [blocks])
 
   if (segments.length === 0) {
     return (
@@ -192,7 +197,21 @@ export function TranscriptView({
           fade || fill ? 'pb-40' : readerMode ? 'pb-10' : 'pb-6',
         )}
       >
-        {segments.map((s, i) => {
+        {readerMode && !shadow ? blocks.map(block => {
+          const first = block.first
+          const ov = first.sender ? overrides?.[first.sender] : undefined
+          const speaker = speakerColor(ov?.colorSlot ?? segmentSlot(first, colors), theme)
+          const name = ov?.name?.trim() || first.name?.trim() || (first.speaker == null ? 'Unassigned speaker' : speaker.name)
+          const time = transcriptTime(first.startMs)
+          return <section key={block.key} className={styles.turn} aria-label={`${name}${time ? ', ' + time : ''}`}>
+            <div className={styles.turnHeading}><span className={styles.speakerDot} style={{ backgroundColor: speaker.color }} aria-hidden /><span>{name}</span>{time && <time className={styles.timestamp}>{time}</time>}</div>
+            <div className={styles.paragraphs} style={{ fontSize: `calc(clamp(1rem, .95rem + .2vw, 1.125rem) * ${scale})` }}>
+              {block.paragraphs.map(paragraph => <p key={paragraph[0].id}>
+                {paragraph.map((segment, index) => <span key={segment.id} data-interim={!segment.isFinal || undefined} title={!segment.isFinal ? 'Unfinalized recognition — not confirmed by the speech engine' : segment.confidence != null && segment.confidence < .8 ? 'Low speech-recognition confidence. Check the audio before relying on this wording.' : undefined}>{index > 0 ? ' ' : ''}{segment.text.trim()}{!segment.isFinal && <small className={styles.pending}>Unfinalized</small>}</span>)}
+              </p>)}
+            </div>
+          </section>
+        }) : segments.map((s) => {
           const ov = s.sender ? overrides?.[s.sender] : undefined
           // Override color slot wins, else the receiver-derived consistent slot.
           const slot = ov?.colorSlot ?? segmentSlot(s, colors)
@@ -204,17 +223,7 @@ export function TranscriptView({
           // group into a turn instead of every line re-labelling and running on.
           // Group turns by SENDER (stable identity) — with a colorSlot override two
           // people could share a color, so sender is the correct turn boundary.
-          const prev = segments[i - 1]
-          const senderChanged = i === 0 || prev?.sender !== s.sender
-          const silenceBreak = !senderChanged && prev?.endMs != null && s.startMs != null && s.startMs - prev.endMs >= 2000
-          const timeBreak = !senderChanged && (() => {
-            if (s.startMs == null) return false
-            let j = i - 1
-            while (j >= 0 && segments[j]?.sender === s.sender) j--
-            const turnStart = segments[j + 1]?.startMs
-            return turnStart != null && s.startMs - turnStart >= 30000
-          })()
-          const newTurn = senderChanged || silenceBreak || timeBreak
+          const newTurn = turnStarts.has(s.id)
           // Only the trailing interim changes on each ASR tick; a memoized row with
           // primitive props lets React skip re-rendering (and re-splitting) every
           // other line — the difference between smooth and janky in long sessions.

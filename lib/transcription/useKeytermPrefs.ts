@@ -1,6 +1,7 @@
 'use client'
 import { useCallback } from 'react'
 import { useStoredPreference } from '../browser/useStoredPreference'
+import { boundedKeyterms, parseVocabulary, VOCABULARY_KEY, vocabularyTerms } from './recognition'
 import { DEFAULT_PACK_IDS, resolveKeyterms } from './keytermPacks'
 
 const STORAGE_KEY = 'lt.keytermPacks'
@@ -15,9 +16,12 @@ function parseKeyterms(raw: string): string[] {
 export function useKeytermPrefs() {
   const { value: enabledIds, setValue } = useStoredPreference(STORAGE_KEY, DEFAULT_PACK_IDS, parseKeyterms)
 
+  const { value: vocabulary, setValue: setVocabulary } = useStoredPreference(VOCABULARY_KEY, '', parseVocabulary)
+
   const toggle = useCallback((id: string) => {
     setValue((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])
   }, [setValue])
 
-  return { enabledIds, toggle, keyterms: resolveKeyterms(enabledIds) }
+  const requestedTerms = [...vocabularyTerms(vocabulary), ...resolveKeyterms(enabledIds)]
+  return { enabledIds, toggle, vocabulary, setVocabulary, keyterms: boundedKeyterms(requestedTerms) }
 }

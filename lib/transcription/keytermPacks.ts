@@ -3,9 +3,8 @@
 // 100-term provider cap, so users boost the vocabulary that matches THEIR context
 // (a coding session vs a networking design review) without diluting the boost.
 //
-// LATENCY: keyterms are sent ONCE at connection open, never per word — so pack
-// size has ZERO effect on live transcription latency. The 100-cap is about
-// accuracy (dilution + provider truncation), not speed.
+// Vocabulary is a bounded recognition hint, not a correction dictionary.
+// Provider performance must be measured on representative audio.
 
 export interface KeytermPack {
   id: string
@@ -61,7 +60,8 @@ export const PACKS: KeytermPack[] = [
     description: 'LLM & retrieval terms.',
     terms: [
       'RAG', 'embeddings', 'vector database', 'FAISS', 'LangChain', 'few-shot prompting',
-      'structured output', 'fine-tuning',
+      'structured output', 'fine-tuning', 'LLM', 'Claude Code', 'tool calling',
+      'root cause analysis', 'test harness', 'prompt optimization',
     ],
   },
   {

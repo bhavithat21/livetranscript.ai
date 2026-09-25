@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    "qa-results/**",
+    "qa/refinement/generated-fonts.css",
   ]),
 ]);
 

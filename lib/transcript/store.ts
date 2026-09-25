@@ -8,6 +8,8 @@ import type { TranscriptEvent } from '@/lib/transcription/types'
 // from the same sender, never across senders or a provider reconnect.
 export type Segment = {
   id: number
+  utteranceId?: string
+  confidence?: number
   speaker: number | null
   text: string
   isFinal: boolean
@@ -23,6 +25,29 @@ export type Segment = {
 // interim is identical to the trailing one (ASR re-emits these ~10x/sec) so React
 // skips the re-render and we don't copy the whole history for a no-op.
 export function mergeSegments(prev: Segment[], e: TranscriptEvent): Segment[] {
+  if (!e.text.trim()) return prev
+  if (e.utteranceId) {
+    const indexes = prev.flatMap((segment, index) => segment.utteranceId === e.utteranceId ? [index] : [])
+    const existing = indexes.map(index => prev[index])
+    if (!e.isFinal && existing.some(segment => segment.isFinal)) return prev
+    const parts = e.parts?.length ? e.parts : [e]
+    const id = prev.reduce((max, segment) => Math.max(max, segment.id), 0) + 1
+    let added = 0
+    const replacement: Segment[] = parts.map((part, index) => ({
+      id: existing[index]?.id ?? id + added++, utteranceId: e.utteranceId,
+      text: part.text, speaker: part.speaker, isFinal: e.isFinal,
+      startMs: part.startMs, endMs: part.endMs,
+      ...(e.confidence !== undefined ? { confidence: e.confidence } : {}),
+    }))
+    if (existing.length === replacement.length && existing.every((segment, index) => {
+      const next = replacement[index]
+      return segment.text === next.text && segment.speaker === next.speaker && segment.isFinal === next.isFinal
+        && segment.startMs === next.startMs && segment.endMs === next.endMs && segment.confidence === next.confidence
+    })) return prev
+    if (!indexes.length) return [...prev, ...replacement]
+    const position = indexes[0], same = new Set(indexes)
+    return [...prev.slice(0, position), ...replacement, ...prev.slice(position).filter((_, index) => !same.has(index + position))]
+  }
   const last = prev[prev.length - 1]
   if (last && !last.isFinal) {
     if (last.text === e.text && last.isFinal === e.isFinal && last.speaker === e.speaker) return prev
@@ -52,6 +77,8 @@ export function sanitizeSegments(input: unknown): Segment[] {
       speaker: typeof r.speaker === 'number' ? r.speaker : null,
       text: r.text.slice(0, MAX_SEG_TEXT),
       isFinal: r.isFinal === true,
+      ...(typeof r.utteranceId === 'string' ? { utteranceId: r.utteranceId.slice(0, 160) } : {}),
+      ...(typeof r.confidence === 'number' && Number.isFinite(r.confidence) && r.confidence >= 0 && r.confidence <= 1 ? { confidence: r.confidence } : {}),
       ...(typeof r.sender === 'string' ? { sender: r.sender.slice(0, 200) } : {}),
       ...(typeof r.name === 'string' ? { name: r.name.slice(0, 200) } : {}),
       ...(typeof r.startMs === 'number' && Number.isFinite(r.startMs) ? { startMs: r.startMs } : {}),

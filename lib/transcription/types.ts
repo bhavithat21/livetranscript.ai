@@ -1,4 +1,10 @@
+export type TranscriptPart = { text: string; speaker: number | null; startMs: number; endMs: number }
+
 export type TranscriptEvent = {
+  /** Stable within this provider connection; formatted finals replace the same turn. */
+  utteranceId?: string
+  confidence?: number
+  parts?: TranscriptPart[]
   text: string
   isFinal: boolean
   speaker: number | null
@@ -7,6 +13,7 @@ export type TranscriptEvent = {
 }
 
 export type TranscriptionConfig = {
+  recognitionMode?: 'balanced' | 'careful'
   keyterms: string[]
   sampleRate: number
   maxSpeakers: number

@@ -94,6 +94,7 @@ for (const engine of engines) describe(`${engine.name} cancellation`, () => {
     provider.onFinal(final)
     const disconnected = provider.disconnect()
     socket.message(engine.final)
+    socket.message({ type: engine.name === 'Deepgram' ? 'Metadata' : 'Termination' })
     await disconnected
     expect(final).toHaveBeenCalledWith(expect.objectContaining({ text: 'Final words', isFinal: true }))
     expect(abort.signal.aborted).toBe(false)

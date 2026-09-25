@@ -3,21 +3,21 @@ version: alpha
 name: LiveTranscript
 description: A precise conversation workspace with calm navigation and readable live answers.
 colors:
-  background: '#f5f7fb'
-  foreground: '#172033'
+  background: '#f7f7f8'
+  foreground: '#202127'
   reader: '#ffffff'
-  primary: '#2563eb'
-  muted: '#5f6d82'
-  line: '#e2e8f0'
+  primary: '#5750c7'
+  muted: '#626570'
+  line: '#e6e6eb'
   danger: '#b91c1c'
-  dark-background: '#0d1422'
-  dark-foreground: '#e8eef8'
-  dark-primary: '#8bb0ff'
+  dark-background: '#111216'
+  dark-foreground: '#ececf0'
+  dark-primary: '#b0a8ff'
 typography:
   body:
-    fontFamily: 'IBM Plex Sans, system-ui, sans-serif'
+    fontFamily: 'Geist Sans, system-ui, sans-serif'
   display:
-    fontFamily: 'IBM Plex Sans, system-ui, sans-serif'
+    fontFamily: 'Geist Sans, system-ui, sans-serif'
   technical:
     fontFamily: 'ui-monospace, monospace'
 rounded:
@@ -73,7 +73,7 @@ and `--ink` is main text. `--muted` remains readable at small sizes. `--line` an
 
 Buttons consume `--primary-fill`, not the text accent: in dark mode the bright
 text accent must not become a background underneath white text. Dark button fill
-is #315bd1, hover #3b68e1; dark surfaces are #0d1422 / #121d30 and text #e8eef8.
+is #635ad9, hover #6a5ed8; dark surfaces are #111216 / #191b21 and text #ececf0.
 Semantic red is reserved for failure, stop and destructive actions. State is
 always described in text as well as color.
 
@@ -84,7 +84,7 @@ the design makes no invisibility or proctoring compatibility claim.
 
 ## Typography
 
-IBM Plex Sans is shared by the wordmark, headings, paragraphs and controls, with
+Geist Sans is shared by the wordmark, headings, paragraphs and controls, with
 weights 400/500/600/700. `--font-serif` is retained only as a compatibility alias
 to `--font-body` for focused reading routes. No serif font is loaded.
 
@@ -162,7 +162,7 @@ name the data and consequence, initially focus Cancel and restore focus.
 
 | Previous rule / drift | Rebuild decision |
 |---|---|
-| Warm paper, serif headings and teal glass pills | Intentional site-wide migration to cool surfaces, IBM Plex Sans, blue actions and solid borders |
+| Warm paper, serif headings and teal glass pills | Intentional site-wide migration to cool surfaces, Geist Sans, blue actions and solid borders |
 | Each product route owned a different sidebar or HomeMenu | WorkspaceShell is canonical for tool pages; HomeMenu remains the focused-reading variant |
 | Selected button fill reused a light dark-mode text token | Separate primary-fill from signal text to preserve contrast |
 | Public home described mainly transcription | Explain actual Live / AI / repository / practice / Mock Lab workflows and link directly |
@@ -170,3 +170,10 @@ name the data and consequence, initially focus Cancel and restore focus.
 
 The migration preserves storage, permission, provider and capture contracts.
 `UX-CONTRACT.md` owns behavior; `premium-ui.json` scopes static verification.
+
+
+## September 2026 refinement — porcelain / graphite
+- Application text: self-hosted variable Geist Sans (`--font-body`). Code, timestamps and tabular detail: Geist Mono (`--font-code`). No serif transcript labels or decorative font mixing. Fonts load through Next Font, not third-party browser font requests.
+- Surfaces are neutral porcelain in light mode and opaque graphite in dark mode. Indigo is reserved for the main action, selection and focus. Green signals capture/valid state, not general decoration.
+- Accessible text accent (`--signal`) and white-label button fill (`--primary-fill`) are separate in dark mode. Test ink/muted/signal/button contrast in both themes; borders are visual separators, not the only interaction cue.
+- Transcript reading is a presentation transform only. It groups consecutive same-speaker fragments with timestamps, preserves every saved word and exposes an original-segment view. ASR confidence and unfinalized text are never sold as verified accuracy.

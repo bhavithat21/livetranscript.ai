@@ -1,19 +1,24 @@
 import type { TranscriptionProvider, TranscriptionConfig, TranscriptEvent } from './types'
+import { assemblyResult } from './results'
+import { boundedKeyterms } from './recognition'
 
 // Bound on how long disconnect() waits for the trailing final after Terminate,
 // so Stop never hangs if the server goes quiet.
-const FINAL_FLUSH_MS = 800
+const FINAL_FLUSH_MS = 2000
 
 export class AssemblyAIProvider implements TranscriptionProvider {
+  private stream = ''
   private ws: WebSocket | null = null
   private removeAbort: (() => void) | null = null
   private partialCb: (e: TranscriptEvent) => void = () => {}
   private finalCb: (e: TranscriptEvent) => void = () => {}
   private statusCb: (s: { error: string }) => void = () => {}
-  // Set while disconnect() is flushing; onmessage calls it when a final arrives.
+  // Resolves only on terminal acknowledgement, close, abort or bounded timeout.
   private onFinalFlush: (() => void) | null = null
 
   async connect(config: TranscriptionConfig): Promise<void> {
+    this.stream = crypto.randomUUID()
+    this.labels.clear()
     config.signal?.throwIfAborted()
     const res = await fetch('/api/token', {
       method: 'POST',
@@ -26,18 +31,17 @@ export class AssemblyAIProvider implements TranscriptionProvider {
     config.signal?.throwIfAborted()
 
     // speech_model explicit; keyterms_prompt is JSON (URLSearchParams url-encodes it).
-    // mode=balanced is the primary latency/accuracy preset (our two-track correction pass
-    // covers accuracy, so we favor responsiveness here). max_speakers caps diarization at 5.
+    // Native ASR formatting is retained; no LLM silently rewrites recognized speech.
     const params = new URLSearchParams({
       speech_model: 'universal-3-5-pro',
-      mode: 'balanced',
+      mode: config.recognitionMode === 'careful' ? 'max_accuracy' : 'balanced',
       sample_rate: String(config.sampleRate),
       speaker_labels: 'true',
       max_speakers: String(config.maxSpeakers),
       token,
     })
     if (config.keyterms.length) {
-      params.set('keyterms_prompt', JSON.stringify(config.keyterms.slice(0, 100)))
+      params.set('keyterms_prompt', JSON.stringify(boundedKeyterms(config.keyterms)))
     }
 
     await new Promise<void>((resolve, reject) => {
@@ -88,28 +92,23 @@ export class AssemblyAIProvider implements TranscriptionProvider {
         this.statusCb({ error: 'Transcription connection closed' })
       }
       ws.onmessage = (msg) => {
-        const data = JSON.parse(msg.data)
-        if (data.type !== 'Turn') return
-        // v3: turn-level speaker_label is a STRING ('A'/'B'/'UNKNOWN'); timing is per-word in ms.
-        const words = Array.isArray(data.words) ? data.words : []
-        const label: string | undefined = data.speaker_label ?? words[0]?.speaker
-        const evt: TranscriptEvent = {
-          text: data.transcript ?? '',
-          isFinal: data.end_of_turn === true,
-          speaker: label != null ? this.speakerIndex(label) : null,
-          startMs: words[0]?.start ?? 0,
-          endMs: words[words.length - 1]?.end ?? 0,
-        }
-        if (evt.isFinal) this.onFinalFlush?.() // let disconnect() resolve on the trailing final
-        ;(evt.isFinal ? this.finalCb : this.partialCb)(evt)
+        // Bad frames must not crash the recording page or mutate transcript state.
+        let data
+        try { data = JSON.parse(msg.data) } catch { return }
+        if (!data || typeof data !== 'object') return
+        if (data.type === 'Termination') { this.onFinalFlush?.(); return }
+        const evt = assemblyResult(data, this.stream, value => this.speakerIndex(value))
+        if (evt) (evt.isFinal ? this.finalCb : this.partialCb)(evt)
       }
     })
   }
 
   // AssemblyAI returns string speaker labels ('A','B',...); map to stable 0-based indices for the palette.
   private labels = new Map<string, number>()
-  private speakerIndex(label: string): number | null {
-    if (label === 'UNKNOWN') return null
+  private speakerIndex(value: unknown): number | null {
+    if (typeof value !== 'string' && typeof value !== 'number') return null
+    const label = String(value)
+    if (!label || label === 'UNKNOWN') return null
     if (!this.labels.has(label)) this.labels.set(label, this.labels.size)
     return this.labels.get(label)!
   }
@@ -136,20 +135,16 @@ export class AssemblyAIProvider implements TranscriptionProvider {
     this.statusCb = () => {}
     const ws = this.ws
     if (ws?.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'Terminate' }))
-      // Wait for the server to flush its trailing final so the last turn is
-      // finalized (interim-only turns are excluded from the saved transcript).
+      // Register BEFORE sending. One final is not the end: providers may flush
+      // several results before their terminal acknowledgement or socket close.
       await new Promise<void>((resolve) => {
-        const done = () => {
-          this.onFinalFlush = null
-          clearTimeout(t)
-          resolve()
-        }
-        const t = setTimeout(done, FINAL_FLUSH_MS)
+        const done = () => { this.onFinalFlush = null; clearTimeout(timer); resolve() }
+        const timer = setTimeout(done, FINAL_FLUSH_MS)
         this.onFinalFlush = done
+        try { ws.send(JSON.stringify({ type: 'Terminate' })) } catch { done() }
       })
     }
-    ws?.close()
-    this.ws = null
+    if (ws) { ws.onmessage = null; ws.onclose = null; ws.onerror = null; ws.onopen = null; ws.close() }
+    if (this.ws === ws) this.ws = null
   }
 }

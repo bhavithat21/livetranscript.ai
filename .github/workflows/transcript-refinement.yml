@@ -1,0 +1,45 @@
+name: Transcript and premium UI regression
+on:
+  pull_request:
+    paths: ['app/**', 'components/**', 'lib/transcription/**', 'lib/transcript/**', 'qa/refinement/**', '.github/workflows/transcript-refinement.yml']
+  push:
+    branches: [main]
+    paths: ['app/**', 'components/**', 'lib/transcription/**', 'lib/transcript/**', 'qa/refinement/**', '.github/workflows/transcript-refinement.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: transcript-refinement-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  presentation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - name: Build actual app and self-hosted font assets
+        run: pnpm run build
+      - run: node qa/refinement/fonts.mjs
+      - name: Install pinned browser tooling
+        run: |
+          python3 -m pip install playwright==1.55.0
+          python3 -m playwright install --with-deps chromium
+      - name: Validate actual components in both themes at seven widths
+        run: |
+          mkdir -p qa-results/refinement
+          node qa/refinement/server.mjs > qa-results/refinement/server.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" || true' EXIT
+          for i in $(seq 1 40); do curl -fsS http://127.0.0.1:4181 >/dev/null && break; sleep 1; done
+          python3 qa/refinement/verify.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: transcript-refinement-${{ github.sha }}
+          path: qa-results/refinement/
+          retention-days: 14

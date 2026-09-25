@@ -8,7 +8,7 @@
 .newSession:hover { background: var(--accent-soft); border-color: var(--signal); }
 .navigation { display: flex; flex: 1; flex-direction: column; gap: .2rem; }
 .groupLabel { margin: 1.55rem .7rem .5rem; color: var(--muted); font-size: .625rem; text-transform: uppercase; letter-spacing: .14em; font-weight: 600; }
-.navLink { display: flex; min-height: 44px; align-items: center; gap: .7rem; padding: .625rem .75rem; border-radius: .45rem; color: var(--muted); font-size: .8125rem; font-weight: 500; transition: color 140ms, background 140ms; }
+.navLink { display: flex; min-height: 44px; align-items: center; gap: .7rem; padding: .625rem .75rem; border-radius: .625rem; color: var(--muted); font-size: .8125rem; font-weight: 500; transition: color 140ms, background 140ms; }
 .navLink svg { flex-shrink: 0; }
 .navLink:hover { color: var(--ink); background: var(--hover-surface); }
 .navLink[aria-current='page'] { color: var(--signal); background: var(--accent-soft); }
