@@ -67,7 +67,7 @@ export function useProactive(enabled: boolean, getTranscript: () => string,
       }
     }
     const timer = setInterval(tick, POLL_MS)
-    return () => { mounted = false; clearInterval(timer); queue.current = []; pending.current = null; flight.current = 0; serial.current++ }
+    return () => { mounted = false; clearInterval(timer); queue.current = []; pending.current = null; flight.current = 0 }
   }, [enabled, latestWins])
   return { lastAsked, error }
 }

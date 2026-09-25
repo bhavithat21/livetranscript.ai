@@ -36,3 +36,9 @@ describe('hands-free interview detection — synthetic text, not audio recogniti
     for (const text of ['Please implement polling for the report status.', 'Refactor the service to enqueue a background job.', "I'd like you to add a regression test."]) expect(questionCandidates(text).at(-1)?.question).toBe(text)
   })
 })
+
+it('keeps a question key when earlier unrelated speech is reformatted or role-filtered', () => {
+  const question = 'How would you handle cancellation?'
+  expect(questionCandidates('We discussed the first task. Candidate response. ' + question).at(-1)?.key)
+    .toBe(questionCandidates('Candidate response. ' + question).at(-1)?.key)
+})

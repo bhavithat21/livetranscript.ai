@@ -92,11 +92,13 @@ export function incompleteQuestion(q: string): boolean {
   return /\b(?:the|a|an|of|to|with|and|or|if|because|which|from|for|would|could|should|your|how|when|where|design|implement|write|explain|describe)[.!?,\s]*$/i.test(q)
 }
 export type QuestionCandidate = { question: string; origin: number; key: string; complete: boolean }
-/** Ordinal source position disambiguates a repeated question in a later turn.
- * No role is guessed from a voice id. Hard turn markers are plain non-questions. */
+/** Count occurrences of each normalized question, not preceding sentence count:
+ * earlier punctuation/role revisions must not re-bill an unchanged question.
+ * Source position is retained only to coalesce queued multi-part extensions. */
 export function questionCandidates(transcript: string): QuestionCandidate[] {
   const sentences = transcript.replace(/\s+/g, ' ').trim().split(/(?<=[.!?])\s+/).filter(Boolean)
   const candidates: QuestionCandidate[] = []
+  const occurrences = new Map<string, number>()
   let group: string[] = [], origin = 0
   for (let index = 0; index < sentences.length; index++) {
     const sentence = sentences[index]
@@ -104,7 +106,12 @@ export function questionCandidates(transcript: string): QuestionCandidate[] {
     if (!group.length) origin = index
     group.push(stripLabels(sentence) || sentence)
     const question = group.slice(-5).join(' ')
-    if (!incompleteQuestion(question)) candidates.push({ question, origin, key: `${origin}:${normalizeQuestion(question)}`, complete: /[.!?]["')\]]?\s*$/.test(question) })
+    if (!incompleteQuestion(question)) {
+      const normalized = normalizeQuestion(question)
+      const occurrence = occurrences.get(normalized) ?? 0
+      occurrences.set(normalized, occurrence + 1)
+      candidates.push({ question, origin, key: `${occurrence}:${normalized}`, complete: /[.!?]["')\]]?\s*$/.test(question) })
+    }
   }
   return candidates
 }
