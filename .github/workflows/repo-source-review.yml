@@ -1,0 +1,32 @@
+name: Repository source review artifact
+on:
+  pull_request:
+    paths:
+      - 'scripts/wire-repo-native.mjs'
+      - '.github/workflows/repo-source-review.yml'
+permissions:
+  contents: read
+jobs:
+  source:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/repo-live-guidance-20260925'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Archive tracked source only for programmatic review
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, subprocess, zipfile
+          names = subprocess.check_output(['git', 'ls-files', '-z']).decode().split('\0')
+          extensions = {'.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.json', '.yaml', '.yml', '.rs', '.toml', '.lock', '.css', '.md', '.py', '.sh', '.ps1', '.xml', '.html'}
+          with zipfile.ZipFile('source-review.zip', 'w', zipfile.ZIP_DEFLATED) as z:
+            for name in names:
+              p = pathlib.Path(name)
+              if not name or p.is_symlink() or p.suffix not in extensions or p.name.startswith('.env') or not p.is_file(): continue
+              z.write(p, name)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: repo-source-review-${{ github.sha }}
+          path: source-review.zip
+          retention-days: 2
