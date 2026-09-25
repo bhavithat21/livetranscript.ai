@@ -1,0 +1,35 @@
+name: Repository coach QA
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/repo-coach-qa.yml'
+      - 'lib/repoCoach/**'
+      - 'components/repoCoach/**'
+      - 'app/api/copilot/repo-coach/**'
+permissions:
+  contents: read
+jobs:
+  workspace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Export isolated build inputs without credentials
+        run: |
+          tar --exclude=./.git --exclude='./.env*' --exclude=./.next --exclude=./.vercel --exclude=./src-tauri/target -czf "$RUNNER_TEMP/repo-coach-workspace.tgz" .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: repo-coach-workspace
+          path: ${{ runner.temp }}/repo-coach-workspace.tgz
+          retention-days: 1
+          compression-level: 0
