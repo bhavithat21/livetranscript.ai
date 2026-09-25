@@ -1,0 +1,46 @@
+name: Repository coach QA
+on:
+  pull_request:
+    paths: ['lib/coach/**', 'components/coach/**', 'app/api/copilot/coach/**', 'qa/coach/**', 'scripts/test-repo-coach.mjs', '.github/workflows/repository-coach.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  browser-and-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Evidence and asynchronous controller contracts (no model calls)
+        run: |
+          mkdir -p qa-results/coach
+          set -o pipefail
+          node --test scripts/test-repo-coach.mjs | tee qa-results/coach/contracts.txt
+      - name: Install pinned browser test runtime
+        run: |
+          python3 -m pip install playwright==1.55.0
+          python3 -m playwright install --with-deps chromium
+      - name: Real UI viewport and replay verification with fixture models
+        run: |
+          pnpm exec vite --config qa/coach/vite.config.ts > qa-results/coach/vite.log 2>&1 &
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:4180 >/dev/null && break; sleep 1; done
+          python3 qa/coach/verify.py
+      - name: Record exact source snapshot (tracked files only, no credentials or dependencies)
+        if: always()
+        run: |
+          mkdir -p qa-results
+          git archive --format=tar.gz HEAD > qa-results/repo-coach-source.tar.gz
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: repository-coach-qa-${{ github.run_id }}
+          path: qa-results/
+          retention-days: 14
