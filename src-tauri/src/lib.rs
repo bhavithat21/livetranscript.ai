@@ -18,6 +18,7 @@ use std::sync::Mutex;
 use tauri::ipc::{Channel, InvokeResponseBody};
 
 mod remote_assist;
+mod repo_capture;
 
 #[cfg(target_os = "macos")]
 mod macos_capture;
@@ -455,6 +456,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             }
             "quit" => {
                 remote_assist::stop_for_exit(app);
+                repo_capture::stop_for_exit(app);
                 app.exit(0);
             }
             _ => {}
@@ -490,6 +492,7 @@ pub fn run() {
 
     let builder = builder
         .manage(AudioState::default())
+        .manage(repo_capture::RepoCaptureState::default())
         .manage(remote_assist::RemoteAssistState::default())
         .manage(ProtectionState::default())
         .manage(LockState::default());
@@ -510,7 +513,11 @@ pub fn run() {
             remote_assist::remote_assist_heartbeat,
             remote_assist::remote_assist_set_control,
             remote_assist::remote_assist_input,
-            remote_assist::remote_assist_stop
+            remote_assist::remote_assist_stop,
+            repo_capture::repo_capture_displays,
+            repo_capture::repo_capture_start,
+            repo_capture::repo_capture_frame,
+            repo_capture::repo_capture_stop
         ])
         .on_window_event(|window, event| {
             use tauri::Manager;
@@ -519,6 +526,7 @@ pub fn run() {
                 tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed
             ) {
                 remote_assist::stop_for_exit(window.app_handle());
+                repo_capture::stop_for_exit(window.app_handle());
             }
         })
         // Auto-update the NATIVE SHELL. Note the web UI already updates on every
@@ -554,6 +562,7 @@ pub fn run() {
                     .global_shortcut()
                     .on_shortcut(remote_stop, move |app, shortcut, event| {
                         if event.state == ShortcutState::Pressed && shortcut == &remote_stop {
+                            repo_capture::stop_for_exit(app);
                             remote_assist::stop_all(
                                 app,
                                 "Stopped with the host's emergency shortcut.",
@@ -630,6 +639,7 @@ pub fn run() {
                 tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
             ) {
                 remote_assist::stop_for_exit(app);
+                repo_capture::stop_for_exit(app);
             }
         });
 }
