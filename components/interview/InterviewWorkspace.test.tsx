@@ -20,6 +20,7 @@ describe('interview views in the shared workspace', () => {
   it('links to implemented tools through the shared navigation', () => {
     render(<InterviewWorkspace ownerId="alice" />)
     expect(navLink('Transcripts').getAttribute('href')).toBe('/dashboard')
+    fireEvent.click(within(screen.getByRole('navigation', { name: 'Workspace' })).getByText('More tools'))
     expect(navLink('Repository').getAttribute('href')).toBe('/interview/repository')
     expect(navLink('Remote assist').getAttribute('href')).toBe('/remote')
     expect(navLink('Live interview').getAttribute('aria-current')).toBe('page')

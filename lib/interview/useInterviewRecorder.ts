@@ -83,7 +83,7 @@ export function useInterviewRecorder() {
     return run.stop
   }, [releaseCapture])
 
-  const start = useCallback(async (source: AudioSource, keyterms: string[] = []) => {
+  const start = useCallback(async (source: AudioSource, keyterms: string[] = [], maxSpeakers = source === 'mic' ? 1 : 5) => {
     if (runRef.current) throw new Error('Audio capture is already active or stopping.')
     if (!mounted.current) return
     const run: RecordingRun = {
@@ -134,7 +134,7 @@ export function useInterviewRecorder() {
         setError('Transcription could not connect in time. Check your connection and try again.')
         void stop()
       }, 25_000)
-      const result = await connectWithFallback({ keyterms, sampleRate: rate, maxSpeakers: source === 'mic' ? 1 : 5, signal: run.abort.signal })
+      const result = await connectWithFallback({ keyterms, sampleRate: rate, maxSpeakers: Math.max(1, Math.min(10, maxSpeakers)), signal: run.abort.signal })
       if (!valid()) {
         void result.provider.disconnect().catch(() => {})
         return
@@ -146,7 +146,8 @@ export function useInterviewRecorder() {
         // Established Stop may flush a final; a replaced/unmounted run may not.
         if (!mounted.current || runRef.current !== run || !run.acceptFinals) return
         const previous = new Map(rows.current.map((row) => [row.id, row.capturedAt]))
-        rows.current = mergeSegments(rows.current, event).map((row) => ({ ...row, capturedAt: previous.get(row.id) ?? Date.now() }))
+        const utteranceTime = event.utteranceId ? rows.current.find(row => row.utteranceId === event.utteranceId)?.capturedAt : undefined
+        rows.current = mergeSegments(rows.current, event).map((row) => ({ ...row, capturedAt: previous.get(row.id) ?? utteranceTime ?? Date.now() }))
         setSegments(rows.current)
       }
       result.provider.onPartial(ingest)

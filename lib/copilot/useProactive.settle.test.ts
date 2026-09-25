@@ -2,9 +2,8 @@ import { it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook } from '@testing-library/react'
 import { useProactive } from './useProactive'
 
-// The completion gate: answer IMMEDIATELY when the question looks complete (ASR
-// terminal punctuation = speaker finished → zero added latency), and only wait when
-// the text is still forming (no punctuation yet) so we never answer a fragment.
+// Punctuation is only a fast-path hint after incomplete stems are excluded.
+// Unpunctuated but complete questions use a short settling backstop.
 beforeEach(() => vi.useFakeTimers())
 afterEach(() => vi.useRealTimers())
 
@@ -32,7 +31,7 @@ it('does NOT fire an unpunctuated fragment immediately; waits for the settle bac
   const onQ = vi.fn()
   renderHook(() => useProactive(true, () => transcript, onQ))
   // No terminal punctuation → still forming → must wait, not answer the fragment.
-  transcript = 'tell me how would you design'
+  transcript = 'tell me how would you design a queue'
   vi.advanceTimersByTime(600) // first poll: starts the settle clock, does not fire
   expect(onQ).not.toHaveBeenCalled()
   // Advance well past the 900ms backstop (polls are 600ms apart) → now it answers.

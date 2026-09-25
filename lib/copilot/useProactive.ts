@@ -1,231 +1,73 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
+import { questionCandidates, type QuestionCandidate } from './questionDetection'
+export { latestQuestion, latestQuestionGroup } from './questionDetection'
 
-// Proactive auto-answer (opt-in). While ON, it watches the live transcript and,
-// when a NEW question is detected, fires the copilot automatically — so in a
-// meeting/interview the answer is already there without the user typing.
-//
-// Guards (so it doesn't spam or burn cost): only fires on question-shaped lines,
-// debounces on a brief pause, and dedupes so the same question isn't re-asked.
-// Off by default; the panel exposes the toggle.
-
-// An interrogative/behavioral cue at the START of the (filler-stripped) clause.
-const CUE_RE =
-  /^(what|why|how|when|where|who|which|whose|whom|can you|could you|would you|will you|do you|did you|have you|are you|is there|tell me|walk me|describe|explain|give me an example|share|design|implement|write|reverse|find|solve|compare|difference between|what's|whats|how'd|how're)\b/i
-
-// Leading discourse filler real speakers (and ASR) prepend before the real ask:
-// "So tell me…", "Okay, walk me…", "And how would you…", "Great. So, can you…".
-// Without stripping these, a `^cue` test misses most spoken questions — which is
-// why auto-answer sat on "Listening…" and never fired.
-const FILLER_RE =
-  /^(?:[\s,.\-–—]*\b(?:so|ok|okay|um|uh|erm|well|and|but|alright|all right|right|now|great|good|cool|yeah|yes|no|hmm|like|actually|basically|first|next|then|also|maybe|perhaps|let's|lets|let me|i guess|you know|i mean|for example)\b[\s,.:;\-–—]*)+/i
-
-// A diarized transcript prefixes each finalized line with "Speaker N: " (default
-// on for AssemblyAI/Deepgram). That label pushes the interrogative cue off the
-// START of the sentence, so CUE_RE would miss "Speaker 2: Walk me through…" — i.e.
-// auto-answer would silently sit on "Listening…" for every period-ended spoken
-// question in a real (diarized) interview. Strip the label first, everywhere the
-// sentence is tested or returned.
-const SPEAKER_RE = /^\s*Speaker\s+\d+:\s*/i
-
-function stripLabels(sentence: string): string {
-  return sentence.replace(SPEAKER_RE, '').replace(FILLER_RE, '').trim()
-}
-
-// A sentence is question-shaped if it ends with '?' OR, after stripping a speaker
-// label + leading filler, opens with an interrogative/behavioral cue. ASR
-// smart-format often renders spoken questions with a period, so we can't rely on
-// '?' alone; and '?' may itself sit after a "Speaker N:" label.
-function looksLikeQuestion(sentence: string): boolean {
-  const bare = sentence.replace(SPEAKER_RE, '')
-  if (/\?\s*$/.test(bare)) return true
-  return CUE_RE.test(bare.replace(FILLER_RE, ''))
-}
-
-// Pull the most recent question-shaped sentence out of the transcript tail, with
-// the speaker label + leading filler trimmed (a cleaner ask for the model, and no
-// "Speaker N:" leaking into the Answers feed). Null if none.
-export function latestQuestion(transcript: string): string | null {
-  const sentences = transcript
-    .replace(/\s+/g, ' ')
-    .split(/(?<=[.!?])\s+/)
-    .map((s) => s.trim())
-    .filter(Boolean)
-  for (let i = sentences.length - 1; i >= 0; i--) {
-    if (looksLikeQuestion(sentences[i]) && sentences[i].length >= 8) {
-      return stripLabels(sentences[i]) || sentences[i]
-    }
-  }
-  return null
-}
-
-// A MULTI-PART question is asked in pieces ("Tell me about a challenge. And how did
-// you measure it? And what would you change?"). Each piece may end in punctuation, so
-// the completion gate fires on the first — but they're ONE question. This gathers the
-// TRAILING RUN of consecutive question sentences (a question directly followed by
-// more questions, allowing short connective statements between) so the model can
-// answer ALL parts together instead of the first in isolation. Returns the combined
-// text, or the single latest question if there's only one part.
-export function latestQuestionGroup(transcript: string): string | null {
-  const sentences = transcript
-    .replace(/\s+/g, ' ')
-    .split(/(?<=[.!?])\s+/)
-    .map((s) => s.trim())
-    .filter(Boolean)
-  // Find the last question sentence.
-  let end = -1
-  for (let i = sentences.length - 1; i >= 0; i--) {
-    if (looksLikeQuestion(sentences[i]) && sentences[i].length >= 8) { end = i; break }
-  }
-  if (end === -1) return null
-  // Walk backward collecting the contiguous block of question-ish parts. Stop at a
-  // non-question sentence that ISN'T a short connective ("and", "also", "then …").
-  let start = end
-  for (let i = end - 1; i >= 0 && i >= end - 4; i--) {
-    const s = sentences[i]
-    if (looksLikeQuestion(s) && s.length >= 8) { start = i; continue }
-    break
-  }
-  const parts = sentences.slice(start, end + 1).map((s) => stripLabels(s) || s)
-  return parts.length > 1 ? parts.join(' ') : parts[0]
-}
-
-// Poll fast so a heard question turns into an answer with minimal lag. The
-// in-flight guard + prefix-dedupe below keep this from stacking duplicate calls,
-// so a short interval is safe (was 1500ms, which added up to 1.5s of dead wait).
-const DEBOUNCE_MS = 600
-
-// Normalize for dedupe: lowercase, collapse whitespace, drop trailing punctuation
-// so "reverse a linked list" and "Reverse a linked list?" are one question.
-function normalizeKey(q: string): string {
-  return q.toLowerCase().replace(/\s+/g, ' ').replace(/[.?!,\s]+$/, '').trim()
-}
-
-// The tail of a spoken question keeps growing as ASR revises finals, so a new
-// candidate that's a prefix/extension of one already asked is the SAME question.
-function isSameOrExtension(a: string, b: string): boolean {
-  return a === b || a.startsWith(b) || b.startsWith(a)
-}
-
-// Answering a question is a race: too early = a half-spoken FRAGMENT, too late =
-// dead latency (which we do NOT want). The resolution: fire IMMEDIATELY when the
-// candidate looks COMPLETE, and only wait when it genuinely might still be forming.
-// The completion signal is free — streaming ASR (AssemblyAI/Deepgram smart-format)
-// emits TERMINAL PUNCTUATION (. ! ?) exactly when it detects end-of-utterance, i.e.
-// the speaker finished. So:
-//   - ends with . ! ? → the utterance is done → fire on the next poll, NO extra wait
-//     (the common case pays zero latency).
-//   - no terminal punctuation yet → still forming → wait this SETTLE_MS as a backstop
-//     (covers ASR configs that don't punctuate) before answering the fragment.
+const POLL_MS = 300
 const SETTLE_MS = 900
-
-// A candidate whose text ends in terminal punctuation = the speaker finished.
-function isComplete(q: string): boolean {
-  return /[.!?]["')\]]?\s*$/.test(q.trim())
-}
-
-// After answering, a new question part arriving within this window is treated as a
-// CONTINUATION of a multi-part question (re-answer the whole group), not a fresh one.
-const MERGE_WINDOW_MS = 8_000
-
-export function useProactive(
-  enabled: boolean,
-  getTranscript: () => string,
-  // May return a promise that resolves when the answer finishes — the in-flight
-  // guard holds until then so ASR tail-revisions don't stack duplicate answers.
-  onQuestion: (q: string) => void | Promise<void>,
-) {
+const MAX_QUEUE = 4
+/** Detect while a model is busy. Latest-wins callers cancel superseded work;
+ * serial callers retain a bounded queue. Static text, revisions and toggling
+ * cannot repeatedly bill the same candidate. Failures never auto-retry here. */
+export function useProactive(enabled: boolean, getTranscript: () => string,
+  onQuestion: (q: string) => void | Promise<void>, options: { latestWins?: boolean } = {}) {
   const [lastAsked, setLastAsked] = useState<string | null>(null)
-  const askedRef = useRef<string[]>([])
-  const inFlightRef = useRef(false)
-  const onQuestionRef = useRef(onQuestion)
-  const getRef = useRef(getTranscript)
+  const [error, setError] = useState<string | null>(null)
+  const callback = useRef(onQuestion), getter = useRef(getTranscript)
+  const seen = useRef(new Set<string>())
+  const queue = useRef<QuestionCandidate[]>([])
+  const pending = useRef<{ key: string; since: number } | null>(null)
+  const flight = useRef(0), serial = useRef(0)
+  useEffect(() => { callback.current = onQuestion; getter.current = getTranscript }, [onQuestion, getTranscript])
+  const latestWins = options.latestWins === true
   useEffect(() => {
-    onQuestionRef.current = onQuestion
-    getRef.current = getTranscript
-  }, [onQuestion, getTranscript])
-  // The candidate question we're WAITING on, its normalized key, and when it last
-  // changed — the basis for "has it stopped growing?".
-  const pendingRef = useRef<{ q: string; key: string; since: number } | null>(null)
-  // When we last answered — for the MULTI-PART merge window. A question part arriving
-  // soon after an answer is likely a CONTINUATION of the same multi-part question, so
-  // we re-answer the whole GROUP rather than treating the new part as isolated.
-  const lastAnsweredAtRef = useRef(0)
-  // Exact normalized group last sent to the answer pipeline. The merge window is
-  // allowed to re-fire only when the question group actually CHANGES (for example
-  // a new follow-up sentence is appended). A static transcript must never loop.
-  const lastFiredGroupKeyRef = useRef<string | null>(null)
-
-  useEffect(() => {
-    if (!enabled) {
-      pendingRef.current = null
-      lastFiredGroupKeyRef.current = null
-      return
+    if (!enabled) return
+    let mounted = true, snapshot = ''
+    const remember = (key: string) => {
+      seen.current.add(key)
+      if (seen.current.size > 128) seen.current.delete(seen.current.values().next().value!)
     }
-    // Fire an answer for the current question GROUP (all contiguous parts, so a
-    // multi-part question is answered completely, not just its first part).
-    const fire = () => {
-      const group = latestQuestionGroup(getRef.current()) ?? latestQuestion(getRef.current())
-      if (!group) return
-      const groupKey = normalizeKey(group)
-      // Critical loop guard: after an async answer completes, the same static
-      // transcript is still "within the merge window". Without this check the old
-      // logic would answer the identical completed question every poll. Only a
-      // genuinely changed/extended group may fire again.
-      if (lastFiredGroupKeyRef.current === groupKey) return
-      lastFiredGroupKeyRef.current = groupKey
-      askedRef.current.push(groupKey)
-      pendingRef.current = null
-      lastAnsweredAtRef.current = Date.now()
-      inFlightRef.current = true
-      setLastAsked(group)
-      Promise.resolve(onQuestionRef.current(group)).finally(() => {
-        inFlightRef.current = false
-      })
+    const dispatch = (candidate: QuestionCandidate) => {
+      const token = ++serial.current
+      flight.current = token
+      setError(null); setLastAsked(candidate.question)
+      // Start sync callbacks immediately, but contain thrown/rejected callbacks.
+      let result: void | Promise<void>
+      try { result = callback.current(candidate.question) }
+      catch (failure) { result = Promise.reject(failure) }
+      void Promise.resolve(result).catch(failure => {
+        if (mounted && flight.current === token) setError(failure instanceof Error ? failure.message : 'Could not answer this question.')
+      }).finally(() => { if (mounted && flight.current === token) flight.current = 0 })
     }
-
-    const id = setInterval(() => {
-      if (inFlightRef.current) return // don't stack answers while one is generating
-      const q = latestQuestion(getRef.current())
-      if (!q) {
-        pendingRef.current = null
-        return
+    const tick = () => {
+      const transcript = getter.current()
+      const changed = transcript !== snapshot
+      if (changed || pending.current) {
+        snapshot = transcript
+        const candidates = questionCandidates(transcript)
+        const candidate = candidates.at(-1)
+        if (!candidate || seen.current.has(candidate.key)) pending.current = null
+        else {
+          const now = Date.now()
+          if (!pending.current || pending.current.key !== candidate.key) pending.current = { key: candidate.key, since: now }
+          if (now - pending.current.since >= (candidate.complete ? POLL_MS : SETTLE_MS)) {
+            remember(candidate.key); pending.current = null
+            // Replace an extension waiting in the queue rather than answering a
+            // half-question and the completed version consecutively.
+            queue.current = queue.current.filter(item => item.origin !== candidate.origin)
+            queue.current.push(candidate)
+            if (queue.current.length > MAX_QUEUE) queue.current.shift()
+          }
+        }
       }
-      const key = normalizeKey(q)
-      const now = Date.now()
-
-      // MULTI-PART MERGE: a NEW question part arriving within the merge window after
-      // the last answer is treated as a continuation — re-answer the full group so
-      // the later parts (and the earlier ones) are all covered. Without this, part 2
-      // of "tell me about X. and how did you measure it?" would be a separate answer.
-      const alreadySeen = askedRef.current.some((k) => isSameOrExtension(k, key))
-      const withinMergeWindow = now - lastAnsweredAtRef.current < MERGE_WINDOW_MS
-      if (alreadySeen && !withinMergeWindow) {
-        pendingRef.current = null
-        return // genuinely already answered, not a continuation
+      if (queue.current.length && (!flight.current || latestWins)) {
+        const candidate = latestWins ? queue.current.at(-1)! : queue.current[0]
+        queue.current = latestWins ? [] : queue.current.slice(1)
+        dispatch(candidate)
       }
-      if (alreadySeen && withinMergeWindow && !isComplete(q)) {
-        return // a continuation may still be forming — wait for it to complete
-      }
-
-      // FAST PATH: complete (terminal punctuation → speaker finished) → answer NOW.
-      if (isComplete(q)) {
-        fire()
-        return
-      }
-
-      // SLOW PATH: still forming → wait the SETTLE_MS backstop (only for un-punctuated
-      // ASR), resetting the clock while the text grows.
-      const pending = pendingRef.current
-      if (!pending || pending.key !== key) {
-        pendingRef.current = { q, key, since: now }
-        return
-      }
-      if (now - pending.since < SETTLE_MS) return
-      fire()
-    }, DEBOUNCE_MS)
-    return () => clearInterval(id)
-  }, [enabled])
-
-  return { lastAsked }
+    }
+    const timer = setInterval(tick, POLL_MS)
+    return () => { mounted = false; clearInterval(timer); queue.current = []; pending.current = null; flight.current = 0; serial.current++ }
+  }, [enabled, latestWins])
+  return { lastAsked, error }
 }

@@ -7,7 +7,7 @@ import { useStoredPreference } from '@/lib/browser/useStoredPreference'
 // localStorage so it sticks across sessions and screens (record, meeting, reader).
 const KEY = 'lt.textScale'
 export const MIN_SCALE = 0.85
-export const MAX_SCALE = 1.6
+export const MAX_SCALE = 2
 const STEP = 0.15
 const DEFAULT_SCALE = 1
 
@@ -27,5 +27,5 @@ export function useTextScale() {
   const inc = useCallback(() => set(scale + STEP), [scale, set])
   const dec = useCallback(() => set(scale - STEP), [scale, set])
 
-  return { scale, inc, dec, canInc: scale < MAX_SCALE, canDec: scale > MIN_SCALE }
+  return { scale, inc, dec, set, reset: () => set(DEFAULT_SCALE), canInc: scale < MAX_SCALE, canDec: scale > MIN_SCALE }
 }

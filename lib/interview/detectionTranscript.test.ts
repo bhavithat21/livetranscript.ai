@@ -8,7 +8,7 @@ describe('live question turn boundaries', () => {
   })
   it('does not combine unrelated questions across a candidate answer', () => {
     const text = detectionTranscript([row('How would you scale this?', 1), row('Tell me about a disagreement', 5000)], [row('Why not use this other system?', 2000)])
-    expect(latestQuestionGroup(text)).toBe('Tell me about a disagreement.')
+    expect(latestQuestionGroup(text)).toBe('Tell me about a disagreement')
     expect(text).not.toContain('Why not use')
   })
   it('separates long gaps without a candidate channel and excludes interim hypotheses', () => {

@@ -1,5 +1,6 @@
 import type { TranscriptionProvider, TranscriptionConfig, TranscriptEvent } from './types'
-import { assemblyResult } from './results'
+import { assemblyResult, type ResultMessage } from './results'
+import { reviseSpeakers } from './speakerRevision'
 import { boundedKeyterms } from './recognition'
 
 // Bound on how long disconnect() waits for the trailing final after Terminate,
@@ -8,6 +9,8 @@ const FINAL_FLUSH_MS = 2000
 
 export class AssemblyAIProvider implements TranscriptionProvider {
   private stream = ''
+  private finalTurns = new Map<number, ResultMessage>()
+  private cachedCharacters = 0
   private ws: WebSocket | null = null
   private removeAbort: (() => void) | null = null
   private partialCb: (e: TranscriptEvent) => void = () => {}
@@ -19,6 +22,7 @@ export class AssemblyAIProvider implements TranscriptionProvider {
   async connect(config: TranscriptionConfig): Promise<void> {
     this.stream = crypto.randomUUID()
     this.labels.clear()
+    this.finalTurns.clear(); this.cachedCharacters = 0
     config.signal?.throwIfAborted()
     const res = await fetch('/api/token', {
       method: 'POST',
@@ -97,7 +101,31 @@ export class AssemblyAIProvider implements TranscriptionProvider {
         try { data = JSON.parse(msg.data) } catch { return }
         if (!data || typeof data !== 'object') return
         if (data.type === 'Termination') { this.onFinalFlush?.(); return }
+        if (data.type === 'SpeakerRevision' && Array.isArray(data.revisions)) {
+          for (const revision of data.revisions.slice(0, 1000)) {
+            if (!revision || typeof revision !== 'object') continue
+            const old = this.finalTurns.get(revision.turn_order)
+            const corrected = old && reviseSpeakers(old, revision)
+            if (!corrected) continue
+            this.finalTurns.set(revision.turn_order, corrected)
+            const event = assemblyResult(corrected, this.stream, value => this.speakerIndex(value))
+            if (event) this.finalCb(event)
+          }
+          return
+        }
         const evt = assemblyResult(data, this.stream, value => this.speakerIndex(value))
+        if (evt?.isFinal && Number.isInteger(data.turn_order) && data.turn_order >= 0) {
+          const old = this.finalTurns.get(data.turn_order)
+          this.cachedCharacters -= typeof old?.transcript === 'string' ? old.transcript.length : 0
+          this.finalTurns.set(data.turn_order, data)
+          this.cachedCharacters += evt.text.length
+          while (this.finalTurns.size > 1000 || this.cachedCharacters > 250000) {
+            const first = this.finalTurns.keys().next().value!
+            const removed = this.finalTurns.get(first)
+            this.cachedCharacters -= typeof removed?.transcript === 'string' ? removed.transcript.length : 0
+            this.finalTurns.delete(first)
+          }
+        }
         if (evt) (evt.isFinal ? this.finalCb : this.partialCb)(evt)
       }
     })
@@ -107,8 +135,8 @@ export class AssemblyAIProvider implements TranscriptionProvider {
   private labels = new Map<string, number>()
   private speakerIndex(value: unknown): number | null {
     if (typeof value !== 'string' && typeof value !== 'number') return null
-    const label = String(value)
-    if (!label || label === 'UNKNOWN') return null
+    const label = String(value).trim()
+    if (!label || /^(?:UNKNOWN|PENDING)$/i.test(label)) return null
     if (!this.labels.has(label)) this.labels.set(label, this.labels.size)
     return this.labels.get(label)!
   }
@@ -146,5 +174,6 @@ export class AssemblyAIProvider implements TranscriptionProvider {
     }
     if (ws) { ws.onmessage = null; ws.onclose = null; ws.onerror = null; ws.onopen = null; ws.close() }
     if (this.ws === ws) this.ws = null
+    this.finalTurns.clear(); this.cachedCharacters = 0
   }
 }

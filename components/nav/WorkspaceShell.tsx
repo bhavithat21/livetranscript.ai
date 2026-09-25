@@ -27,7 +27,6 @@ const TOOL_LINKS = [
   { id: 'copilot', href: '/copilot', label: 'AI workspace', icon: Sparkles },
   { id: 'repository', href: '/interview/repository', label: 'Repository', icon: GitBranch },
   { id: 'practice', href: '/practice', label: 'Practice', icon: GraduationCap },
-  { id: 'transcripts', href: '/dashboard', label: 'Transcripts', icon: FileText },
   { id: 'remote', href: '/remote', label: 'Remote assist', icon: MonitorUp },
 ] as const
 
@@ -69,23 +68,26 @@ export function WorkspaceShell({ active, children, interviewView = 'live', onInt
 
   function navigation(mobile: boolean) {
     return <nav aria-label={mobile ? 'Mobile workspace' : 'Workspace'} className={styles.navigation}>
-      <p className={styles.groupLabel}>Interview</p>
+      <p className={styles.groupLabel}>Workspace</p>
       {INTERVIEW_LINKS.map(({ view, label, icon: Icon }) => <Link key={view} href={`/interview#${view}`} onClick={(event) => navigate(event, view)} aria-current={active === 'interview' && interviewView === view ? 'page' : undefined} className={styles.navLink}>
         <Icon size={17} strokeWidth={1.7} aria-hidden /><span>{label}</span>
         {active === 'interview' && interviewView === view && <span className={styles.selectedDot} aria-hidden />}
       </Link>)}
-      <p className={styles.groupLabel}>Your tools</p>
+      <Link href="/dashboard" onClick={(event) => navigate(event)} aria-current={active === 'transcripts' ? 'page' : undefined} className={styles.navLink}><FileText size={17} strokeWidth={1.7} aria-hidden /><span>Transcripts</span></Link>
+      <details className={styles.moreTools} open={TOOL_LINKS.some(item => item.id === active)}>
+        <summary><span>More tools</span><ChevronDown size={15} aria-hidden /></summary>
       {TOOL_LINKS.map(({ id, href, label, icon: Icon }) => <Link key={id} href={href} onClick={(event) => navigate(event)} aria-current={active === id ? 'page' : undefined} className={styles.navLink}>
         <Icon size={17} strokeWidth={1.7} aria-hidden /><span>{label}</span>
       </Link>)}
+        <Link href="/download" onClick={(event) => navigate(event)} className={styles.navLink}><Download size={17} strokeWidth={1.7} aria-hidden />Desktop app</Link>
+      </details>
       <div className={styles.navBottom}>
         <Link href="/settings" onClick={(event) => navigate(event)} aria-current={active === 'settings' ? 'page' : undefined} className={styles.navLink}><Settings2 size={17} strokeWidth={1.7} aria-hidden />Settings</Link>
-        <Link href="/download" onClick={(event) => navigate(event)} className={styles.navLink}><Download size={17} strokeWidth={1.7} aria-hidden />Desktop app</Link>
       </div>
     </nav>
   }
 
-  const currentLabel = active === 'interview' ? INTERVIEW_LINKS.find(item => item.view === interviewView)?.label : active === 'settings' ? 'Settings' : TOOL_LINKS.find(item => item.id === active)?.label
+  const currentLabel = active === 'interview' ? INTERVIEW_LINKS.find(item => item.view === interviewView)?.label : active === 'settings' ? 'Settings' : active === 'transcripts' ? 'Transcripts' : TOOL_LINKS.find(item => item.id === active)?.label
 
   return <div className={styles.shell}>
     <a href="#workspace-content" className={styles.skipLink}>Skip to workspace</a>

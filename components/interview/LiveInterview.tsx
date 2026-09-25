@@ -1,6 +1,10 @@
 'use client'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { AudioLines, Download, FileText, Headphones, Mic, Monitor, Play, Settings2, ShieldCheck, Sparkles, Square } from 'lucide-react'
+import { ReadingControls } from '@/components/transcript/ReadingControls'
+import { ListeningIndicator } from '@/components/transcript/ListeningIndicator'
+import { useTextScale } from '@/lib/transcript/useTextScale'
+import { liveTurns, voiceLabel, type ChannelSegment } from '@/lib/interview/liveTurns'
 import { LiveScrollArea } from '@/components/transcript/LiveScrollArea'
 import { LiveAnswerCanvas } from './LiveAnswerCanvas'
 import { RepositoryCoach } from '@/components/coach/RepositoryCoach'
@@ -19,6 +23,8 @@ export function LiveInterview({ blocked, onActivity, onComplete }: {
   const call = useInterviewRecorder()
   const microphone = useInterviewRecorder()
   const tuning = useInterviewTuning()
+  const { scale } = useTextScale()
+  const [interviewerSpeaker, setInterviewerSpeaker] = useState<number | null>(null)
   const { keyterms } = useKeytermPrefs()
   const [source, setSource] = useState<'both' | 'system' | 'mic'>('both')
   const [title, setTitle] = useState('Live interview')
@@ -50,7 +56,8 @@ export function LiveInterview({ blocked, onActivity, onComplete }: {
   const questionText = useCallback(() => detectionTranscript(
     (source === 'mic' ? getMicSegments() : getCallSegments()).filter((row) => row.capturedAt >= startTime.current),
     source === 'both' ? getMicSegments().filter((row) => row.capturedAt >= startTime.current) : [],
-  ), [getCallSegments, getMicSegments, source])
+    interviewerSpeaker,
+  ), [getCallSegments, getMicSegments, source, interviewerSpeaker])
 
   useEffect(() => {
     if (!active) return
@@ -62,10 +69,10 @@ export function LiveInterview({ blocked, onActivity, onComplete }: {
     if (activity.current || blocked || !consent) return
     const token = ++lifecycle.current
     activity.current = true; ending.current = false; sessionId.current = crypto.randomUUID(); startTime.current = Date.now()
-    setCaptureStartedAt(startTime.current); setElapsed(0); setError(null); setBusy(true); setActive(true); setTranscriptOpen(true); onActivity(true)
+    setInterviewerSpeaker(null); setCaptureStartedAt(startTime.current); setElapsed(0); setError(null); setBusy(true); setActive(true); setTranscriptOpen(true); onActivity(true)
     try {
       if (source !== 'mic') await call.start('system', keyterms)
-      if (token === lifecycle.current && !ending.current && source !== 'system') await microphone.start('mic', keyterms)
+      if (token === lifecycle.current && !ending.current && source !== 'system') await microphone.start('mic', keyterms, source === 'mic' ? 5 : 1)
     } catch (e) {
       if (token !== lifecycle.current) return
       await Promise.all([call.stop(), microphone.stop()])
@@ -104,13 +111,16 @@ export function LiveInterview({ blocked, onActivity, onComplete }: {
   const captured = (source !== 'mic' && callRows.length > 0) || (source !== 'system' && micRows.length > 0)
   const hasRecording = call.phase === 'recording' || microphone.phase === 'recording'
   const formatTime = (seconds: number) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
-  const transcriptRows = [
-    ...(source === 'mic' ? [] : callRows.map((row) => ({ ...row, channel: 'call', label: 'Interviewer / call' }))),
-    ...(source === 'system' ? [] : micRows.map((row) => ({ ...row, channel: 'mic', label: 'You / microphone' }))),
-  ].sort((a, b) => a.capturedAt - b.capturedAt).slice(-24)
+  const transcriptRows: ChannelSegment[] = [
+    ...(source === 'mic' ? [] : callRows.map((row) => ({ ...row, channel: 'call' as const }))),
+    ...(source === 'system' ? [] : micRows.map((row) => ({ ...row, channel: 'mic' as const }))),
+  ].sort((a, b) => a.capturedAt - b.capturedAt).slice(-160)
+  const turns = liveTurns(transcriptRows)
+  const callSpeakers = [...new Set((source === 'mic' ? micRows : callRows).flatMap(row => row.speaker == null ? [] : [row.speaker]))].sort((a, b) => a - b)
+  const readingStyle = { '--live-text-size': `${18 * scale}px` } as CSSProperties
   const captureStatus = finishing ? 'Saving transcript…' : busy ? 'Connecting audio…' : hasRecording ? 'Listening' : 'Audio paused'
   if (!active) return <div>
-    <section className={styles.liveStage} aria-labelledby="live-setup-heading">
+    <section className={styles.liveStage} style={readingStyle} aria-labelledby="live-setup-heading">
       <div className={styles.liveTopbar}><span className={styles.liveMark}><AudioLines size={17} aria-hidden /></span><span className={styles.liveTitle}>A clear space for your next conversation</span><span className={styles.sessionTime}>Ready to set up</span></div>
       <div className={styles.setupGrid}>
         <div className={styles.setupMain}>
@@ -146,12 +156,12 @@ export function LiveInterview({ blocked, onActivity, onComplete }: {
   </div>
 
   return <div>
-    <section className={styles.liveStage} aria-label="Active interview">
+    <section className={styles.liveStage} style={readingStyle} aria-label="Active interview">
       <div className={styles.liveTopbar}>
         <span className={styles.liveMark}><AudioLines size={17} aria-hidden /></span>
         <span className={styles.liveTitle}>{title || 'Live interview'}</span>
-        <span className={styles.liveStatus}>{captureStatus}</span>
-        <span className={styles.sessionTime}>{formatTime(elapsed)}</span>
+        <ListeningIndicator active={hasRecording && !finishing} level={Math.max(call.level, microphone.level)} label={captureStatus} />
+        <ReadingControls /><span className={styles.sessionTime}>{formatTime(elapsed)}</span>
         <button type="button" className={styles.endButton} disabled={finishing} onClick={() => void finish()}><Square size={12} aria-hidden />End</button>
       </div>
       <div className={`${styles.liveGrid} ${repositoryMode || !transcriptOpen ? styles.liveGridNoRail : ''}`}>
@@ -165,10 +175,11 @@ export function LiveInterview({ blocked, onActivity, onComplete }: {
         </div>
         {transcriptOpen && <aside id="live-transcript" className={styles.transcriptRail}>
           <div className={styles.railHeader}><h3>Transcript</h3><button type="button" onClick={() => setTranscriptOpen(false)}>Close</button></div>
+          {callSpeakers.length > 0 && <details className={styles.speakerSettings}><summary>Speakers · {callSpeakers.length} detected</summary><label>Answer questions from<select aria-label="Interviewer voice" value={interviewerSpeaker ?? 'all'} onChange={event => setInterviewerSpeaker(event.target.value === 'all' ? null : Number(event.target.value))}><option value="all">All incoming voices</option>{callSpeakers.map(speaker => <option key={speaker} value={speaker}>Speaker {speaker + 1}</option>)}</select></label><p>Voices are separated automatically. Assign the interviewer only when you know who is speaking. Early labels can change.</p></details>}
           <LiveScrollArea className={styles.transcriptList} updateKey={transcriptRows} label="Interviewer and microphone transcript">
-            {!transcriptRows.length ? <div className={styles.transcriptEmpty}><AudioLines size={23} aria-hidden /><p>{busy ? 'Connect your audio to begin.' : 'Speech will appear here as it is transcribed.'}</p></div> : transcriptRows.map((row) => <div key={`${row.channel}-${row.id}`} className={styles.transcriptTurn}><div className={styles.turnLabel}><span>{formatTime(Math.max(0, Math.floor((row.capturedAt - captureStartedAt) / 1000)))}</span><strong>{row.label}</strong></div><p className={row.isFinal ? undefined : styles.interim}>{row.text}</p></div>)}
+            {!turns.length ? <div className={styles.transcriptEmpty}><AudioLines size={23} aria-hidden /><p>{busy ? 'Connect your audio to begin.' : 'Speech will appear here as it is transcribed.'}</p></div> : turns.map(turn => <div key={turn.key} className={styles.transcriptTurn} data-speaker={turn.speaker ?? 'pending'} data-channel={turn.channel}><div className={styles.turnLabel}><strong>{voiceLabel(turn.channel, turn.speaker, interviewerSpeaker)}</strong><span>{formatTime(Math.max(0, Math.floor((turn.capturedAt - captureStartedAt) / 1000)))}</span></div><p>{turn.parts.map((part, index) => <span key={part.id} className={part.isFinal ? undefined : styles.interim}>{index > 0 ? ' ' : ''}{part.text}</span>)}</p></div>)}
           </LiveScrollArea>
-          <div className={styles.railFooter}><div><span className={styles.waveform} aria-hidden><i /><i /><i /><i /><i /><i /><i /></span><span>{captureStatus}</span></div><p>Following the latest speech. Scroll up to review; jump to latest to resume.</p></div>
+          <div className={styles.railFooter}><ListeningIndicator active={hasRecording && !finishing} level={Math.max(call.level, microphone.level)} label={captureStatus} /><span className={styles.railHint}>Auto-follow · scroll up to review</span></div>
         </aside>}
       </div>
     </section>
