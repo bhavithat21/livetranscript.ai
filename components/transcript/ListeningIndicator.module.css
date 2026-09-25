@@ -1,0 +1,7 @@
+.indicator {display:inline-flex;align-items:center;gap:9px;color:var(--muted);font-size:12px;min-height:28px}
+.indicator[data-active=true] {color:var(--ink)}
+.bars {display:flex;align-items:center;justify-content:center;gap:3px;width:28px;height:26px;color:var(--signal)}
+.bars i {display:block;width:3px;height:22px;border-radius:4px;background:currentColor;transform:scaleY(calc(.15 + var(--amplitude) * var(--bar-height)));transition:transform 100ms linear;opacity:.5}
+.indicator[data-speaking=true] .bars i {opacity:1;animation:listenPulse 640ms ease-in-out var(--delay) infinite alternate}
+@keyframes listenPulse {from{opacity:.55}to{opacity:1}}
+@media(prefers-reduced-motion:reduce){.bars i{animation:none!important;transition:none;transform:scaleY(.5)}}

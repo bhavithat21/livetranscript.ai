@@ -32,7 +32,10 @@ export function useFollowLatest(updateKey: unknown, enabled = true) {
     let userGestureUntil = 0
     let previousTop = viewport.scrollTop
     let touchY: number | null = null
+    let pointerIsDown = false
     const gesture = () => { userGestureUntil = Date.now() + 1000 }
+    const pointerDown = () => { gesture(); pointerIsDown = true }
+    const pointerUp = () => { pointerIsDown = false }
     const wheel = (event: WheelEvent) => { gesture(); if (event.deltaY < 0) pause() }
     const touchStart = (event: TouchEvent) => { gesture(); touchY = event.touches[0]?.clientY ?? null }
     const touchMove = (event: TouchEvent) => {
@@ -50,11 +53,16 @@ export function useFollowLatest(updateKey: unknown, enabled = true) {
     const onScroll = () => {
       const atBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 32
       if (!followingRef.current && atBottom && Date.now() <= userGestureUntil) resume()
-      else if (followingRef.current && !atBottom && viewport.scrollTop < previousTop && Date.now() <= userGestureUntil) pause()
+      // A recent wheel/key gesture is not proof that this scroll is user-driven:
+      // browser scroll anchoring can decrease scrollTop during text-size reflow.
+      // Wheel/touch/keyboard already pause explicitly. Infer only active drags.
+      else if (followingRef.current && !atBottom && viewport.scrollTop < previousTop && pointerIsDown) pause()
       previousTop = viewport.scrollTop
     }
     viewport.addEventListener('wheel', wheel, { passive: true })
-    viewport.addEventListener('pointerdown', gesture, { passive: true })
+    viewport.addEventListener('pointerdown', pointerDown, { passive: true })
+    document.addEventListener('pointerup', pointerUp, { passive: true })
+    document.addEventListener('pointercancel', pointerUp, { passive: true })
     viewport.addEventListener('touchstart', touchStart, { passive: true })
     viewport.addEventListener('touchmove', touchMove, { passive: true })
     viewport.addEventListener('keydown', keyDown)
@@ -68,7 +76,9 @@ export function useFollowLatest(updateKey: unknown, enabled = true) {
     return () => {
       resize?.disconnect()
       viewport.removeEventListener('wheel', wheel)
-      viewport.removeEventListener('pointerdown', gesture)
+      viewport.removeEventListener('pointerdown', pointerDown)
+      document.removeEventListener('pointerup', pointerUp)
+      document.removeEventListener('pointercancel', pointerUp)
       viewport.removeEventListener('touchstart', touchStart)
       viewport.removeEventListener('touchmove', touchMove)
       viewport.removeEventListener('keydown', keyDown)

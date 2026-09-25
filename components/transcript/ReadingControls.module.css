@@ -1,0 +1,12 @@
+.control { position:relative; font-size:13px; color:var(--ink); }
+.control summary { display:flex; align-items:center; gap:7px; min-height:44px; padding:8px 11px; border:1px solid var(--line); border-radius:8px; background:var(--reader); cursor:pointer; list-style:none; }
+.control summary::-webkit-details-marker { display:none; }
+.value { color:var(--muted); font-variant-numeric:tabular-nums; }
+.panel { position:fixed; max-height:calc(100dvh - 24px); overflow:auto; z-index:80; width:min(280px, calc(100vw - 40px)); padding:16px; background:var(--reader); border:1px solid var(--line); border-radius:12px; box-shadow:0 8px 32px #0004; }
+.panel>label { display:block; font-weight:600; }
+.panel input[type=range] { display:block; width:100%; margin:14px 0; accent-color:var(--signal); min-height:28px; }
+.panel>div { display:flex; align-items:center; gap:14px; justify-content:space-between; }
+.panel input[type=number] { width:72px; min-height:40px; margin-left:8px; background:var(--surface-soft); border:1px solid var(--line); border-radius:6px; color:inherit; padding:6px; }
+.panel button { min-height:40px; padding:4px 9px; border:1px solid var(--line); border-radius:6px; }
+.panel p { color:var(--muted); font-size:12px; line-height:1.6; margin:12px 0 0; }
+.control summary:focus-visible, .panel input:focus-visible, .panel button:focus-visible {outline:2px solid var(--signal);outline-offset:3px}

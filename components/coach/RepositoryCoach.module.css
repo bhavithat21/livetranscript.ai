@@ -25,3 +25,9 @@
 @container (min-width: 1000px) {.layout {grid-template-columns:minmax(580px,1fr) 300px}.aside {border-top:0;border-left:1px solid var(--coach-line)}.grid2 {grid-template-columns:repeat(2,minmax(0,1fr))}}
 @container (max-width: 480px) {.main,.aside {padding:14px}.header,.controls,.footer {padding:12px}.setup {padding:20px 16px}.card {padding:13px}.talk {font-size:16px}.question {font-size:19px}.notice {margin:10px 12px}}
 @media (prefers-reduced-motion:reduce) {.root * {scroll-behavior:auto!important}}
+
+/* Inherit the live reading-size control without scaling dense toolbar chrome. */
+.talk, .next {font-size:var(--live-text-size,18px);line-height:1.65;color:#f3f1e7}
+.code {font-size:calc(var(--live-text-size,18px) * .85)}
+.card .list li {font-size:calc(var(--live-text-size,18px) * .9);line-height:1.65}
+@container(max-width:480px){.talk{font-size:var(--live-text-size,18px)}}

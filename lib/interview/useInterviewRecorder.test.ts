@@ -128,3 +128,11 @@ it('cancels startup immediately on unmount and ignores a late provider', async (
   await act(async () => { resolve({ name: 'Late', provider: { disconnect: oldDisconnect } }); await starting })
   expect(oldDisconnect).toHaveBeenCalledTimes(1)
 })
+
+it('speaker-only split revisions retain the original arrival timestamp',async()=>{
+  const {result}=renderHook(()=>useInterviewRecorder());await act(async()=>result.current.start('system'))
+  act(()=>emit({...event,text:'Hello. Hi.',utteranceId:'stream:1'}))
+  const original=result.current.segments[0].capturedAt
+  act(()=>emit({...event,text:'Hello. Hi.',utteranceId:'stream:1',parts:[{text:'Hello.',speaker:0,startMs:0,endMs:40},{text:'Hi.',speaker:1,startMs:50,endMs:100}]}))
+  expect(result.current.segments.map(p=>p.capturedAt)).toEqual([original,original])
+})

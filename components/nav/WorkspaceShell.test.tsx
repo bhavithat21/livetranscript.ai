@@ -52,6 +52,7 @@ describe('WorkspaceShell navigation', () => {
     render(<WorkspaceShell active="interview" onNavigate={event => event.preventDefault()}><main>Active capture</main></WorkspaceShell>)
     const trigger = screen.getByLabelText('Open workspace navigation')
     fireEvent.click(trigger)
+    fireEvent.click(within(screen.getByRole('navigation', { name: 'Mobile workspace' })).getByText('More tools'))
     fireEvent.click(within(screen.getByRole('navigation', { name: 'Mobile workspace' })).getByRole('link', { name: 'AI workspace' }))
     expect(trigger.closest('details')!.open).toBe(true)
     fireEvent.pointerDown(screen.getByText('Active capture'))

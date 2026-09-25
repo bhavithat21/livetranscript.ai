@@ -71,7 +71,7 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
   useEffect(() => { if (permission && state.status === 'idle') controller.start(permission, presetObjective || 'Follow the interviewer’s task using only observed repository evidence.') }, [permission, presetObjective, controller, state.status])
   const ask = useCallback((question: string) => { controller.question(question) }, [controller])
   const getQuestions = useCallback(() => getter.current(), [])
-  useProactive(running, getQuestions, ask)
+  useProactive(running, getQuestions, ask, { latestWins: true })
   useEffect(() => {
     if (!running) return
     const timer = setInterval(() => {

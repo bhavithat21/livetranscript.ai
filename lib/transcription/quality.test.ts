@@ -142,3 +142,21 @@ for (const engine of engines) describe(`${engine.name} protocol fidelity`, () =>
     const done = provider.disconnect(); socket.message({ type: engine.terminal }); await done
   })
 })
+
+describe('AssemblyAI speaker-only corrections', () => {
+  beforeEach(() => { vi.useFakeTimers(); Socket.instances=[]; vi.stubGlobal('WebSocket',Socket); vi.stubGlobal('fetch',vi.fn(async()=>({ok:true,json:async()=>({token:'fixture'})}))) })
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
+  it('leaves PENDING unknown and applies verified revisions to the same turn through shutdown',async()=>{
+    const provider=new AssemblyAIProvider();const final=vi.fn();provider.onFinal(final)
+    const connecting=provider.connect({sampleRate:16000,maxSpeakers:5,keyterms:[]})
+    await Promise.resolve();await Promise.resolve();const socket=Socket.instances[0];socket.open();await connecting
+    const words=[{text:'Hello.',start:0,end:300,speaker:'PENDING'}]
+    socket.message({...aai('Hello.'),speaker_label:'PENDING',words})
+    expect(final.mock.calls[0][0].speaker).toBeNull()
+    const done=provider.disconnect()
+    socket.message({type:'SpeakerRevision',revisions:[{turn_order:0,speaker_label:'B',words:[{...words[0],speaker:'B'}]}]})
+    socket.message({type:'Termination'});await done
+    expect(final).toHaveBeenCalledTimes(2)
+    expect(final.mock.calls[1][0]).toMatchObject({text:'Hello.',speaker:0,startMs:0,endMs:300,utteranceId:final.mock.calls[0][0].utteranceId})
+  })
+})

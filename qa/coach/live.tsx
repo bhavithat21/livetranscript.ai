@@ -16,9 +16,45 @@ const source: Observation = {
   visiblePaths: [path, 'tests/TrackingService.test.ts'], terminal: '', requirements: ['Only PROCESSING orders may become SHIPPED. Preserve the public API.'],
 }
 const calls: Array<{ lane: string; context: ContextPacket }> = []
+const answerCalls: Array<{question:string; aborted:boolean}> = []
 const originalFetch = window.fetch.bind(window)
 window.fetch = async (input, init) => {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+  if (url === '/api/copilot/classify') return Response.json({result:{mode:'general',isQuestion:true,needsWeb:false,confidence:1}})
+  if (url === '/api/copilot/answer') {
+    const body=JSON.parse(String(init?.body)); const call={question:String(body.question),aborted:false};answerCalls.push(call)
+    const encoder=new TextEncoder()
+    let timer:ReturnType<typeof setTimeout> | undefined
+    let closed=false
+    let detachAbort=()=>{}
+    const finish=()=>{
+      if(closed)return false
+      closed=true
+      clearTimeout(timer)
+      detachAbort()
+      return true
+    }
+    const stream=new ReadableStream<Uint8Array>({ start(controller){
+      const abort=()=>{
+        if(!finish())return
+        call.aborted=true
+        controller.close()
+      }
+      detachAbort=()=>init?.signal?.removeEventListener('abort',abort)
+      init?.signal?.addEventListener('abort',abort,{once:true})
+      if(init?.signal?.aborted){abort();return}
+      timer=setTimeout(()=>{
+        if(!finish())return
+        controller.enqueue(encoder.encode(`**Fixture response — not a model evaluation.**\n\nFor this question: ${call.question}\n\nI would move the long-running report into a background job, return a job identifier, and provide a status endpoint with clear failure and cancellation states.`))
+        controller.close()
+      }, /slow fixture/i.test(call.question)?30000:120)
+    },cancel(){
+      // The production reader may cancel before the fetch signal handler runs.
+      // Cancellation already closes the stream: never close it a second time.
+      if(finish())call.aborted=true
+    }})
+    return new Response(stream,{headers:{'Content-Type':'text/plain'}})
+  }
   if (url === '/api/copilot/repo-screen') return Response.json({ observation: source, model: 'fixture-vision-NOT-a-model' })
   if (url === '/api/copilot/coach') {
     const body = JSON.parse(String(init?.body)), context = parseContext(body.context)
@@ -40,8 +76,8 @@ window.fetch = async (input, init) => {
   if (url.includes('/api/') || /^https?:/.test(url)) throw new Error(`Unexpected live QA network request: ${url}`)
   return originalFetch(input, init)
 }
-declare global { interface Window { __liveQA: { speak: (text: string, source?: string) => void; calls: () => Array<{ lane: string; context: ContextPacket }> } } }
-window.__liveQA = { speak: injectSpeech, calls: () => [...calls] }
+declare global { interface Window { __liveQA: { speak: (text: string, source?: string, speaker?: number | null) => void; answers: () => Array<{question:string;aborted:boolean}>; calls: () => Array<{ lane: string; context: ContextPacket }> } } }
+window.__liveQA = { speak: injectSpeech, answers:()=>[...answerCalls], calls: () => [...calls] }
 function App() {
   const [completed, setCompleted] = useState(false)
   return <InterviewTuningProvider ownerId="fixture-account"><WorkspaceShell active="interview"><main style={{ padding: 'clamp(12px, 2vw, 28px)', minWidth: 0 }}><p style={{ fontSize: 12, marginBottom: 16 }}>Integrated Live UI QA · synthetic audio, screen extraction, and model responses · no provider calls</p>{completed && <p role="status">Fixture transcript completed</p>}<LiveInterview visible blocked={false} onActivity={() => {}} onComplete={() => setCompleted(true)} /></main></WorkspaceShell></InterviewTuningProvider>

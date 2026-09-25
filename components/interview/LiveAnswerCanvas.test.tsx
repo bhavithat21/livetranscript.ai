@@ -105,7 +105,7 @@ describe('live answer context and cancellation', () => {
 
         if (end === 'pause') {
           fireEvent.click(screen.getByRole('button', { name: 'Pause answers' }))
-          expect(mocks.stop).toHaveBeenCalledOnce()
+          expect(mocks.stop).toHaveBeenCalledTimes(2)
           expect(mocks.proactive.mock.lastCall?.[0]).toBe(false)
         } else view.unmount()
         await act(async () => {
