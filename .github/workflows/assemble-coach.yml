@@ -26,7 +26,7 @@ jobs:
         run: |
           for part in 1 2 3 4; do python3 "transfer/.github/coach-transfer-$part.py"; done
           git -C candidate add -A
-          test "$(git -C candidate write-tree)" = 670ec112c7c2bcbeaea807bde93621b2e5475751
+          test "$(git -C candidate write-tree)" = e2e8ba621c7962618443ffa0b04defae8d89491c
       - uses: pnpm/action-setup@v4
         with:
           version: 9
@@ -46,11 +46,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: python
         run: |
-          import base64, hashlib, json, os, pathlib, subprocess, urllib.request
+          import hashlib, json, os, pathlib, subprocess, urllib.request
           root = pathlib.Path('candidate')
           repository = 'bhavithat21/livetranscript.ai'
           base = '23cc10f3a14e894a40b665e24c363bc7d8164f40'
-          expected = '670ec112c7c2bcbeaea807bde93621b2e5475751'
+          expected = 'e2e8ba621c7962618443ffa0b04defae8d89491c'
           def git(*args):
               return subprocess.check_output(['git', '-C', str(root), *args]).decode().strip()
           assert git('rev-parse', 'HEAD') == base
