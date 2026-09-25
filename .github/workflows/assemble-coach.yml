@@ -41,37 +41,41 @@ jobs:
           pnpm install --frozen-lockfile
           node --test scripts/test-repo-coach.mjs
           pnpm exec tsc --noEmit
-      - name: Store candidate Git objects for separate reviewed branch update
+      - name: Store source Git objects without changing workflows or branches
         env:
           GH_TOKEN: ${{ github.token }}
         shell: python
         run: |
-          import hashlib, json, os, pathlib, subprocess, urllib.request
+          import hashlib, json, os, pathlib, subprocess, urllib.request, urllib.error
           root = pathlib.Path('candidate')
           repository = 'bhavithat21/livetranscript.ai'
           base = '23cc10f3a14e894a40b665e24c363bc7d8164f40'
-          expected = 'e2e8ba621c7962618443ffa0b04defae8d89491c'
           def git(*args):
               return subprocess.check_output(['git', '-C', str(root), *args]).decode().strip()
           assert git('rev-parse', 'HEAD') == base
-          assert git('write-tree') == expected
+          assert git('write-tree') == 'e2e8ba621c7962618443ffa0b04defae8d89491c'
           paths = git('diff', '--cached', '--name-only', '--diff-filter=AM').splitlines()
           assert len(paths) == 26
           def api(path, data):
               request = urllib.request.Request('https://api.github.com/repos/' + repository + '/git/' + path, data=json.dumps(data).encode(), method='POST', headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'], 'Accept': 'application/vnd.github+json', 'Content-Type': 'application/json', 'X-GitHub-Api-Version': '2022-11-28'})
-              with urllib.request.urlopen(request, timeout=60) as response:
-                  return json.load(response)
+              try:
+                  with urllib.request.urlopen(request, timeout=60) as response:
+                      return json.load(response)
+              except urllib.error.HTTPError as error:
+                  print('GitHub object creation error:', error.code, json.loads(error.read()).get('message', 'Unavailable'))
+                  raise
           entries, hashes = [], {}
           for name in paths:
               file = root / name
               assert file.resolve().is_relative_to(root.resolve())
               data = file.read_bytes()
               hashes[name] = hashlib.sha256(data).hexdigest()
+              if name == '.github/workflows/macos-coach-build.yml':
+                  continue
               entries.append({'path': name, 'mode': '100644', 'type': 'blob', 'content': data.decode()})
           tree = api('trees', {'base_tree': git('rev-parse', 'HEAD^{tree}'), 'tree': entries})
-          assert tree['sha'] == expected
-          commit = api('commits', {'message': 'Harden repository coach evidence, replay checkpoints and integrated viewport QA', 'tree': tree['sha'], 'parents': [base]})
-          report = {'repository': repository, 'base': base, 'tree': tree['sha'], 'commit': commit['sha'], 'files': hashes, 'branchUpdated': False, 'note': 'Git objects only. No ref, deployment, secrets, or production model configuration was modified by assembly.'}
+          assert tree['sha'] == 'e4b310d224ac50ba5387decc0bf16f15013b1aa8'
+          report = {'repository': repository, 'base': base, 'tree': tree['sha'], 'files': hashes, 'branchUpdated': False, 'note': 'Application source objects only. Workflow addition and branch update require the separate authorized GitHub connector. No ref, deployment, secrets, or production model configuration was modified.'}
           pathlib.Path('candidate-commit.json').write_text(json.dumps(report, indent=2))
           print(json.dumps(report, indent=2))
       - uses: actions/upload-artifact@v4
