@@ -30,10 +30,10 @@ jobs:
           python3 -m playwright install --with-deps chromium
       - name: Real UI viewport and replay verification with fixture models
         run: |
-          pnpm exec vite --config qa/coach/vite.config.ts > qa-results/coach/vite.log 2>&1 &
+          node qa/coach/server.mjs > qa-results/coach/vite.log 2>&1 &
           for i in $(seq 1 30); do curl -fsS http://127.0.0.1:4180 >/dev/null && break; sleep 1; done
           python3 qa/coach/verify.py
-      - name: Record exact source snapshot (tracked files only, no credentials or dependencies)
+      - name: Record exact source snapshot (tracked files only)
         if: always()
         run: |
           mkdir -p qa-results
