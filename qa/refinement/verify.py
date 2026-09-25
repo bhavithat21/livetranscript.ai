@@ -18,6 +18,8 @@ with sync_playwright() as p:
     browser=p.chromium.launch(executable_path=os.environ.get('CHROMIUM_PATH') or None)
     page=browser.new_page(viewport={'width':1440,'height':1000},device_scale_factor=1)
     errors=[]; page.on('pageerror',lambda error: errors.append(str(error)))
+    console_errors=[]
+    page.on('console',lambda message: console_errors.append(message.text) if message.type=='error' else None)
     offline=os.environ.get('REFINEMENT_OFFLINE')
     if offline:
         folder=pathlib.Path(offline)/'assets'
@@ -27,7 +29,12 @@ with sync_playwright() as p:
         page.add_script_tag(content=scripts[0].read_text(),type='module')
     else:
         page.goto('http://127.0.0.1:4181',wait_until='networkidle')
-    page.wait_for_function('window.__refinementQA')
+    try:
+        page.wait_for_function('window.__refinementQA')
+    except Exception:
+        page.screenshot(path=str(ROOT/'startup-failure.png'),full_page=True)
+        (ROOT/'startup-failure.json').write_text(json.dumps({'browserErrors':errors,'consoleErrors':console_errors,'html':page.content()},indent=2))
+        raise
     page.evaluate('document.fonts.ready')
     faces=page.evaluate("[...document.fonts].filter(f=>/geist/i.test(f.family)).map(f=>({family:f.family,status:f.status}))")
     report['fontFaces']=faces
@@ -107,6 +114,12 @@ with sync_playwright() as p:
     assert page.locator('[data-motion-paused]').count()==1
     assert page.evaluate("document.getAnimations().filter(a=>a.playState==='running').length")==0
     page.emulate_media(reduced_motion='reduce')
+    # Remount with the OS preference active; Pause motion is intentionally hidden
+    # under reduced-motion, so this is independent of the manual pause state.
+    page.evaluate('window.__refinementQA.show("transcript")')
+    page.get_by_role('button',name='Reading view',exact=True).wait_for()
+    page.evaluate('window.__refinementQA.show("home")')
+    page.wait_for_timeout(100)
     page.get_by_role('heading',name='Before you press play.',exact=False).scroll_into_view_if_needed()
     assert page.evaluate("document.getAnimations().filter(a=>a.playState==='running').length")==0
     report['checks'].append('Pause motion and reduced-motion leave content visible with zero running decorative animations')
