@@ -11,7 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - name: Assemble exact source tree on separate feature branch
+      - name: Assemble exact application source on separate feature branch
         run: |
           python3 - <<'PY'
           import pathlib, base64, hashlib, lzma, subprocess, json
@@ -26,17 +26,23 @@ jobs:
           subprocess.run(['git','apply','--check','--unidiff-zero'],input=patch,check=True)
           subprocess.run(['git','apply','--unidiff-zero'],input=patch,check=True)
           git('add','-A')
-          tree=git('write-tree')
-          assert tree=='6b731a243c07d8315cff393cb80a6744a10bb406',tree
+          full_tree=git('write-tree')
+          assert full_tree=='6b731a243c07d8315cff393cb80a6744a10bb406',full_tree
           paths=git('diff','--cached','--name-only').splitlines()
+          files=[{'path':p,'sha256':hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()} for p in paths]
+          out=pathlib.Path('/tmp/focus-assembly');out.mkdir(exist_ok=True)
+          (out/'repository-coach.yml').write_bytes(pathlib.Path('.github/workflows/repository-coach.yml').read_bytes())
+          # Actions' token cannot update workflows. Leave that single reviewed
+          # change for the explicitly workflow-authorized GitHub connector.
+          git('checkout',base,'--','.github/workflows/repository-coach.yml')
+          app_tree=git('write-tree')
           git('config','user.name','github-actions[bot]')
           git('config','user.email','41898282+github-actions[bot]@users.noreply.github.com')
           git('commit','-m','Simplify Live navigation, group voice turns and improve automatic question scheduling')
           commit=git('rev-parse','HEAD')
           git('push','origin','HEAD:refs/heads/feat/focus-dialogue-20260925')
-          out=pathlib.Path('/tmp/focus-assembly');out.mkdir(exist_ok=True)
-          (out/'manifest.json').write_text(json.dumps({'base':base,'commit':commit,'tree':tree,'files':[{ 'path':p,'sha256':hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()} for p in paths]},indent=2))
-          print('Published feature commit',commit,'tree',tree,'files',len(paths))
+          (out/'manifest.json').write_text(json.dumps({'base':base,'commit':commit,'tree':app_tree,'intended_tree':full_tree,'files':files},indent=2))
+          print('Published application commit',commit,'tree',app_tree,'files',len(files))
           PY
       - uses: actions/upload-artifact@v4
         with:
