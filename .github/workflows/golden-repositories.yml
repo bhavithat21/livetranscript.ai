@@ -1,0 +1,36 @@
+name: Golden repository fixtures
+on:
+  pull_request:
+    paths: ['scripts/golden-repo-smoke.py', 'lib/coach/**', '.github/workflows/golden-repositories.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  authored-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.0'
+          cache: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Prove 24 authored micro-repository baselines fail and gold replacements pass
+        run: python3 scripts/golden-repo-smoke.py --output qa-results/golden
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: golden-repository-fixtures-${{ github.run_id }}
+          path: qa-results/golden/
+          retention-days: 14

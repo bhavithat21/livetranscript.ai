@@ -30,7 +30,8 @@ function saveFile(name: string, content: string) {
 }
 export function RepositoryCoach({ transport = httpCoachTransport, captureTransport = httpCapture, onReady, ...props }: RepositoryCoachProps) {
   const [resources, setResources] = useState<Resources | null>(null)
-  const readyRef = useRef(onReady); readyRef.current = onReady
+  const readyRef = useRef(onReady)
+  useEffect(() => { readyRef.current = onReady }, [onReady])
   useEffect(() => {
     const controller = new CoachController(transport)
     const screen = new ScreenObserver((observation, at) => controller.observe(observation, 'screen', at), captureTransport)
@@ -60,8 +61,10 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
   const [displays, setDisplays] = useState<NativeDisplay[]>([]), [displayId, setDisplayId] = useState(''), [selecting, setSelecting] = useState(false), [loadedReplay, setLoadedReplay] = useState(false)
   const screenshots = useRef<HTMLInputElement>(null), files = useRef<HTMLInputElement>(null), replayInput = useRef<HTMLInputElement>(null)
   const generation = useRef(0), mounted = useRef(true), previousSpeech = useRef('')
-  const activity = useRef(onActivity); activity.current = onActivity
-  const getter = useRef(getQuestionTranscript); getter.current = getQuestionTranscript
+  const activity = useRef(onActivity)
+  useEffect(() => { activity.current = onActivity }, [onActivity])
+  const getter = useRef(getQuestionTranscript)
+  useEffect(() => { getter.current = getQuestionTranscript }, [getQuestionTranscript])
   const running = state.status === 'running'
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; generation.current++; activity.current?.(false) } }, [])
   useEffect(() => { activity.current?.(running) }, [running])
@@ -116,7 +119,7 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
     const items = Array.from(selected), token = ++generation.current
     if (files.current) files.current.value = ''
     if (items.length > 40 || items.reduce((sum, file) => sum + file.size, 0) > 300_000) { setError('Select at most 40 text source files, totalling under 300 KB. Do not include credentials.'); return }
-    setReading(true); setError(null)
+    screen.watch(false); setReading(true); setError(null)
     try {
       for (const file of items) {
         const path = safePath(file.webkitRelativePath || file.name)
@@ -156,7 +159,7 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
         <button className={styles.button} disabled={!running || selecting || reading || capture.reading} onClick={() => void selectScreen()}>{selecting ? 'Selecting…' : capture.sharing ? 'Change shared IDE' : 'Share IDE'}</button>
         {capture.sharing && <><button className={styles.button} disabled={!running || reading} onClick={() => screen.watch(!capture.watching)}>{capture.watching ? 'Pause screen watch' : 'Watch changes'}</button><button className={styles.button} disabled={!running || capture.reading || reading} onClick={() => void screen.captureNow()}>Capture now</button><button className={styles.button} onClick={() => void screen.stop()}>Stop sharing</button></>}
         <button className={styles.button} disabled={!running || capture.reading || reading} onClick={() => screenshots.current?.click()}>Add screenshots</button><input hidden ref={screenshots} type="file" multiple accept="image/png,image/jpeg,image/webp" aria-label="Repository screenshots" onChange={event => void uploadScreens(event.target.files)} />
-        <button className={styles.button} disabled={!running || reading} onClick={() => files.current?.click()}>Import source files</button><input hidden ref={files} type="file" multiple aria-label="Repository source files" onChange={event => void importFiles(event.target.files)} />
+        <button className={styles.button} disabled={!running || reading || capture.reading} onClick={() => files.current?.click()}>Import source files</button><input hidden ref={files} type="file" multiple aria-label="Repository source files" onChange={event => void importFiles(event.target.files)} />
         {running ? <button className={styles.button} onClick={pause}>Pause coach</button> : state.status === 'paused' && <button className={styles.button} onClick={() => loadedReplay ? controller.analyzeReplay() : controller.resume()}>{loadedReplay ? 'Analyze replay with AI' : 'Resume coach'}</button>}
         {state.status !== 'ended' && <button className={styles.button} onClick={end}>End coach</button>}
       </div>
