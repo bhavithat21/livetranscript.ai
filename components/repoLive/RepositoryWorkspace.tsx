@@ -13,6 +13,7 @@ import { useRepoSession } from '@/lib/repo/live/useRepoSession'
 import { useRepoObserver } from '@/lib/repo/live/useObserver'
 import { demoEvents, replayPrefix } from '@/lib/repo/live/fixtures'
 import styles from './RepositoryWorkspace.module.css'
+import { NativeCaptureControls } from './NativeCaptureControls'
 
 type AudioSource = 'both' | 'system' | 'mic' | 'none'
 export function RepositoryWorkspace({ replay = false }: { replay?: boolean }) {
@@ -117,6 +118,8 @@ export function RepositoryWorkspace({ replay = false }: { replay?: boolean }) {
         {isReplay && <section className={styles.notice}><strong>{importedReplay ? 'Imported event replay' : 'Synthetic example, not an AI-generated or real interview result.'}</strong><p>Replaying checks state transitions. It does not measure model quality or speech/screenshot accuracy.</p></section>}
         {replay && !importedReplay && <div className={styles.timeline}><button className={styles.button} onClick={() => { setCursor(0); setPlaying(false) }}><RotateCcw size={14} />Reset</button><button className={styles.button} disabled={cursor >= fixture.events.length} onClick={() => setCursor(v => Math.min(v + 1, fixture.events.length))}>Next event</button><button className={styles.button} disabled={cursor >= fixture.events.length} onClick={() => setPlaying(v => !v)}>{playing && cursor < fixture.events.length ? 'Pause replay' : 'Play replay'}</button><button className={styles.button} onClick={() => { setPlaying(false); setCursor(fixture.events.length) }}>Replay all</button><span className={styles.muted}>{cursor}/{fixture.events.length} events</span></div>}
         {!isReplay && running && <div className={styles.capture}>
+          <NativeCaptureControls available={observer.nativeAvailable} displays={observer.displays} busy={observer.phase === 'requesting'} choose={observer.chooseNative} start={observer.beginNative} />
+          {observer.phase === 'watching' && <button className={styles.button} disabled={observer.reading} onClick={observer.captureNow}>Capture now</button>}
           <button className={styles.button} onClick={() => void observer.start()} disabled={observer.phase === 'requesting' || observer.phase === 'watching'}><Monitor size={15} />{observer.phase === 'requesting' ? 'Select a surface…' : 'Share IDE'}</button>
           {(observer.phase === 'watching' || observer.phase === 'paused') && <button className={styles.button} onClick={observer.togglePause}>{observer.phase === 'paused' ? 'Resume capture' : 'Pause capture'}</button>}
           <button className={styles.button} disabled={observer.reading} onClick={() => fileInput.current?.click()}><Camera size={15} />Screenshot</button>
