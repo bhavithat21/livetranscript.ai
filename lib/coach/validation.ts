@@ -102,6 +102,7 @@ export function parseGuidance(raw: unknown, context: ContextPacket): Guidance {
     const item = object(value, ['path', 'fileVersion', 'startLine', 'before', 'after', 'reason'])
     const path = safePath(item.path), fileVersion = integer(item.fileVersion, 1), startLine = integer(item.startLine, 1, 100_000)
     const before = text(item.before, 6000, true), after = text(item.after, 6000)
+    if (/\[REDACTED(?: SECRET)?\]/.test(before + after)) throw new Error('Redacted source cannot support an exact patch')
     if (before === after || before.includes('[REDACTED')) throw new Error('Patch must change visible non-secret code')
     const file = context.files.find(item => item.path === path && item.fileVersion === fileVersion)
     const observation = observedText(context, path, startLine, before.split('\n').length)

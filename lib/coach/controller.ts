@@ -3,6 +3,7 @@ import { buildContext, EvidenceIndex } from './context'
 import { emptyCoach, normalizeQuestion, parseReplayEvent, reduceCoach, resultCurrent } from './state'
 import { LIMITS, list, object, parseGuidance, redactSecrets, text } from './validation'
 
+export type ReplayReference = { id: string; lane: string; model: string; text: string; summary: string; note: string; verdict: string }
 export type CoachTransport = (lane: Lane, packet: ContextPacket, options: { signal: AbortSignal; delta: (text: string, model: string) => void }) => Promise<{ model: string; guidance: Guidance | null }>
 type Flight = { controller: AbortController; key: string; requestId: string }
 export class CoachController {
@@ -19,6 +20,9 @@ export class CoachController {
   private index = new EvidenceIndex()
   private disposed = false
   private replay = false
+  private replayEvents: CoachEvent[] = []
+  private replayPosition = 0
+  private replayReferences: ReplayReference[] = []
   private retrySerial = 0
   readonly sessionId: string
   constructor(private transport: CoachTransport, private now: () => number = Date.now, private id: () => string = () => crypto.randomUUID(), sessionId?: string) {
@@ -42,12 +46,21 @@ export class CoachController {
     return event
   }
   start(permission: Permission, objective: string) { this.emit({ type: 'session.start', permission, objective }) }
-  task(objective: string, constraints: string[]) { this.emit({ type: 'task.update', objective, constraints }); this.cancelStale(); this.scheduleGuide() }
+  task(objective: string, constraints: string[]) {
+    if (this.state.status !== 'running' || this.disposed) return
+    this.emit({ type: 'task.update', objective, constraints }); this.cancelStale()
+    if (!this.replay) void this.run('talk')
+    this.scheduleGuide()
+  }
   speech(value: string, speaker: 'interviewer' | 'candidate' = 'interviewer') {
     if (this.state.status !== 'running') return
     const previous = this.state.evidenceVersion
     this.emit({ type: 'speech.final', speaker, text: value.slice(-4000) })
-    if (this.state.evidenceVersion !== previous) { this.cancelStale(); this.scheduleGuide() }
+    if (this.state.evidenceVersion !== previous) {
+      this.cancelStale()
+      if (!this.replay) void this.run('talk')
+      this.scheduleGuide()
+    }
   }
   question(original: string) {
     if (this.state.status !== 'running' || this.disposed) return
@@ -133,7 +146,7 @@ export class CoachController {
   dispose() { this.cancelAll(); this.disposed = true; this.listeners.clear(); this.index.clear() }
   exportReplay(): string {
     return JSON.stringify({ format: 'livetranscript-repo-replay-v1', sessionId: this.sessionId, truncated: this.journalTruncated, events: this.journal,
-      evaluations: this.state.results.filter(item => item.status !== 'running').map(item => ({ ...item })), feedback: this.state.feedback,
+      evaluations: [...this.replayReferences.map(item => ({ ...item, referenceOnly: true })), ...this.state.results.filter(item => item.status !== 'running').map(item => ({ ...item }))], feedback: this.state.feedback,
       note: 'Contains selected source text and transcript fragments; no raw audio or screen images. Observed terminal output is not independent proof of test execution. Imported evaluations never become observed code.' },
     (_key, value) => typeof value === 'string' ? redactSecrets(value) : value, 2)
   }
@@ -153,10 +166,37 @@ export class CoachController {
       if (event.type === 'session.start') event = { ...event, permission: 'practice' }
       state = reduceCoach(state, event)
     }
-    this.cancelAll(); this.replay = true; this.attempted.clear(); this.index.clear()
-    this.journal = events.map(event => ({ ...event, sessionId: this.sessionId })); this.journalSize = JSON.stringify(this.journal).length
-    this.publish({ ...state, status: 'paused', warning: 'Replay loaded offline. Saved model outputs are not treated as code evidence. Analyze explicitly to make new model calls.' })
+    if (!events.length || events[0].type !== 'session.start') throw new Error('Replay must begin with an explicit practice/session start')
+    const annotations = Array.isArray(root.evaluations) ? root.evaluations.slice(-80) : []
+    const reviews = Array.isArray(root.feedback) ? root.feedback.slice(-100) : []
+    // Reference-only annotations never enter state.files, buildContext or model
+    // input. Keep the user's feedback visible when they reopen a replay.
+    const references: ReplayReference[] = []
+    for (const value of annotations) {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) continue
+      const item = value as Record<string, unknown>
+      if (typeof item.id !== 'string' || !['talk', 'guide', 'review'].includes(String(item.lane))) continue
+      const review = reviews.findLast(value => value && typeof value === 'object' && (value as Record<string, unknown>).resultId === item.id) as Record<string, unknown> | undefined
+      const guidance = item.guidance && typeof item.guidance === 'object' ? item.guidance as Record<string, unknown> : null
+      const plain = (value: unknown, max: number) => typeof value === 'string' ? redactSecrets(value.slice(0, max)) : ''
+      references.push({ id: plain(item.id, 100), lane: String(item.lane), model: plain(item.model, 180), text: plain(item.text, LIMITS.output), summary: plain(guidance?.summary ?? item.summary, 4000), note: plain(review?.note ?? item.note, 2000), verdict: plain(review?.verdict ?? item.verdict, 30) })
+    }
+    this.replayEvents = events.map(event => ({ ...event, sessionId: this.sessionId, ...(event.type === 'session.start' ? { permission: 'practice' as const } : {}) }))
+    this.replayReferences = references
+    this.seekReplay(events.length)
   }
+  /** Seek uses only recorded source events up to the checkpoint. It never calls
+   * a model and never lets future screenshots or old evaluations leak backward. */
+  seekReplay(position: number) {
+    if (!Number.isInteger(position) || position < 1 || position > this.replayEvents.length) throw new Error('Invalid replay checkpoint')
+    this.cancelAll(); this.replay = true; this.attempted.clear(); this.index.clear()
+    let state = emptyCoach(this.sessionId)
+    const events = this.replayEvents.slice(0, position)
+    for (const event of events) state = reduceCoach(state, event)
+    this.replayPosition = position; this.journal = events; this.journalSize = JSON.stringify(events).length; this.journalTruncated = false
+    this.publish({ ...state, status: 'paused', warning: 'Replay checkpoint loaded offline. Saved model answers and review notes are reference only. Analyze explicitly to make new model calls.' })
+  }
+  getReplayInfo() { return { position: this.replayPosition, total: this.replayEvents.length, event: this.replayEvents[this.replayPosition - 1]?.type ?? '', references: this.replayReferences } }
   analyzeReplay() { this.replay = false; this.resume(); void this.run('talk', true); void this.run('guide', true) }
   getMetrics() { return { modelRequests: this.calls, activeRequests: this.flights.size, journalEvents: this.journal.length, journalTruncated: this.journalTruncated } }
 }

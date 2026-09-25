@@ -66,7 +66,7 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
   const getter = useRef(getQuestionTranscript)
   useEffect(() => { getter.current = getQuestionTranscript }, [getQuestionTranscript])
   const running = state.status === 'running'
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; generation.current++; activity.current?.(false) } }, [])
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; activity.current?.(false) } }, [])
   useEffect(() => { activity.current?.(running) }, [running])
   useEffect(() => { if (permission && state.status === 'idle') controller.start(permission, presetObjective || 'Follow the interviewer’s task using only observed repository evidence.') }, [permission, presetObjective, controller, state.status])
   const ask = useCallback((question: string) => { controller.question(question) }, [controller])
@@ -88,7 +88,7 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
     setError(null); setSelecting(true)
     const token = ++generation.current
     try {
-      const source = native ? await nativeFrameSource(displayId) : await browserFrameSource(() => { void screen.stop() })
+      const source = native ? await nativeFrameSource(displayId) : await browserFrameSource(() => { if (mounted.current && token === generation.current) void screen.stop() })
       if (!mounted.current || token !== generation.current || controller.getSnapshot().status !== 'running') { await source.stop(); return }
       await screen.attach(source, native ? 'native' : 'browser')
       if (!mounted.current || token !== generation.current || controller.getSnapshot().status !== 'running') { await screen.stop(); return }
@@ -150,6 +150,7 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
   const guide = state.results.findLast(item => item.lane !== 'talk' && item.status === 'complete' && resultCurrent(item, state))
   const guiding = state.results.some(item => item.lane !== 'talk' && item.status === 'running' && resultCurrent(item, state))
   const failed = state.results.findLast(item => ['failed', 'cancelled'].includes(item.status) && resultCurrent(item, state))
+  const replay = controller.getReplayInfo()
   const next = state.navigation ?? nextInspection(state), metrics = controller.getMetrics(), counts = state.files.map(fileCoverage), native = nativeAvailable()
   return <section className={styles.root} aria-label="Repository coach" data-testid="repository-coach">
     <header className={styles.header}><h2>Repository coach</h2><span className={styles.tag}>{state.status === 'idle' ? 'Set up' : loadedReplay ? 'Replay' : state.permission === 'practice' ? 'Practice' : 'AI-permitted session'}</span><span className={`${styles.muted} ${styles.spacer}`}>{state.status} · evidence v{state.evidenceVersion}</span></header>
@@ -160,11 +161,18 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
         {capture.sharing && <><button className={styles.button} disabled={!running || reading} onClick={() => screen.watch(!capture.watching)}>{capture.watching ? 'Pause screen watch' : 'Watch changes'}</button><button className={styles.button} disabled={!running || capture.reading || reading} onClick={() => void screen.captureNow()}>Capture now</button><button className={styles.button} onClick={() => void screen.stop()}>Stop sharing</button></>}
         <button className={styles.button} disabled={!running || capture.reading || reading} onClick={() => screenshots.current?.click()}>Add screenshots</button><input hidden ref={screenshots} type="file" multiple accept="image/png,image/jpeg,image/webp" aria-label="Repository screenshots" onChange={event => void uploadScreens(event.target.files)} />
         <button className={styles.button} disabled={!running || reading || capture.reading} onClick={() => files.current?.click()}>Import source files</button><input hidden ref={files} type="file" multiple aria-label="Repository source files" onChange={event => void importFiles(event.target.files)} />
-        {running ? <button className={styles.button} onClick={pause}>Pause coach</button> : state.status === 'paused' && <button className={styles.button} onClick={() => loadedReplay ? controller.analyzeReplay() : controller.resume()}>{loadedReplay ? 'Analyze replay with AI' : 'Resume coach'}</button>}
+        {running ? <button className={styles.button} onClick={pause}>Pause coach</button> : state.status === 'paused' && <button className={styles.button} disabled={loadedReplay && !state.question} onClick={() => loadedReplay ? controller.analyzeReplay() : controller.resume()}>{loadedReplay ? 'Analyze replay with AI' : 'Resume coach'}</button>}
         {state.status !== 'ended' && <button className={styles.button} onClick={end}>End coach</button>}
       </div>
       {native && <details className={`${styles.details} ${styles.main}`}><summary>Desktop display capture</summary><p>Use a selected display through the native app. This does not grant remote control. Screen-recording permission is required.</p><button className={styles.button} disabled={!running || selecting} onClick={() => { void nativeDisplays().then(items => { setDisplays(items); setDisplayId(items[0]?.id || '') }).catch(() => setError('Native capture requires the updated desktop installer and screen-recording permission.')) }}>Find displays</button>{displays.length > 0 && <label className={styles.label}>Display<select className={styles.input} value={displayId} onChange={event => setDisplayId(event.target.value)}>{displays.map(display => <option key={display.id} value={display.id}>{display.name} · {display.width} × {display.height}</option>)}</select><button className={styles.button} disabled={!running || !displayId || selecting} onClick={() => void selectScreen(true)}>Share selected display</button></label>}</details>}
       {(capture.sharing || capture.reading || reading) && <p className={styles.notice} role="status">{capture.reading ? 'Reading a changed view…' : reading ? 'Importing selected evidence…' : capture.watching ? 'Watching the selected IDE. Stable changed screenshots are sent to your configured vision provider.' : 'Screen selected; automatic screenshot analysis paused.'}</p>}
+      {loadedReplay && <section className={styles.main} aria-label="Replay timeline">
+        <label className={styles.label} htmlFor="coach-replay-checkpoint">Observation {replay.position} of {replay.total} · {replay.event}</label>
+        <input id="coach-replay-checkpoint" aria-label="Replay checkpoint" type="range" min={1} max={Math.max(1, replay.total)} value={replay.position} className={styles.input} onChange={event => { screen.watch(false); controller.seekReplay(Number(event.target.value)) }} />
+        <div className={styles.feedback}><button className={styles.button} disabled={replay.position <= 1} onClick={() => controller.seekReplay(replay.position - 1)}>Previous observation</button><button className={styles.button} disabled={replay.position >= replay.total} onClick={() => controller.seekReplay(replay.position + 1)}>Next observation</button></div>
+        <p className={styles.muted}>Seeking is offline. Future screenshots and saved model answers are excluded from this checkpoint’s context. Analyze replay with AI sends only the evidence visible so far.</p>
+        {replay.references.length > 0 && <details className={styles.details}><summary>Previous responses and saved feedback · reference only</summary><ul className={styles.list}>{replay.references.map((item, index) => <li key={`${item.id}-${index}`}><strong>{item.lane} · {item.model || 'Model not recorded'} · {item.verdict || 'Not reviewed'}</strong><pre className={styles.code}>{item.text || item.summary}</pre>{item.note && <p>Review: {item.note}</p>}</li>)}</ul></details>}
+      </section>}
       {state.status === 'paused' && <p className={styles.notice}>Coach paused. No new model calls or screen analysis. The parent interview’s audio capture has separate controls.</p>}
       <div className={styles.layout}>
         <div className={styles.main} data-testid="coach-main">

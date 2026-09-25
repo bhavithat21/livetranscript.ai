@@ -1,5 +1,7 @@
-import type { CoachState, CoachEvent, ObservedFile, Fragment, Observation, FileObservation, Navigation, PatchReview, ContextPacket, TestEvidence, Source, Task, EventPayload } from './types'
-import { hashText, LIMITS, parseObservation, safePath, text, list, integer, permission, object } from './validation'
+import type { CoachState, CoachEvent, ObservedFile, Fragment, Observation, FileObservation, Navigation, PatchReview, Source, Task, EventPayload } from './types'
+import { hashText, LIMITS, parseObservation, text, list, integer, permission, object } from './validation'
+import { parseTestOutput } from './testOutput'
+export { parseTestOutput } from './testOutput'
 
 export function emptyCoach(sessionId: string): CoachState {
   return { schema: 1, sessionId: text(sessionId, 100, true), permission: null, status: 'idle',
@@ -53,7 +55,14 @@ function mergeFile(previous: ObservedFile | undefined, observed: FileObservation
     if (fragments.length > LIMITS.fragments) throw new Error('This file has too many partial observations. Import or recapture the current file from line 1.')
   }
   const file: ObservedFile = { ...old, language: observed.language, version: old.version + Number(edited), fragments, retired, lastSeen: source.sequence,
-    contentKey: hashText(JSON.stringify(fragments.map(({ startLine, lines, confidence, endOfFile }) => ({ startLine, lines, confidence, endOfFile })).sort((a, b) => (a.startLine ?? -1) - (b.startLine ?? -1) || a.lines.join('\n').localeCompare(b.lines.join('\n'))))) }
+    contentKey: '' }
+  // Chunk boundaries and provenance do not change code semantics. Overlapping
+  // re-captures must not repeatedly invalidate caches or bill new investigations.
+  file.contentKey = hashText(JSON.stringify({
+    anchored: [...lineMap(file)].sort(([a], [b]) => a - b).map(([line, value]) => [line, value.text, value.confidence]),
+    eof: fileCoverage(file).last,
+    unanchored: [...new Set(fragments.filter(part => part.startLine === null).map(part => JSON.stringify([part.lines, part.confidence, part.endOfFile])))].sort(),
+  }))
   return { file, edited, changed: file.contentKey !== old.contentKey }
 }
 function compactFragments(fragments: Fragment[]): Fragment[] {
@@ -100,28 +109,21 @@ export function reviewEdits(state: CoachState): PatchReview[] {
     return { patchId: patch.id, status: 'differs', detail: operatorWarning, observedSource: sourceId }
   })
 }
-export function parseTestOutput(output: string): { status: TestEvidence['status']; passed: number | null; failed: number | null } {
-  const cleaned = output.replace(/\x1b\[[0-9;]*m/g, '')
-  const count = (pattern: RegExp) => { const match = cleaned.match(pattern); return match ? Number(match[1]) : null }
-  const passed = count(/(?:\bTests:?\s+)?(\d+)\s+passed\b/i) ?? count(/^# pass (\d+)\s*$/m)
-  const failed = count(/(\d+)\s+failed\b/i) ?? count(/^# fail (\d+)\s*$/m)
-  const terminalSummary = /(?:\bTests?:?\s+.*(?:passed|failed)|=+[^\n]*(?:passed|failed)[^\n]*=+|^# (?:pass|fail) \d+|^OK\s*$|^FAILURES!!!|^FAIL\s+|^ok\s+\S+\s+[\d.]+s)/m.test(cleaned)
-  const failure = (failed ?? 0) > 0 || /(?:^FAIL\b|^FAILURES!!!|error TS\d+|error CS\d+|Compilation failure|BUILD FAILED|FAILED \S+::)/m.test(cleaned)
-  if (failure) return { status: 'observed-fail', passed, failed }
-  if (terminalSummary && ((passed ?? 0) > 0 || /^OK\s*$|^ok\s+\S+\s+[\d.]+s/m.test(cleaned)) && (failed ?? 0) === 0) return { status: 'observed-pass', passed, failed }
-  return { status: /(?:collecting|Running tests|RUN\s+v\d|Test run for|^> .*test)/im.test(cleaned) ? 'running' : 'incomplete', passed, failed }
-}
 export function intentFromSpeech(task: Task, speech: string): Task {
   // Only finalized interviewer speech enters this path, never source comments.
+  speech = speech.replaceAll('’', "'")
   let phase = task.phase, implementation = task.implementation
   if (/\b(?:do not|don't|not yet|before you)\s+(?:start\s+)?(?:code|implement|modify)\b|\b(?:explain|walk me through).{0,35}(?:first|before coding)\b/i.test(speech)) { phase = 'plan'; implementation = 'hold' }
   else if (/\b(?:go ahead and|okay[, ]+|now |please )\s*(?:implement|code|make the change|start coding)\b/i.test(speech)) { phase = 'implement'; implementation = 'allowed' }
   else if (/\b(?:debug|why.{0,15}fail|fix the (?:bug|test))\b/i.test(speech)) phase = 'debug'
   else if (/\b(?:review|improve|clean up)\b/i.test(speech)) phase = 'review'
-  const constraints = [...task.constraints]
+  const deferTests = 'Interviewer asked to defer tests. Do not claim the change is verified.'
+  const resumeTests = /\b(?:now|please|go ahead and|okay[, ]+)\s*(?:run|add|write|execute)\s+(?:the |some |targeted )?tests\b/i.test(speech)
+  const constraints = task.constraints.filter(value => !resumeTests || value !== deferTests)
   if (/\b(?:don't|do not|no)\s+(?:change|modify|alter).{0,15}(?:api|signature|interface)\b/i.test(speech)) constraints.push('Keep public APIs and signatures unchanged.')
   if (/\b(?:no external|without (?:new|external)|don't (?:use|add)).{0,20}(?:librar|dependenc)/i.test(speech)) constraints.push('Do not add external dependencies.')
-  if (/\b(?:don't worry about|skip|do not run).{0,10}tests\b/i.test(speech)) constraints.push('Interviewer asked to defer tests. Do not claim the change is verified.')
+  if (/\b(?:don't worry about|skip|do not run).{0,10}tests\b/i.test(speech)) constraints.push(deferTests)
+  if (resumeTests) phase = 'review'
   const next = { ...task, phase, implementation, constraints: [...new Set(constraints)].slice(-30) }
   return JSON.stringify(next) === JSON.stringify(task) ? task : { ...next, version: task.version + 1 }
 }
@@ -151,7 +153,7 @@ export function reduceCoach(previous: CoachState, event: CoachEvent): CoachState
   switch (event.type) {
     case 'task.update':
       state = { ...state, task: { ...state.task, objective: text(event.objective, 4000, true), constraints: list(event.constraints, 30).map(item => text(item, 1000, true)), version: state.task.version + 1 }, evidenceVersion: state.evidenceVersion + 1 }
-      return invalidate(state)
+      return invalidate({ ...state, navigation: null, patches: [], patchReviews: [] })
     case 'speech.final': {
       if (event.speaker !== 'interviewer') return state
       const task = intentFromSpeech(state.task, text(event.text, 4000))
@@ -168,6 +170,10 @@ export function reduceCoach(previous: CoachState, event: CoachEvent): CoachState
       const observation = parseObservation(event.observation)
       if (!['screen', 'file-import', 'replay'].includes(event.origin)) throw new Error('Invalid evidence origin')
       const source: Source = { id: event.id, at: event.capturedAt === undefined ? event.at : integer(event.capturedAt, 0, event.at), origin: event.origin, sequence: state.sequence }
+      const lastSource = state.lastScreen && state.sources.find(item => item.id === state.lastScreen!.sourceId)
+      // Extraction may finish out of order. An older image cannot overwrite the
+      // current screen, code revision, terminal output, or navigation confirmation.
+      if (lastSource && source.at < lastSource.at) return { ...state, warning: 'An older screenshot finished late and was ignored. Recapture it to use current evidence.' }
       const files = new Map(state.files.map(file => [file.path, file]))
       let edited = false, changed = false
       for (const observed of observation.files) { const next = mergeFile(files.get(observed.path), observed, source); files.set(observed.path, next.file); edited ||= next.edited; changed ||= next.changed }
@@ -176,11 +182,14 @@ export function reduceCoach(previous: CoachState, event: CoachEvent): CoachState
       const nextFiles = [...files.values()]
       if (nextFiles.reduce((sum, file) => sum + JSON.stringify(file).length, 0) > LIMITS.sourceText) throw new Error('Repository text budget reached. Start a narrower session.')
       const requirements = [...new Set([...state.task.requirements, ...observation.requirements])].slice(-50)
-      changed ||= knownPaths.length !== state.knownPaths.length || requirements.join('\n') !== state.task.requirements.join('\n')
+      const requirementsChanged = requirements.join('\n') !== state.task.requirements.join('\n')
+      const viewKey = (view: Observation | undefined) => JSON.stringify(view?.files.map(file => [file.path, file.startLine, file.lines.length]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))) ?? [])
+      changed ||= knownPaths.length !== state.knownPaths.length || requirementsChanged || viewKey(observation) !== viewKey(state.lastScreen?.observation)
+
       const oldTerminal = state.lastScreen?.observation.terminal || state.tests.at(-1)?.output || ''
       const terminalChanged = !!observation.terminal && observation.terminal !== oldTerminal
       changed ||= terminalChanged
-      state = { ...state, files: nextFiles, knownPaths, sources: [...state.sources, source].slice(-LIMITS.events), lastScreen: { sourceId: source.id, observation }, evidenceVersion: state.evidenceVersion + Number(changed), codeVersion: state.codeVersion + Number(edited), task: { ...state.task, requirements } }
+      state = { ...state, files: nextFiles, knownPaths, sources: [...state.sources, source].slice(-LIMITS.events), lastScreen: { sourceId: source.id, observation }, evidenceVersion: state.evidenceVersion + Number(changed), codeVersion: state.codeVersion + Number(edited), task: { ...state.task, requirements, version: state.task.version + Number(requirementsChanged) } }
       if (state.navigation && navigationSeen(state.navigation, observation)) state.navigation = { ...state.navigation, status: 'seen' }
       state.patchReviews = reviewEdits(state)
       if (edited) state.tests = state.tests.map(run => run.codeVersion !== null && run.codeVersion !== state.codeVersion ? { ...run, status: 'stale' } : run)

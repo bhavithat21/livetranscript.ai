@@ -68,6 +68,7 @@ export type ContextPacket = {
   evidenceVersion: number; codeVersion: number; contextKey: string
   files: Array<{ path: string; language: string; fileVersion: number; complete: boolean; fragments: Fragment[] }>
   knownPaths: string[]; relations: Array<{ from: string; to: string; kind: 'lexical-reference'; evidence: EvidenceRef[] }>
+  visibleView: { origin: Origin; files: Array<{ path: string; startLine: number | null; endLine: number | null }>; terminalVisible: boolean } | null
   tests: TestEvidence[]; patches: Patch[]; patchReviews: PatchReview[]
   budget: { maxCharacters: number; usedCharacters: number; omittedPaths: string[] }
 }

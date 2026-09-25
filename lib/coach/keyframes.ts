@@ -12,12 +12,17 @@ export class KeyframeGate {
   constructor(readonly settleMs = 400, readonly minIntervalMs = 1500) {}
   reset() { this.accepted = null; this.candidate = null; this.candidateAt = 0; this.lastCapture = -Infinity; this.busy = false }
   sample(signal: FrameSignal, now: number): GateDecision {
-    if (!Number.isFinite(now) || signal.width * signal.height !== signal.pixels.length) throw new Error('Invalid local frame signal')
+    if (!Number.isFinite(now) || !Number.isInteger(signal.width) || !Number.isInteger(signal.height) || signal.width < 1 || signal.height < 1 || signal.width > 640 || signal.height > 640 || !signal.fingerprint || signal.width * signal.height !== signal.pixels.length) throw new Error('Invalid local frame signal')
     if (this.busy) return { capture: false, reason: 'busy', changedTiles: 0 }
     if (this.accepted?.fingerprint === signal.fingerprint) { this.candidate = null; return { capture: false, reason: 'unchanged', changedTiles: 0 } }
     const changedTiles = this.accepted ? changedTileCount(this.accepted, signal) : 1
     if (!changedTiles) return { capture: false, reason: 'unchanged', changedTiles }
-    if (this.candidate?.fingerprint !== signal.fingerprint) { this.candidate = signal; this.candidateAt = now }
+    // A blinking caret must not reset the initial/changed-frame settle clock
+    // forever. Allow at most two tiny changing tiles between local samples while
+    // still detecting small persistent code edits against the accepted frame.
+    // Returning exactly to the accepted frame above clears cursor-only changes.
+    if (!this.candidate || changedTileCount(this.candidate, signal) > 2) this.candidateAt = now
+    this.candidate = signal
     if (now - this.candidateAt < this.settleMs) return { capture: false, reason: 'settling', changedTiles }
     if (now - this.lastCapture < this.minIntervalMs) return { capture: false, reason: 'throttled', changedTiles }
     this.busy = true; this.lastCapture = now

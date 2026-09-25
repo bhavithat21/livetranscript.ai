@@ -6,3 +6,7 @@
 # installer the /download page serves and must be uploaded.
 src-tauri
 .firecrawl
+
+# QA fixtures and render output are never deployed as web assets
+qa
+qa-results

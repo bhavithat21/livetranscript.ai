@@ -27,7 +27,9 @@ export class ScreenObserver {
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener) } }
   private update(value: Partial<ScreenStatus>) { this.status = { ...this.status, ...value }; this.listeners.forEach(listener => listener()) }
   async attach(source: FrameSource, type: 'browser' | 'native') {
-    await this.stop()
+    const stopping = this.stop(), expectedGeneration = this.generation
+    await stopping
+    if (expectedGeneration !== this.generation) { await source.stop(); return }
     this.source = source; this.gate.reset()
     this.update({ sharing: true, watching: false, source: type, error: null })
   }
@@ -47,7 +49,7 @@ export class ScreenObserver {
         if (!signal) throw new Error('Selected screen is no longer available')
         const decision = this.gate.sample(signal, performance.now())
         if (decision.capture) {
-          const image = await this.source.image(), capturedAt = Date.now()
+          const capturedAt = Date.now(), image = await this.source.image()
           if (generation !== this.generation) return
           if (!image) throw new Error('Selected screen is no longer available')
           // Local samples continue while one extraction runs. No frame queue grows.
@@ -87,10 +89,10 @@ export class ScreenObserver {
     }
   }
   async captureNow() {
-    const generation = this.generation, image = await this.source?.image()
+    const generation = this.generation, capturedAt = Date.now(), image = await this.source?.image()
     if (generation !== this.generation) return false
     if (!image) { this.update({ error: 'Select the IDE or upload a screenshot first.' }); return false }
-    return this.capture(image)
+    return this.capture(image, capturedAt)
   }
   async stop() {
     this.generation++

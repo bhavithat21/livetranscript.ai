@@ -64,6 +64,11 @@ export function buildContext(state: CoachState, maxCharacters: number = LIMITS.c
   const packet: ContextPacket = {
     schema: 1, sessionId: state.sessionId, permission: state.permission, question: { ...state.question }, task: { ...state.task, requirements: [...state.task.requirements], constraints: [...state.task.constraints] },
     evidenceVersion: state.evidenceVersion, codeVersion: state.codeVersion, contextKey: '', files: [], knownPaths: ranked.nodes.slice(0, 100).map(node => node.path), relations: [],
+    visibleView: state.lastScreen ? {
+      origin: state.sources.find(source => source.id === state.lastScreen!.sourceId)?.origin ?? 'screen',
+      files: state.lastScreen.observation.files.map(file => ({ path: file.path, startLine: file.startLine, endLine: file.startLine === null ? null : file.startLine + file.lines.length - 1 })),
+      terminalVisible: !!state.lastScreen.observation.terminal,
+    } : null,
     tests: state.tests.slice(-3).map(run => ({ ...run, output: run.output.slice(-2500), outputBefore: '' })),
     patches: state.patches.slice(0, 4).map(patch => ({ ...patch })), patchReviews: state.patchReviews.slice(0, 4),
     budget: { maxCharacters, usedCharacters: 0, omittedPaths: [] },
@@ -126,7 +131,7 @@ export function nextInspection(state: CoachState): Navigation | null {
   return { path: selected.path, startLine, endLine: startLine, symbol: '', reason, status: 'pending', requestedAfter: state.sequence }
 }
 export function parseContext(raw: unknown): ContextPacket {
-  const root = object(raw, ['schema', 'sessionId', 'permission', 'question', 'task', 'evidenceVersion', 'codeVersion', 'contextKey', 'files', 'knownPaths', 'relations', 'tests', 'patches', 'patchReviews', 'budget'])
+  const root = object(raw, ['schema', 'sessionId', 'permission', 'question', 'task', 'evidenceVersion', 'codeVersion', 'contextKey', 'files', 'knownPaths', 'relations', 'tests', 'patches', 'patchReviews', 'visibleView', 'budget'])
   if (root.schema !== 1 || JSON.stringify(root).length > LIMITS.context + 100) throw new Error('Invalid context envelope or size')
   const task = object(root.task, ['objective', 'requirements', 'constraints', 'phase', 'implementation', 'version'])
   if (!['understand', 'explore', 'plan', 'implement', 'debug', 'review'].includes(String(task.phase)) || !['hold', 'allowed'].includes(String(task.implementation))) throw new Error('Invalid task state')
@@ -183,8 +188,24 @@ export function parseContext(raw: unknown): ContextPacket {
     if (!['not-observed', 'matches-proposal', 'differs', 'incomplete', 'reverted'].includes(String(review.status))) throw new Error('Invalid patch review')
     return { patchId: text(review.patchId, 100, true), status: review.status as PatchReview['status'], detail: text(review.detail, 1000), observedSource: review.observedSource === null ? null : text(review.observedSource, 100, true) }
   })
+  let visibleView: ContextPacket['visibleView'] = null
+  if (root.visibleView !== undefined && root.visibleView !== null) {
+    const view = object(root.visibleView, ['origin', 'files', 'terminalVisible'])
+    if (!['screen', 'file-import', 'replay'].includes(String(view.origin)) || typeof view.terminalVisible !== 'boolean') throw new Error('Invalid visible view')
+    visibleView = {
+      origin: view.origin as NonNullable<ContextPacket['visibleView']>['origin'], terminalVisible: view.terminalVisible,
+      files: list(view.files, 12).map(value => {
+        const item = object(value, ['path', 'startLine', 'endLine']), path = safePath(item.path)
+        if (!knownPaths.includes(path)) throw new Error('Unobserved current-view path')
+        const startLine = item.startLine === null ? null : integer(item.startLine, 1, 100_000)
+        const endLine = item.endLine === null ? null : integer(item.endLine, 1, 100_000)
+        if ((startLine === null) !== (endLine === null) || (startLine !== null && endLine! < startLine)) throw new Error('Invalid visible-view range')
+        return { path, startLine, endLine }
+      }),
+    }
+  }
   const budget = object(root.budget, ['maxCharacters', 'usedCharacters', 'omittedPaths'])
   return { schema: 1, sessionId: text(root.sessionId, 100, true), permission: permission(root.permission), question: { id: text(question.id, 100, true), original: text(question.original, 4000, true), text: text(question.text, 2000, true), at: integer(question.at) }, task: parsedTask,
-    evidenceVersion: integer(root.evidenceVersion), codeVersion: integer(root.codeVersion), contextKey: text(root.contextKey, 100, true), files, knownPaths, relations, tests, patches, patchReviews,
+    evidenceVersion: integer(root.evidenceVersion), codeVersion: integer(root.codeVersion), contextKey: text(root.contextKey, 100, true), files, knownPaths, relations, visibleView, tests, patches, patchReviews,
     budget: { maxCharacters: integer(budget.maxCharacters, 4000, LIMITS.context), usedCharacters: integer(budget.usedCharacters, 0, LIMITS.context), omittedPaths: list(budget.omittedPaths, 20).map(safePath) } }
 }

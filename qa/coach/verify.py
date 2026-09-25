@@ -1,17 +1,36 @@
 """Real Chromium UI + shared-controller replay checks using fixture providers only."""
 import json
+import os
 import pathlib
 from playwright.sync_api import sync_playwright
 ROOT = pathlib.Path('qa-results/coach')
 ROOT.mkdir(parents=True, exist_ok=True)
 WIDTHS = [375, 768, 1024, 1280, 1440, 1920, 2560]
-report = {'kind': 'real-browser-fixture-qa', 'providerInference': False, 'viewports': [], 'checks': []}
+report = {'kind': 'real-browser-fixture-qa', 'providerInference': False, 'offlineBundle': bool(os.environ.get('COACH_OFFLINE_BUNDLES')), 'viewports': [], 'checks': []}
+def open_fixture(page, entry='index'):
+    offline = os.environ.get('COACH_OFFLINE_BUNDLES')
+    if not offline:
+        page.goto('http://127.0.0.1:4180/' + ('' if entry == 'index' else 'live.html'), wait_until='networkidle')
+        return
+    # Rendering already-built fixture code in a blank document uses no browser
+    # network access. This is not an auth/device test or a production bypass.
+    directory = pathlib.Path(offline) / entry / 'assets'
+    css = '\n'.join(path.read_text() for path in directory.glob('*.css'))
+    page.set_content('<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="root"></div></body></html>')
+    # Blank documents lack secure-context randomUUID. Supply fixture-only unique
+    # event ids; production still uses the browser crypto API on HTTPS.
+    page.evaluate("() => { let n=0; if (!crypto.randomUUID) Object.defineProperty(crypto, 'randomUUID', {value: () => 'offline-fixture-' + (++n)}); }")
+    page.add_style_tag(content=css)
+    scripts = list(directory.glob('*.js'))
+    assert len(scripts) == 1, 'Offline QA requires a single self-contained bundle'
+    page.add_script_tag(content=scripts[0].read_text(), type='module')
+
 with sync_playwright() as p:
-    browser = p.chromium.launch()
+    browser = p.chromium.launch(executable_path=os.environ.get('CHROMIUM_PATH') or None)
     page = browser.new_page(viewport={'width': 1440, 'height': 1000}, device_scale_factor=1)
     errors = []
     page.on('pageerror', lambda error: errors.append(str(error)))
-    page.goto('http://127.0.0.1:4180', wait_until='networkidle')
+    open_fixture(page)
     page.wait_for_function('window.__coachQA && window.__coachQA.snapshot().results.filter(r=>r.status === "complete").length >= 2')
     page.get_by_role('region', name='Say now', exact=True).wait_for()
     for width in WIDTHS:
@@ -58,6 +77,45 @@ with sync_playwright() as p:
     assert not errors, f'Browser exceptions: {errors}'
     report['browserErrors'] = errors
     (ROOT / 'fixture-replay.json').write_text(page.evaluate('window.__coachQA.exportReplay()'))
+    # Render the REAL navigation shell + LiveInterview + RepositoryCoach together.
+    # Only Next Link navigation, audio, image extraction and provider responses
+    # are fixture boundaries. This catches nesting/panel-width regressions that
+    # an isolated component screenshot cannot establish.
+    live = browser.new_page(viewport={'width': 1440, 'height': 1000})
+    live.on('pageerror', lambda error: errors.append(str(error)))
+    open_fixture(live, 'live')
+    live.get_by_role('checkbox', name='I have permission to record', exact=False).check()
+    live.get_by_role('checkbox', name='Repository coding interview', exact=False).check()
+    live.get_by_role('button', name='Start interview', exact=True).click()
+    live.get_by_test_id('repository-coach').wait_for()
+    live.evaluate('window.__liveQA.speak("Why does the shipment status test fail?")')
+    live.get_by_role('region', name='Say now', exact=True).get_by_text('I would trace', exact=False).wait_for()
+    live.get_by_label('Repository screenshots', exact=True).set_input_files({'name': 'synthetic-frame.png', 'mimeType': 'image/png', 'buffer': b'fixture image bytes, parsed by explicit fixture vision adapter'})
+    live.get_by_role('region', name='Proposed change in src/services/TrackingService.ts', exact=True).wait_for()
+    report['integratedLiveViewports'] = []
+    for width in WIDTHS:
+        live.set_viewport_size({'width': width, 'height': 1000})
+        live.wait_for_timeout(100)
+        bounds = live.evaluate("""() => {
+          const root = document.querySelector('[data-testid=repository-coach]').getBoundingClientRect();
+          const answer = document.querySelector('[data-testid=coach-main]').getBoundingClientRect();
+          return {rootWidth:root.width, answerWidth:answer.width, scrollWidth:document.documentElement.scrollWidth};
+        }""")
+        assert bounds['scrollWidth'] <= width + 1, f'Integrated page overflow {width}: {bounds}'
+        assert bounds['answerWidth'] >= min(580, bounds['rootWidth'] - 4), f'Nested live answer collapsed {width}: {bounds}'
+        assert live.locator('textarea:visible').count() == 0, 'Integrated Live exposed a chat composer'
+        live.screenshot(path=str(ROOT / f'live-viewport-{width}.png'), full_page=True)
+        report['integratedLiveViewports'].append({'width': width, **bounds, 'passed': True})
+    live.get_by_role('button', name='Pause coach', exact=True).click()
+    count = live.evaluate('window.__liveQA.calls().length')
+    live.evaluate('window.__liveQA.speak("Should we change the repository next?")')
+    live.wait_for_timeout(1200)
+    assert live.evaluate('window.__liveQA.calls().length') == count
+    live.get_by_role('button', name='End', exact=True).click()
+    live.get_by_role('button', name='Start interview', exact=True).wait_for()
+    assert live.get_by_test_id('repository-coach').count() == 0
+    report['checks'].append('Integrated Live mounts the coach after consent, grounds a screenshot, pauses, and unmounts on End')
+    assert not errors, f'Browser exceptions: {errors}'
     browser.close()
 report['passed'] = True
 (ROOT / 'report.json').write_text(json.dumps(report, indent=2))
