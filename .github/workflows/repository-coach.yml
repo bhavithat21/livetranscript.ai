@@ -1,7 +1,20 @@
 name: Repository coach QA
 on:
   pull_request:
-    paths: ['lib/coach/**', 'components/coach/**', 'app/api/copilot/coach/**', 'qa/coach/**', 'scripts/test-repo-coach.mjs', '.github/workflows/repository-coach.yml']
+    paths:
+      - 'lib/coach/**'
+      - 'lib/interview/**'
+      - 'components/coach/**'
+      - 'components/interview/**'
+      - 'components/nav/**'
+      - 'app/globals.css'
+      - 'app/(app)/interview/**'
+      - 'app/api/copilot/coach/**'
+      - 'qa/coach/**'
+      - 'scripts/test-repo-coach.mjs'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/repository-coach.yml'
   workflow_dispatch:
 permissions:
   contents: read
