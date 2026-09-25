@@ -1,0 +1,61 @@
+name: Assemble verified transcript refinement
+on:
+  pull_request:
+    paths: ['.github/refinement-transfer/**', '.github/workflows/assemble-refinement.yml']
+permissions:
+  contents: write
+jobs:
+  assemble:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'fix/transcript-fidelity-premium-20260925'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: transfer
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: bbffd9b3afcaaa267dc458b0631d5debf8efc0fd
+          path: candidate
+          persist-credentials: false
+      - name: Verify exact source edits and store application tree only
+        shell: python
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          import hashlib, json, os, pathlib, subprocess, urllib.request, zlib
+          root = pathlib.Path('candidate')
+          raw = zlib.decompress(b''.join(pathlib.Path(f'transfer/.github/refinement-transfer/part{i}.zlib').read_bytes() for i in range(1,5)))
+          assert hashlib.sha256(raw).hexdigest() == '38aea81d52ce0d29d5a630b7dffe62ede90bf2181b142fe22a81ad86e583d8e9'
+          manifest = json.loads(raw)
+          assert manifest['base'] == 'bbffd9b3afcaaa267dc458b0631d5debf8efc0fd'
+          assert len(manifest['files']) == 40
+          entries, hashes = [], {}
+          for item in manifest['files']:
+              name = item['path']
+              target = root / name
+              assert target.resolve().is_relative_to(root.resolve()) and not target.is_symlink()
+              assert not name.startswith('.github/') and name not in ['.env', '.env.local']
+              before = target.read_bytes() if target.exists() else None
+              assert (hashlib.sha256(before).hexdigest() if before is not None else None) == item['before'], name
+              lines = (before.decode() if before is not None else '').splitlines(keepends=True)
+              for start, end, insert in reversed(item['edits']):
+                  assert 0 <= start <= end <= len(lines)
+                  lines[start:end] = [insert]
+              output = ''.join(lines).encode()
+              assert hashlib.sha256(output).hexdigest() == item['after'], name
+              entries.append({'path':name, 'mode':'100644', 'type':'blob', 'content':output.decode()})
+              hashes[name] = item['after']
+          req = urllib.request.Request('https://api.github.com/repos/bhavithat21/livetranscript.ai/git/trees', data=json.dumps({'base_tree':'735c290db88fed50ea12f15189be9ef9faeabd22','tree':entries}).encode(), method='POST', headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json','Content-Type':'application/json','X-GitHub-Api-Version':'2022-11-28'})
+          with urllib.request.urlopen(req, timeout=60) as response:
+              tree = json.load(response)
+          report = {'base':manifest['base'],'tree':tree['sha'],'files':hashes,'branchUpdated':False,'note':'Verified application Git tree only; no ref, deployment, workflow, model setting, or user data was modified.'}
+          pathlib.Path('refinement-tree.json').write_text(json.dumps(report, indent=2))
+          print(json.dumps(report, indent=2))
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-refinement-tree
+          path: refinement-tree.json
+          retention-days: 7
