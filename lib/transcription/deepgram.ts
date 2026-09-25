@@ -1,23 +1,27 @@
 import type { TranscriptionProvider, TranscriptionConfig, TranscriptEvent } from './types'
+import { deepgramResult } from './results'
+import { boundedKeyterms } from './recognition'
 
 // Deepgram closes the stream after ~10-12s of no audio; a text KeepAlive resets
 // that timer so a muted (silent) session survives. Send well inside the window.
 const KEEPALIVE_MS = 5000
 // Bound on how long disconnect() waits for the trailing final after CloseStream,
 // so Stop never hangs if the server goes quiet.
-const FINAL_FLUSH_MS = 800
+const FINAL_FLUSH_MS = 2000
 
 export class DeepgramProvider implements TranscriptionProvider {
+  private stream = ''
   private ws: WebSocket | null = null
   private removeAbort: (() => void) | null = null
   private partialCb: (e: TranscriptEvent) => void = () => {}
   private finalCb: (e: TranscriptEvent) => void = () => {}
   private statusCb: (s: { error: string }) => void = () => {}
   private keepAlive: ReturnType<typeof setInterval> | null = null
-  // Set while disconnect() is flushing; onmessage calls it when a final arrives.
+  // Resolves only on terminal acknowledgement, close, abort or bounded timeout.
   private onFinalFlush: (() => void) | null = null
 
   async connect(config: TranscriptionConfig): Promise<void> {
+    this.stream = crypto.randomUUID()
     config.signal?.throwIfAborted()
     const res = await fetch('/api/token', {
       method: 'POST',
@@ -36,15 +40,13 @@ export class DeepgramProvider implements TranscriptionProvider {
       interim_results: 'true',
       punctuate: 'true',
       diarize: 'true',
-      endpointing: '50',
-      no_delay: 'true',
+      endpointing: config.recognitionMode === 'careful' ? '500' : '300',
       encoding: 'linear16',
       sample_rate: String(config.sampleRate),
       channels: '1',
     })
-    // Cap at 100 (Deepgram's limit; also stays within its ~500-token budget) so a
-    // large list can't get silently truncated mid-way by the server.
-    config.keyterms.slice(0, 100).forEach((t) => params.append('keyterm', t))
+    // Bound both count and prompt size, not just the number of terms.
+    boundedKeyterms(config.keyterms).forEach((t) => params.append('keyterm', t))
 
     // Region-configurable WS host: point at the endpoint NEAREST your users to cut
     // RTT on both the handshake AND every interim result (Deepgram EU is GA:
@@ -106,23 +108,13 @@ export class DeepgramProvider implements TranscriptionProvider {
         this.statusCb({ error: 'Transcription connection closed' })
       }
       ws.onmessage = (msg) => {
-        const data = JSON.parse(msg.data)
-        const alt = data.channel?.alternatives?.[0]
-        if (!alt) return
-        const words = alt.words ?? []
-        const speaker = words[0]?.speaker // Deepgram speaker is a 0-based int
-        const evt: TranscriptEvent = {
-          text: alt.transcript ?? '',
-          isFinal: data.is_final === true,
-          speaker: typeof speaker === 'number' ? speaker : null,
-          startMs: Math.round((words[0]?.start ?? data.start ?? 0) * 1000),
-          endMs: Math.round(
-            (words[words.length - 1]?.end ?? (data.start ?? 0) + (data.duration ?? 0)) * 1000,
-          ),
-        }
-        if (!evt.text) return
-        if (evt.isFinal) this.onFinalFlush?.() // let disconnect() resolve on the trailing final
-        ;(evt.isFinal ? this.finalCb : this.partialCb)(evt)
+        // Bad frames must not crash the recording page or mutate transcript state.
+        let data
+        try { data = JSON.parse(msg.data) } catch { return }
+        if (!data || typeof data !== 'object') return
+        if (data.type === 'Metadata') { this.onFinalFlush?.(); return }
+        const evt = deepgramResult(data, this.stream)
+        if (evt) (evt.isFinal ? this.finalCb : this.partialCb)(evt)
       }
     })
   }
@@ -153,20 +145,16 @@ export class DeepgramProvider implements TranscriptionProvider {
     this.statusCb = () => {}
     const ws = this.ws
     if (ws?.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'CloseStream' }))
-      // Wait for the server to flush its trailing final so the last utterance is
-      // finalized (interim-only lines are excluded from the saved transcript).
+      // Register BEFORE sending. One final is not the end: providers may flush
+      // several results before their terminal acknowledgement or socket close.
       await new Promise<void>((resolve) => {
-        const done = () => {
-          this.onFinalFlush = null
-          clearTimeout(t)
-          resolve()
-        }
-        const t = setTimeout(done, FINAL_FLUSH_MS)
+        const done = () => { this.onFinalFlush = null; clearTimeout(timer); resolve() }
+        const timer = setTimeout(done, FINAL_FLUSH_MS)
         this.onFinalFlush = done
+        try { ws.send(JSON.stringify({ type: 'CloseStream' })) } catch { done() }
       })
     }
-    ws?.close()
-    this.ws = null
+    if (ws) { ws.onmessage = null; ws.onclose = null; ws.onerror = null; ws.onopen = null; ws.close() }
+    if (this.ws === ws) this.ws = null
   }
 }

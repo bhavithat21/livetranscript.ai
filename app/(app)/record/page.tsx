@@ -5,7 +5,7 @@ import { AudioLines, BookOpen, FileText, Link2, Mic, MicOff, Sparkles, X } from 
 import { useMicStream, type AudioSource } from '@/lib/audio/useMicStream'
 import { useNativeCapture } from '@/lib/audio/useNativeCapture'
 import { connectWithFallback, type ProviderChoice } from '@/lib/transcription'
-import { mergeSegments, applyCorrection, transcriptText, type Segment } from '@/lib/transcript/store'
+import { mergeSegments, transcriptText, type Segment } from '@/lib/transcript/store'
 import { TranscriptView } from '@/components/transcript/TranscriptView'
 import { TextSizeControl } from '@/components/transcript/TextSizeControl'
 import { useTextScale } from '@/lib/transcript/useTextScale'
@@ -24,33 +24,11 @@ import type { TranscriptionProvider, TranscriptEvent } from '@/lib/transcription
 
 type Summary = { summary: string; keyPoints: string[]; actionItems: string[] }
 
-// Never surface the underlying vendor/model — show what the engine is good at.
+// Vendor identity is factual; model quality needs evaluation on the same audio.
 function engineLabel(name: string): string {
-  if (name === 'AssemblyAI') return 'High-accuracy engine'
-  if (name === 'Deepgram') return 'Fast engine'
-  return 'Live engine'
-}
-
-// Correction track: on each finalized line, re-clean it server-side and swap in place. Fail-soft.
-async function correctLine(
-  id: number,
-  e: TranscriptEvent,
-  context: string,
-  keyterms: string[],
-  setSegments: (fn: (s: Segment[]) => Segment[]) => void,
-) {
-  try {
-    const r = await fetch('/api/correct', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: e.text, context, keyterms }),
-    })
-    if (!r.ok) return
-    const { text } = await r.json()
-    if (text && text !== e.text) setSegments((s) => applyCorrection(s, id, text))
-  } catch (err) {
-    logError('record/correctLine', err) // fail-soft: keep the live line, but record it
-  }
+  if (name === 'AssemblyAI') return 'Universal 3.5'
+  if (name === 'Deepgram') return 'Nova-3'
+  return 'Live transcription'
 }
 
 export default function RecordPage() {
@@ -79,6 +57,8 @@ export default function RecordPage() {
   const [shareMsg, setShareMsg] = useState<string | null>(null)
   const [startError, setStartError] = useState<string | null>(null)
   const providerRef = useRef<TranscriptionProvider | null>(null)
+  const connectionAbort = useRef<AbortController | null>(null)
+  const stoppingRef = useRef(false)
   const startedAtRef = useRef<number>(0)
   const [startedAt, setStartedAt] = useState(0)
   const mutedRef = useRef(false)
@@ -92,13 +72,24 @@ export default function RecordPage() {
     mutedRef.current = muted
   }, [muted])
   useEffect(() => {
-    segmentsRef.current = segments
-  }, [segments])
-  useEffect(() => {
     keytermsRef.current = keyterms
   }, [keyterms])
 
+  useEffect(() => () => {
+    connectionAbort.current?.abort()
+    const provider = providerRef.current
+    providerRef.current = null
+    void provider?.disconnect().catch(() => {})
+  }, [])
+
   const onStart = useCallback(async () => {
+    connectionAbort.current?.abort()
+    const abort = new AbortController()
+    connectionAbort.current = abort
+    const previous = providerRef.current
+    providerRef.current = null
+    void previous?.disconnect().catch(() => {})
+    segmentsRef.current = []
     setSegments([])
     setSummary(null)
     setSavedId(null)
@@ -117,6 +108,7 @@ export default function RecordPage() {
       const MAX_PENDING = 60
       const pending: ArrayBuffer[] = []
       const onPcm = (pcm: ArrayBuffer) => {
+        if (abort.signal.aborted) return
         if (provider) return provider.sendAudio(pcm)
         pending.push(pcm)
         if (pending.length > MAX_PENDING) pending.shift() // drop oldest
@@ -130,32 +122,35 @@ export default function RecordPage() {
         try {
           nativeRate = await native.start(onPcm, setLevel, { isMuted: () => mutedRef.current })
         } catch (err) {
+          abort.signal.throwIfAborted()
           logError('record/native.start', err) // native tap failed — fall back to browser
         }
       }
+      abort.signal.throwIfAborted()
       const actualRate =
         nativeRate ||
         (await start(onPcm, setLevel, { source, isMuted: () => mutedRef.current }))
+      abort.signal.throwIfAborted()
       const res = await connectWithFallback(
-        { keyterms: keytermsRef.current, sampleRate: actualRate, maxSpeakers: 5 },
+        { keyterms: keytermsRef.current, sampleRate: actualRate, maxSpeakers: 5, signal: abort.signal },
         undefined,
         providerChoice,
       )
+      abort.signal.throwIfAborted()
       provider = res.provider
       providerRef.current = provider
-      for (const chunk of pending) provider.sendAudio(chunk) // flush pre-connect audio
+      // Publish synchronously into the authoritative buffer. React updater
+      // functions are pure; they must never schedule remote rewriting calls.
+      const ingest = (event: TranscriptEvent) => {
+        if (providerRef.current !== provider) return
+        segmentsRef.current = mergeSegments(segmentsRef.current, event)
+        setSegments(segmentsRef.current)
+      }
+      provider.onPartial(ingest)
+      provider.onFinal(ingest)
+      for (const chunk of pending) provider.sendAudio(chunk)
       pending.length = 0
       setEngine(res.name)
-      provider.onPartial((e) => setSegments((s) => mergeSegments(s, e)))
-      provider.onFinal((e) => {
-        setSegments((s) => {
-          const merged = mergeSegments(s, e)
-          const id = merged[merged.length - 1].id
-          const context = transcriptText(merged.slice(-4, -1)) // recent finals for context
-          void correctLine(id, e, context, keytermsRef.current, setSegments)
-          return merged
-        })
-      })
       // Socket dropped after connect: surface it and stop the "recording" illusion
       // (kill the meter, flip recording off) — no silent dead session.
       provider.onStatus?.(({ error }) => {
@@ -167,19 +162,27 @@ export default function RecordPage() {
       })
       setRecording(true)
     } catch (e) {
+      if (abort.signal.aborted) return
       stop()
       void native.stop() // native tap may have started before connect threw — don't leak it
       // Inline error (not alert) — a modal mid-async can wedge AudioContext on iOS Safari.
       setStartError(e instanceof Error ? e.message : 'Failed to start')
     } finally {
-      setBusy(false)
+      if (!abort.signal.aborted) setBusy(false)
     }
   }, [start, stop, native, providerChoice, source])
 
   const onStop = useCallback(async () => {
+    if (stoppingRef.current) return
+    stoppingRef.current = true
+    const stoppedAt = Date.now()
+    setBusy(true)
     stop()
-    void native.stop() // tear down the native tap too (no-op in the browser)
-    await providerRef.current?.disconnect()
+    try { await native.stop() } catch (err) { logError('record/native.stop', err) }
+    const provider = providerRef.current
+    try { await provider?.disconnect() } catch (err) { logError('record/disconnect', err) }
+    if (providerRef.current === provider) providerRef.current = null
+    connectionAbort.current?.abort()
     setRecording(false)
     setLevel(0)
     const finalSegments = segmentsRef.current // authoritative latest, not a stale closure
@@ -191,12 +194,13 @@ export default function RecordPage() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ transcript: text }),
-        })
-        const sum: Summary | null = r.ok ? await r.json() : null
+          signal: AbortSignal.timeout(20_000),
+        }).catch(() => null)
+        const sum: Summary | null = r?.ok ? await r.json().catch(() => null) : null
         if (sum) setSummary(sum)
         // Persist the session (best-effort — needs auth + DB configured).
         try {
-          const durationSeconds = Math.round((Date.now() - startedAtRef.current) / 1000)
+          const durationSeconds = Math.round((stoppedAt - startedAtRef.current) / 1000)
           const { id } = await saveSession({
             title: 'Untitled session',
             language: 'en',
@@ -210,9 +214,9 @@ export default function RecordPage() {
           logError('record/saveSession', err)
         }
       } finally {
-        setBusy(false)
+        setBusy(false); stoppingRef.current = false
       }
-    }
+    } else { setBusy(false); stoppingRef.current = false }
   }, [stop, native])
 
   const onShare = useCallback(
@@ -480,7 +484,7 @@ export default function RecordPage() {
             {/* elapsed already shows in the header — hide on phones to save dock width */}
             <span className="hidden font-mono text-sm tabular-nums text-black/50 sm:inline">{elapsed}</span>
             <span className="hidden h-5 w-px bg-black/10 sm:block" aria-hidden />
-            <button onClick={onStop} className="btn-stop flex items-center gap-2" title="Stop (S)">
+            <button onClick={onStop} disabled={busy} aria-busy={busy} className="btn-stop flex items-center gap-2" title="Stop (S)">
               <span className="live-dot" aria-hidden />
               Stop
             </button>
@@ -574,14 +578,14 @@ function LaunchConsole({
               { value: 'system', label: 'System sound' },
               { value: 'mic', label: 'Microphone' },
             ]} />
-            <p className="mt-2 text-xs leading-5 text-[color:var(--muted)]">{source === 'system' ? 'For call or browser audio. Your device will ask you to choose what to share; audio support depends on your browser and operating system.' : 'For people speaking in the room. Your device will ask for microphone access.'}</p>
+            <p className="mt-2 text-xs leading-5 text-[color:var(--muted)]">{source === 'system' ? 'Captures the selected call or browser audio, not necessarily your own microphone. For both sides, use Live Interview with Mic + System. Audio availability depends on your browser and operating system.' : 'For people speaking in the room. Your device will ask for microphone access.'}</p>
           </div>
           <div>
             <p className="mb-2 text-sm font-medium">Transcription engine</p>
             <Select ariaLabel="Transcription engine" value={providerChoice} onChange={setProviderChoice} disabled={busy} className="[&>button]:min-h-11 [&>button]:w-full [&>button]:justify-between [&>button]:rounded-lg [&>ul]:w-full" options={[
-              { value: 'auto', label: 'Auto — best available' },
-              { value: 'AssemblyAI', label: 'Prioritize accuracy' },
-              { value: 'Deepgram', label: 'Prioritize speed' },
+              { value: 'auto', label: 'Auto — with fallback' },
+              { value: 'AssemblyAI', label: 'AssemblyAI · Universal 3.5' },
+              { value: 'Deepgram', label: 'Deepgram · Nova-3' },
             ]} />
             <p className="mt-2 text-xs leading-5 text-[color:var(--muted)]">Auto connects an available engine and can fall back if it is unavailable.</p>
           </div>
@@ -589,6 +593,7 @@ function LaunchConsole({
         <div className="mt-6 border-t border-[color:var(--line)] pt-5">
           <button onClick={onStart} disabled={busy} aria-busy={busy} className="btn-signal flex w-full items-center justify-center gap-2 py-3 text-sm" title="Start (S)"><Mic size={17} aria-hidden />{busy ? 'Starting recording…' : 'Start recording'}</button>
           <p className="mt-3 text-center text-xs leading-5 text-[color:var(--muted)]">Audio starts after you grant access. Make sure everyone involved agrees to transcription.</p>
+          <p className="mt-3 text-center text-xs leading-5 text-[color:var(--muted)]">Recognized wording is preserved. <Link href="/settings#audio" className="font-medium text-[color:var(--signal)] underline underline-offset-4">Tune phrase breaks and vocabulary</Link></p>
           {error && <p role="alert" className="mt-3 text-sm text-[color:var(--stop)]">{error}</p>}
         </div>
         <p className="mt-5 flex flex-wrap justify-center gap-x-4 gap-y-2 text-xs text-[color:var(--muted)]"><span><kbd className="font-mono">S</kbd> Start / stop</span><span><kbd className="font-mono">M</kbd> Mute</span><span><kbd className="font-mono">R</kbd> Reader</span></p>

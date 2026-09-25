@@ -1,6 +1,7 @@
 import type { TranscriptionProvider, TranscriptionConfig } from './types'
 import { AssemblyAIProvider } from './assemblyai'
 import { DeepgramProvider } from './deepgram'
+import { readRecognitionMode } from './recognition'
 
 export type ProviderMaker = { name: string; make: () => TranscriptionProvider }
 
@@ -28,7 +29,7 @@ export async function connectWithFallback(
     config.signal?.throwIfAborted()
     const provider = m.make()
     try {
-      await provider.connect(config)
+      await provider.connect({ ...config, recognitionMode: config.recognitionMode ?? readRecognitionMode() })
       config.signal?.throwIfAborted()
       return { provider, name: m.name }
     } catch (e) {

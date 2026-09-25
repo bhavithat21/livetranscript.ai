@@ -54,3 +54,6 @@ src-tauri/binaries/audio-capture-*
 
 # Local and CI verification artifacts (not application source)
 /qa-results/
+
+# Generated self-hosted QA font CSS; never upload font assets.
+qa/refinement/generated-fonts.css
