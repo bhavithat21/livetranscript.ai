@@ -24,18 +24,35 @@ window.fetch = async (input, init) => {
   if (url === '/api/copilot/answer') {
     const body=JSON.parse(String(init?.body)); const call={question:String(body.question),aborted:false};answerCalls.push(call)
     const encoder=new TextEncoder()
-    let timer:ReturnType<typeof setTimeout>
+    let timer:ReturnType<typeof setTimeout> | undefined
+    let closed=false
+    let detachAbort=()=>{}
+    const finish=()=>{
+      if(closed)return false
+      closed=true
+      clearTimeout(timer)
+      detachAbort()
+      return true
+    }
     const stream=new ReadableStream<Uint8Array>({ start(controller){
-      let closed=false
-      const abort=()=>{if(closed)return;closed=true;clearTimeout(timer);call.aborted=true;controller.close()}
+      const abort=()=>{
+        if(!finish())return
+        call.aborted=true
+        controller.close()
+      }
+      detachAbort=()=>init?.signal?.removeEventListener('abort',abort)
       init?.signal?.addEventListener('abort',abort,{once:true})
       if(init?.signal?.aborted){abort();return}
       timer=setTimeout(()=>{
-        if(closed)return;closed=true
+        if(!finish())return
         controller.enqueue(encoder.encode(`**Fixture response — not a model evaluation.**\n\nFor this question: ${call.question}\n\nI would move the long-running report into a background job, return a job identifier, and provide a status endpoint with clear failure and cancellation states.`))
-        controller.close();init?.signal?.removeEventListener('abort',abort)
+        controller.close()
       }, /slow fixture/i.test(call.question)?30000:120)
-    },cancel(){clearTimeout(timer)}})
+    },cancel(){
+      // The production reader may cancel before the fetch signal handler runs.
+      // Cancellation already closes the stream: never close it a second time.
+      if(finish())call.aborted=true
+    }})
     return new Response(stream,{headers:{'Content-Type':'text/plain'}})
   }
   if (url === '/api/copilot/repo-screen') return Response.json({ observation: source, model: 'fixture-vision-NOT-a-model' })
