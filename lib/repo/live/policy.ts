@@ -2,24 +2,27 @@ import { createSession, makeEvent, parseEvent, parseTestSummary, reduceRepoEvent
 import type { RepoEvent, RepoSession } from './types'
 export { createSession, makeEvent }
 export function testMarker(id: string): string { return 'LT_RUN_' + id.replace(/[^a-zA-Z0-9]/g, '_') }
-/** Safety policy shared by live observation and offline replay. */
+/** Same policy for live events and offline replay. Source, proposals, and verification stay separate. */
 export function reduceSession(previous: RepoSession, raw: RepoEvent): RepoSession {
   const event = parseEvent(raw)
   if (event.sessionId !== previous.id || event.seq <= previous.seq) return previous
   let next = reduceCore(previous, event)
   if (next.holdImplementation !== previous.holdImplementation || JSON.stringify(next.constraints) !== JSON.stringify(previous.constraints)) next = { ...next, evidenceRevision: next.evidenceRevision + 1, say: null, plan: null }
-  if (event.kind === 'plan' && next.navigation?.status === 'pending') {
-    const n = next.navigation, file = next.snapshot.files.find(f => f.path === n.path)
-    const seenLine = n.line !== null && file?.fragments.some(f => f.startLine !== null && n.line! >= f.startLine && n.line! < f.startLine + f.lines.length && f.confidence >= .9)
-    if (n.line !== null && !seenLine) next = { ...next, navigation: { ...n, line: null } }
+  if (event.kind === 'plan' && next.discardedResults === previous.discardedResults) {
+    if (next.navigation?.status === 'pending') {
+      const n = next.navigation, file = next.snapshot.files.find(f => f.path === n.path)
+      const seenLine = n.line !== null && file?.fragments.some(f => f.startLine !== null && n.line! >= f.startLine && n.line! < f.startLine + f.lines.length && f.confidence >= .9)
+      if (n.line !== null && !seenLine) next = { ...next, navigation: { ...n, line: null } }
+    }
+    // A reviewer returning no new edits must not erase the user's already observed edit history.
+    if (!next.holdImplementation && event.data.plan.edits.length === 0) next = { ...next, edits: previous.edits.filter(e => e.status === 'matched' || e.status === 'different' || e.status === 'not-visible') }
     if (next.plan) next = { ...next, plan: { ...next.plan, verify: next.plan.verify.filter(safeVerifyCommand) } }
   }
   if (event.kind === 'observation') next = { ...next, testRuns: next.testRuns.map(run => {
     const old = previous.testRuns.find(r => r.id === run.id)
     if (!old || old.status !== 'waiting' || run.status === 'stale' || event.at <= run.startedAt) return run
     const terminal = event.data.observation.terminal, marker = testMarker(run.id)
-    // Require a marker on its OWN line, not a shell prompt containing an echo
-    // command, and only parse output AFTER it. This remains visual evidence.
+    // Must be the marker's printed line, not an echo command shown at a shell prompt.
     const lines = terminal.split('\n'), index = lines.findLastIndex(l => l.trim() === marker)
     if (index < 0 || old.initialTerminal.split('\n').some(l => l.trim() === marker)) return run
     const output = lines.slice(index + 1).join('\n'), result = parseTestSummary(output)
@@ -46,7 +49,7 @@ export function importSession(text: string): RepoSession {
   for (const raw of value.events) { const e = parseEvent(raw); if (e.sessionId !== s.id || e.seq !== s.seq + 1) throw new Error('Replay identity or sequence mismatch'); s = reduceSession(s, e) }
   return s
 }
-/** Restricts suggestions; no command is executed by the application. */
+/** Restricts recommendations; the application never runs these commands. */
 export function safeVerifyCommand(command: string): boolean {
   return command.length <= 500 && !/[\n\r;&|`$<>]/.test(command) && /^(?:(?:pnpm|npm|yarn)\s+(?:test|typecheck|lint|build)|pytest|python(?:3)?\s+-m\s+(?:pytest|unittest)|mvn\s+(?:test|verify|compile)|(?:gradle|\.\/gradlew)\s+(?:test|check|build)|dotnet\s+(?:test|build)|go\s+test|cargo\s+test|npx\s+(?:vitest|jest|tsc))\b/.test(command) && !/\b(?:install|publish|deploy|delete|remove|exec|curl|wget|https?)\b/i.test(command)
 }
