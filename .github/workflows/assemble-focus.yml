@@ -1,0 +1,45 @@
+name: Assemble verified dialogue source
+on:
+  push:
+    branches: [build/focus-source-20260925]
+permissions:
+  contents: write
+jobs:
+  assemble:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Assemble exact source tree on separate feature branch
+        run: |
+          python3 - <<'PY'
+          import pathlib, base64, hashlib, lzma, subprocess, json
+          def git(*args):
+              return subprocess.check_output(['git',*args],text=True).strip()
+          data=base64.b64decode(''.join(pathlib.Path('.source-focus/part'+str(i)+'.b64').read_text() for i in range(2)),validate=True)
+          assert hashlib.sha256(data).hexdigest()=='b77b0994dea6ab36107ebbefe3cc648583ecc85ed1f1f0817f4f3fc4e0e84ac0', 'Transfer hash mismatch'
+          patch=lzma.decompress(data)
+          assert len(patch)==89467
+          base='683fff3e5ad50dbb0b0e8a7faf2ae6cb77b9f850'
+          git('checkout','--detach',base)
+          subprocess.run(['git','apply','--check','--unidiff-zero'],input=patch,check=True)
+          subprocess.run(['git','apply','--unidiff-zero'],input=patch,check=True)
+          git('add','-A')
+          tree=git('write-tree')
+          assert tree=='6b731a243c07d8315cff393cb80a6744a10bb406',tree
+          paths=git('diff','--cached','--name-only').splitlines()
+          git('config','user.name','github-actions[bot]')
+          git('config','user.email','41898282+github-actions[bot]@users.noreply.github.com')
+          git('commit','-m','Simplify Live navigation, group voice turns and improve automatic question scheduling')
+          commit=git('rev-parse','HEAD')
+          git('push','origin','HEAD:refs/heads/feat/focus-dialogue-20260925')
+          out=pathlib.Path('/tmp/focus-assembly');out.mkdir(exist_ok=True)
+          (out/'manifest.json').write_text(json.dumps({'base':base,'commit':commit,'tree':tree,'files':[{ 'path':p,'sha256':hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()} for p in paths]},indent=2))
+          print('Published feature commit',commit,'tree',tree,'files',len(paths))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-dialogue-source
+          path: /tmp/focus-assembly/
+          retention-days: 7
