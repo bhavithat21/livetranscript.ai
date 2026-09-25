@@ -45,7 +45,7 @@ with sync_playwright() as p:
   page.get_by_role('region',name='AI answer').get_by_text('For this question: How would you handle cancellation?',exact=False).wait_for()
   report['checks'].append('New turn aborts a stalled obsolete answer and displays the newest question')
   page.wait_for_timeout(3000)
-  assert page.evaluate('window.__liveQA.answers().length')==3
+  assert page.evaluate('window.__liveQA.answers().length')==3, page.evaluate('window.__liveQA.answers()')
   # Multiple voices are displayed instead of repeated generic interviewer labels.
   assert page.locator('#live-transcript').get_by_text('Call · Speaker 1',exact=True).count()>0
   assert page.locator('#live-transcript').get_by_text('Call · Speaker 2',exact=True).count()>0
@@ -57,8 +57,12 @@ with sync_playwright() as p:
   page.get_by_label('Interviewer voice').select_option('1')
   page.evaluate("window.__liveQA.speak('Why should another caller self-trigger?', 'system', 0)")
   page.wait_for_timeout(1400)
-  assert page.evaluate('window.__liveQA.answers().length')==3
+  assert page.evaluate('window.__liveQA.answers().length')==3, page.evaluate('window.__liveQA.answers()')
   report['checks'].append('Explicit interviewer selection excludes other call voices without guessing identity')
+  page.locator('#live-transcript summary').click()
+  for theme in ['light','dark']:
+    page.evaluate('(v)=>document.documentElement.classList.toggle("lt-dark",v)',theme=='dark')
+    page.screenshot(path=str(ROOT/f'dialogue-{theme}-1440.png'),full_page=True)
   page.get_by_role('button',name='Pause answers',exact=True).click()
   # Burst text while paused tests grouping and latest-edge scrolling independently.
   page.evaluate("() => {for(let i=0;i<24;i++)window.__liveQA.speak('Observation '+i+': '+ 'The latest evidence is visible in this readable voice turn. '.repeat(5),'system',i%2)}")
@@ -75,12 +79,12 @@ with sync_playwright() as p:
         assert bounds['left']>=0 and bounds['right']<=width
         control.click()
         page.wait_for_function("() => {const s=document.querySelector('#live-transcript .live-scroll-viewport');return s && Math.abs(s.scrollHeight-s.scrollTop-s.clientHeight)<2}")
-        measured=page.locator('#live-transcript p').first.evaluate('(e)=>parseFloat(getComputedStyle(e).fontSize)')
+        measured=page.locator('#live-transcript .live-scroll-viewport p').first.evaluate('(e)=>parseFloat(getComputedStyle(e).fontSize)')
         assert abs(measured-18*percent/100)<.1,(percent,measured)
         scroll=page.evaluate('document.documentElement.scrollWidth')
         assert scroll<=width+1, (width,percent,scroll)
         report['layouts'].append({'width':width,'theme':theme,'percent':percent,'transcriptPx':measured,'passed':True})
-        if percent==100 and width in [375,1440]: page.screenshot(path=str(ROOT/f'live-{theme}-{width}.png'),full_page=True)
+        if percent in [100,175] and width in [375,1440]: page.screenshot(path=str(ROOT/f'live-{theme}-{width}-{percent}.png'),full_page=True)
   report['checks'].append('Four primary destinations, resizable grouped speech and popup bounds at seven widths and two themes')
   assert not errors,errors
   report['browserErrors']=errors;report['answerRequests']=page.evaluate('window.__liveQA.answers()')
