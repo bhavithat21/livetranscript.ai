@@ -18,6 +18,7 @@ use std::sync::Mutex;
 use tauri::ipc::{Channel, InvokeResponseBody};
 
 mod remote_assist;
+mod coach_capture;
 
 #[cfg(target_os = "macos")]
 mod macos_capture;
@@ -354,6 +355,7 @@ fn toggle_main_window(app: &tauri::AppHandle) {
         match win.is_visible() {
             Ok(true) if !minimized => {
                 remote_assist::stop_all(app, "Stopped because the host hid the desktop window.");
+                coach_capture::stop_all(app);
                 let _ = win.hide();
             }
             _ => {
@@ -454,6 +456,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
                 });
             }
             "quit" => {
+                coach_capture::stop_all(app);
                 remote_assist::stop_for_exit(app);
                 app.exit(0);
             }
@@ -491,6 +494,7 @@ pub fn run() {
     let builder = builder
         .manage(AudioState::default())
         .manage(remote_assist::RemoteAssistState::default())
+        .manage(coach_capture::CoachCaptureState::default())
         .manage(ProtectionState::default())
         .manage(LockState::default());
     #[cfg(desktop)]
@@ -510,7 +514,12 @@ pub fn run() {
             remote_assist::remote_assist_heartbeat,
             remote_assist::remote_assist_set_control,
             remote_assist::remote_assist_input,
-            remote_assist::remote_assist_stop
+            remote_assist::remote_assist_stop,
+            coach_capture::coach_displays,
+            coach_capture::coach_start,
+            coach_capture::coach_sample,
+            coach_capture::coach_grab,
+            coach_capture::coach_stop
         ])
         .on_window_event(|window, event| {
             use tauri::Manager;
@@ -518,6 +527,7 @@ pub fn run() {
                 event,
                 tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed
             ) {
+                coach_capture::stop_all(window.app_handle());
                 remote_assist::stop_for_exit(window.app_handle());
             }
         })
@@ -629,6 +639,7 @@ pub fn run() {
                 event,
                 tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
             ) {
+                coach_capture::stop_all(app);
                 remote_assist::stop_for_exit(app);
             }
         });

@@ -1,0 +1,49 @@
+name: macOS repository coach build (unsigned)
+on:
+  pull_request:
+    paths: ['src-tauri/**', 'lib/coach/**', 'components/coach/**', '.github/workflows/macos-coach-build.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  macos-universal:
+    runs-on: macos-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build both audio helper architectures
+        run: bash scripts/build-audio-helper.sh
+      - name: Build universal test installer without publishing or updating users
+        uses: tauri-apps/tauri-action@v0
+        with:
+          projectPath: .
+          tauriScript: npx @tauri-apps/cli@2
+          args: --target universal-apple-darwin --bundles dmg --config src-tauri/tauri.no-updater.conf.json
+      - name: Record source and distribution limitations
+        run: |
+          mkdir -p qa-results/native
+          printf 'Source: %s\nUnsigned, not notarized; no updater manifest is published. Physical screen/audio permissions are not tested by this build.\n' "$(git rev-parse HEAD)" > qa-results/native/BUILD.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-universal-coach-unsigned
+          path: |
+            src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+            qa-results/native/BUILD.txt
+          if-no-files-found: error
+          retention-days: 14

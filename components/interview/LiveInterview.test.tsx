@@ -9,10 +9,11 @@ vi.mock('@/lib/interview/useInterviewRecorder', () => ({
 vi.mock('@/lib/transcription/useKeytermPrefs', () => ({ useKeytermPrefs: () => ({ keyterms: [] }) }))
 vi.mock('@/lib/interview/TuningContext', () => ({ useInterviewTuning: () => ({ state: { active: { revision: 1, instructions: '' } } }) }))
 vi.mock('./LiveAnswerCanvas', () => ({ LiveAnswerCanvas: () => <div>Answer canvas</div> }))
+vi.mock('@/components/coach/RepositoryCoach', () => ({ RepositoryCoach: () => <div>Shared repository coach</div> }))
 import { LiveInterview } from './LiveInterview'
 beforeEach(() => { stubs.start.mockReset(); stubs.stop.mockReset().mockResolvedValue([]) })
 afterEach(cleanup)
-function start() { fireEvent.click(screen.getByRole('checkbox')); fireEvent.click(screen.getByRole('button', { name: 'Start interview' })) }
+function start() { fireEvent.click(screen.getByRole('checkbox', { name: /I have permission to record/ })); fireEvent.click(screen.getByRole('button', { name: 'Start interview' })) }
 describe('live startup lifecycle', () => {
   it('ignores an old permission rejection after a newer session starts', async () => {
     let rejectOld!: (error: Error) => void
@@ -49,4 +50,15 @@ describe('live startup lifecycle', () => {
     expect(screen.getByRole('alert').textContent).toContain('Microphone access denied')
     expect(activity).toHaveBeenLastCalledWith(false)
   })
+})
+it('mounts the shared repository coach only when selected before starting', async () => {
+  stubs.start.mockResolvedValue(undefined)
+  render(<LiveInterview visible blocked={false} onActivity={vi.fn()} onComplete={vi.fn()} />)
+  fireEvent.click(screen.getByRole('checkbox', { name: /Repository coding interview/ }))
+  start()
+  expect(await screen.findByText('Shared repository coach')).toBeTruthy()
+  expect(screen.queryByText('Answer canvas')).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'End' }))
+  await screen.findByRole('button', { name: 'Start interview' })
+  expect(screen.queryByText('Shared repository coach')).toBeNull()
 })

@@ -25,7 +25,7 @@ const INTERVIEW_LINKS = [
 ] as const
 const TOOL_LINKS = [
   { id: 'copilot', href: '/copilot', label: 'AI workspace', icon: Sparkles },
-  { id: 'repository', href: '/copilot?mode=repoInterview', label: 'Repository', icon: GitBranch },
+  { id: 'repository', href: '/interview/repository', label: 'Repository', icon: GitBranch },
   { id: 'practice', href: '/practice', label: 'Practice', icon: GraduationCap },
   { id: 'transcripts', href: '/dashboard', label: 'Transcripts', icon: FileText },
   { id: 'remote', href: '/remote', label: 'Remote assist', icon: MonitorUp },
