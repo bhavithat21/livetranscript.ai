@@ -1,0 +1,82 @@
+name: Assemble reviewed coach candidate
+on:
+  pull_request:
+    paths: ['.github/coach-transfer-*.py', '.github/workflows/assemble-coach.yml']
+permissions:
+  contents: write
+jobs:
+  assemble:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/realtime-repo-coach-20260925'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: transfer
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 23cc10f3a14e894a40b665e24c363bc7d8164f40
+          path: candidate
+          persist-credentials: false
+      - name: Apply source edits with SHA-256 preimage and output checks
+        env:
+          TARGET_ROOT: ${{ github.workspace }}/candidate
+        run: |
+          for part in 1 2 3 4; do python3 "transfer/.github/coach-transfer-$part.py"; done
+          git -C candidate add -A
+          test "$(git -C candidate write-tree)" = 670ec112c7c2bcbeaea807bde93621b2e5475751
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: candidate/pnpm-lock.yaml
+      - name: Verify assembled evidence and scheduler contracts
+        working-directory: candidate
+        run: |
+          pnpm install --frozen-lockfile
+          node --test scripts/test-repo-coach.mjs
+          pnpm exec tsc --noEmit
+      - name: Store candidate Git objects for separate reviewed branch update
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: python
+        run: |
+          import base64, hashlib, json, os, pathlib, subprocess, urllib.request
+          root = pathlib.Path('candidate')
+          repository = 'bhavithat21/livetranscript.ai'
+          base = '23cc10f3a14e894a40b665e24c363bc7d8164f40'
+          expected = '670ec112c7c2bcbeaea807bde93621b2e5475751'
+          def git(*args):
+              return subprocess.check_output(['git', '-C', str(root), *args]).decode().strip()
+          assert git('rev-parse', 'HEAD') == base
+          assert git('write-tree') == expected
+          paths = git('diff', '--cached', '--name-only', '--diff-filter=AM').splitlines()
+          assert len(paths) == 26
+          def api(path, data):
+              request = urllib.request.Request('https://api.github.com/repos/' + repository + '/git/' + path, data=json.dumps(data).encode(), method='POST', headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'], 'Accept': 'application/vnd.github+json', 'Content-Type': 'application/json', 'X-GitHub-Api-Version': '2022-11-28'})
+              with urllib.request.urlopen(request, timeout=60) as response:
+                  return json.load(response)
+          entries, hashes = [], {}
+          for name in paths:
+              file = root / name
+              assert file.resolve().is_relative_to(root.resolve())
+              data = file.read_bytes()
+              hashes[name] = hashlib.sha256(data).hexdigest()
+              entries.append({'path': name, 'mode': '100644', 'type': 'blob', 'content': data.decode()})
+          tree = api('trees', {'base_tree': git('rev-parse', 'HEAD^{tree}'), 'tree': entries})
+          assert tree['sha'] == expected
+          commit = api('commits', {'message': 'Harden repository coach evidence, replay checkpoints and integrated viewport QA', 'tree': tree['sha'], 'parents': [base]})
+          report = {'repository': repository, 'base': base, 'tree': tree['sha'], 'commit': commit['sha'], 'files': hashes, 'branchUpdated': False, 'note': 'Git objects only. No ref, deployment, secrets, or production model configuration was modified by assembly.'}
+          pathlib.Path('candidate-commit.json').write_text(json.dumps(report, indent=2))
+          print(json.dumps(report, indent=2))
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reviewed-coach-candidate
+          path: candidate-commit.json
+          if-no-files-found: error
+          retention-days: 7
