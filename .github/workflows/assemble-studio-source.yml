@@ -1,0 +1,20 @@
+name: Assemble verified studio source
+on:
+  push:
+    branches: [build/studio-source-20260925]
+permissions:
+  contents: write
+jobs:
+  assemble:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Verify source preimages and assemble an isolated candidate tree
+        run: python3 .studio-transfer/assemble.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-studio-tree
+          path: studio-assembly-report.json
+          retention-days: 7
