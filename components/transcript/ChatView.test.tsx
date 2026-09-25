@@ -34,8 +34,8 @@ describe('ChatView speaker colors', () => {
     // getByText would match Ravi twice.
     const label = (theme: 'light' | 'dark') =>
       within(render(<ChatView segments={twoSpeakers} theme={theme} />).container).getByText('Ravi').style.color
-    expect(label('light')).toBe('rgb(29, 78, 216)') // #1d4ed8, AA on paper
-    expect(label('dark')).toBe('rgb(147, 197, 253)') // #93c5fd, AA on near-black
+    expect(label('light')).toBe('rgb(165, 60, 37)') // #1d4ed8, AA on paper
+    expect(label('dark')).toBe('rgb(255, 179, 151)') // #93c5fd, AA on near-black
   })
 })
 

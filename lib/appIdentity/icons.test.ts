@@ -14,8 +14,8 @@ function dataUrl(bytes: Uint8Array) { return `data:image/png;base64,${btoa(Strin
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('local icon validation', () => {
-  it('uses the shipped native PNG byte-for-byte for the default browser icon', () => {
-    const shipped = readFileSync('src-tauri/icons/128x128.png')
+  it('uses the canonical web caption mark byte-for-byte for the default browser icon', () => {
+    const shipped = readFileSync('public/brand/icon.png')
     expect(Buffer.from(DEFAULT_ICON_DATA_URL.split(',')[1], 'base64')).toEqual(shipped)
     expect(iconSource(DEFAULT_ICON)).toBe(DEFAULT_ICON_DATA_URL)
   })

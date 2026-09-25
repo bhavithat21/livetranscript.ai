@@ -1,5 +1,6 @@
 import Link from 'next/link'
-import { ArrowRight, CalendarDays, Clock3, FileText, LockKeyhole, Users } from 'lucide-react'
+import { Wordmark } from '@/components/nav/Wordmark'
+import { ArrowRight, CalendarDays, Clock3, LockKeyhole, Users } from 'lucide-react'
 import { TranscriptReader } from './TranscriptReader'
 import { SiteFooter } from '@/components/site/SiteFooter'
 import { formatDate, formatDuration } from '@/lib/format'
@@ -11,7 +12,7 @@ export function ShareTopBar() {
   return (
     <header className="border-b border-[color:var(--line)] bg-[color:var(--reader)]">
       <div className="mx-auto flex min-h-18 max-w-5xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
-        <Link href="/" className="inline-flex min-h-11 items-center gap-2.5 text-base font-semibold tracking-tight"><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[color:var(--primary-fill)] text-white"><FileText size={17} aria-hidden /></span>LiveTranscript</Link>
+        <Link href="/" className="inline-flex min-h-11 items-center gap-2.5 text-base font-semibold tracking-tight"><Wordmark /></Link>
         <Link href="/" className="btn-ghost gap-1.5 text-sm">Explore the app<ArrowRight size={14} aria-hidden /></Link>
       </div>
     </header>

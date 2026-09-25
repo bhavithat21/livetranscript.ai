@@ -227,10 +227,6 @@ function Meeting({ roomId }: { roomId: string }) {
   // floating on top. Unlock is native-only (Cmd/Ctrl+Shift+L or tray) — a
   // click-through window can't be clicked.
   const lockMode = useLockMode()
-  // Paced auto-scroll speed (px/sec). 0 = jump-follow the live edge (default).
-  // Stepped presets so the control is one tap, not a fiddly slider.
-  const SCROLL_SPEEDS = [0, 20, 40, 70] as const
-  const [speedIdx, setSpeedIdx] = useState(0)
   const panel = usePanelWidth() // shared width so the transcript reflows beside the panel
   const [followSource, setFollowSource] = useState<string | null>(null)
   const [startError, setStartError] = useState<string | null>(null)
@@ -567,16 +563,7 @@ function Meeting({ roomId }: { roomId: string }) {
             canDec={textScale.canDec}
             canInc={textScale.canInc}
           />
-          {/* Paced auto-scroll speed: Off → Slow → Med → Fast. One tap cycles it.
-              Off = follow the live edge; the rest creep hands-free at set px/sec. */}
-          <button
-            onClick={() => setSpeedIdx((i) => (i + 1) % SCROLL_SPEEDS.length)}
-            data-active={speedIdx > 0}
-            className="glass glass-interactive flex min-h-10 items-center gap-1.5 rounded-lg px-3 text-sm text-black/55 data-[active=true]:text-[color:var(--signal)]"
-            title="Auto-scroll speed (Off / Slow / Medium / Fast)"
-          >
-            ⇅ {['Off', 'Slow', 'Med', 'Fast'][speedIdx]}
-          </button>
+
           <ThemeToggle label className="glass glass-interactive" />
           {/* Reader mode: distraction-free full-viewport transcript (like /record). */}
           <button
@@ -653,7 +640,7 @@ function Meeting({ roomId }: { roomId: string }) {
         {segments.length === 0 && !reader ? <div className="flex h-full flex-col items-center justify-center px-6 pb-40 pt-10 text-center"><span className="mb-5 inline-flex h-12 w-12 items-center justify-center rounded-xl border border-[color:var(--line)] bg-[color:var(--reader)] text-[color:var(--signal)]"><AudioLines size={23} aria-hidden /></span><h1 className="text-2xl font-semibold tracking-tight">{live ? 'Listening for the conversation' : 'Your shared transcript starts here'}</h1><p role="status" className="mt-3 max-w-md text-sm leading-6 text-[color:var(--muted)]">{live ? 'Speak naturally. Finalized words will appear here with each speaker identified.' : full ? 'All speaker slots are in use. The conversation will appear here as participants transcribe.' : 'Choose an audio source below, then start transcription. Other participants’ words will appear here too.'}</p></div> : view === 'chat' ? (
           <ChatView segments={segments} fill overrides={overrides} scale={textScale.scale} />
         ) : (
-          <TranscriptView segments={segments} readerMode={reader} autoScroll fade={!reader} fill overrides={overrides} scale={textScale.scale} scrollSpeed={SCROLL_SPEEDS[speedIdx]} />
+          <TranscriptView segments={segments} readerMode={reader} autoScroll fade={!reader} fill overrides={overrides} scale={textScale.scale} />
         )}
       </div>
 

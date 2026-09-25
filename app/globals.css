@@ -2,34 +2,36 @@
 
 :root {
   /* Canonical workspace palette. DESIGN.md mirrors these accepted values. */
-  --paper: #f7f7f8;
-  --ink: #202127;
+  --brand-citrus: #dde873;
+  --brand-ink: #25271f;
+  --paper: #f5f2e9;
+  --ink: #25271f;
   --reader: #ffffff;
-  --muted: #626570;
-  --line: #e6e6eb;
-  --line-strong: #c5c7d0;
-  --surface-soft: #f1f2f5;
+  --muted: #65685b;
+  --line: #e1dfd4;
+  --line-strong: #bdbfaf;
+  --surface-soft: #eeece2;
   --sidebar: #ffffff;
-  --hover-surface: #ebecef;
-  --accent-soft: #efedfb;
-  --signal: #5750c7;
-  --primary-fill: #5750c7;
-  --primary-hover: #4940af;
+  --hover-surface: #e5e3d8;
+  --accent-soft: #ebeccf;
+  --signal: #a53c25;
+  --primary-fill: #a53c25;
+  --primary-hover: #8d2e1c;
   --stop: #b91c1c;
   --font-serif: var(--font-body);
   --radius-control: .625rem;
   --radius-panel: 1rem;
   --glass-bg: var(--reader);
   --glass-border: var(--line);
-  --glass-shadow: 0 1px 2px rgb(20 20 30 / 3%), 0 8px 32px -16px rgb(20 20 30 / 10%);
+  --glass-shadow: 0 1px 2px rgb(25 27 21 / 3%), 0 8px 32px -16px rgb(25 27 21 / 10%);
   --glass-blur: 0px;
   --panel-bg: var(--reader);
   --panel-line: var(--line);
   --text-hero: clamp(2.5rem, 1.2rem + 5vw, 5rem);
   --space-section: clamp(4rem, 3rem + 5vw, 9rem);
-  --scroll-thumb: #afb1bd;
+  --scroll-thumb: #aaae9b;
   --scroll-track: transparent;
-  --scroll-thumb-hover: #747887;
+  --scroll-thumb-hover: #737963;
   color-scheme: light;
 }
 
@@ -86,7 +88,7 @@ html { scroll-padding-top: calc(var(--titlebar-h, 0px) + 1rem); }
 }
 html.lt-desktop .ai-workspace-header,
 html.lt-desktop .ai-workspace-audio,
-html.lt-desktop .ai-workspace-notice { background: rgba(20, 20, 28, 0.95); }
+html.lt-desktop .ai-workspace-notice { background: rgba(25, 28, 21, 0.95); }
 
 /* ═══════════════════════════════════════════════════════════════════════════════
    Desktop (Tauri) overlay theme — "always-on-top dark glass panel"
@@ -110,21 +112,21 @@ html.lt-desktop body {
    the desktop shell — the web app has no title bar. */
 html.lt-desktop {
   --titlebar-h: 32px;
-  --paper: #111216;
-  --ink: #ececf0;
+  --paper: #161812;
+  --ink: #f3f1e7;
   color-scheme: dark;
   --stop: #ff9393;
-  --reader: #191b21;
-  --muted: #a7aab6;
-  --line: #30323b;
-  --line-strong: #484b59;
-  --surface-soft: #21232b;
-  --sidebar: #15161b;
-  --hover-surface: #292b35;
-  --accent-soft: #2b2744;
-  --signal: #b0a8ff;
-  --primary-fill: #635ad9;
-  --primary-hover: #6a5ed8;
+  --reader: #1e211a;
+  --muted: #b5b8aa;
+  --line: #373b2d;
+  --line-strong: #555a46;
+  --surface-soft: #262a20;
+  --sidebar: #1b1e17;
+  --hover-surface: #303526;
+  --accent-soft: #343923;
+  --signal: #dde873;
+  --primary-fill: #a53c25;
+  --primary-hover: #94331f;
   --glass-blur: 20px;
 }
 html.lt-desktop body {
@@ -156,7 +158,7 @@ html.lt-desktop .glass-interactive:hover {
 }
 /* Reader surface (transcript area): slightly lighter dark for reading comfort */
 html.lt-desktop .reader-surface {
-  background: rgba(20, 20, 28, 0.88) !important;
+  background: rgba(25, 28, 21, 0.88) !important;
   border-color: rgba(255, 255, 255, 0.08) !important;
 }
 /* All text: force light — the web app's dark colors are invisible on dark bg */
@@ -165,7 +167,7 @@ html.lt-desktop * {
   --ink: #f0f0f0;
   --paper: transparent;
 }
-html.lt-desktop .text-\[\#16151a\],
+html.lt-desktop .text-\[\#1a1a15\],
 html.lt-desktop .text-ink {
   color: #f0f0f0 !important;
 }
@@ -182,9 +184,9 @@ html.lt-desktop .text-black\/70,
 html.lt-desktop .text-black\/75 {
   color: rgba(255, 255, 255, 0.80) !important;
 }
-/* Signal color stays emerald (high contrast on dark) */
+/* Brand accent is citrus on dark work surfaces. */
 html.lt-desktop .text-\[color\:var\(--signal\)\] {
-  color: #34d399 !important;
+  color: var(--signal) !important;
 }
 /* Borders: lighten for dark mode */
 html.lt-desktop .border-black\/10,
@@ -209,7 +211,7 @@ html.lt-desktop select {
    macOS native popup must be captured-hidden. */
 html.lt-desktop option,
 html.lt-desktop optgroup {
-  background: #14141c !important;
+  background: #1b1c14 !important;
   color: #f0f0f0 !important;
 }
 /* Buttons: signal stays emerald, ghost gets light border */
@@ -222,7 +224,7 @@ html.lt-desktop .btn-ghost:hover {
 }
 html.lt-desktop .btn-ghost[data-active='true'] {
   background: rgba(255, 255, 255, 0.90) !important;
-  color: #16151a !important;
+  color: #1a1a15 !important;
 }
 /* Hairline dividers */
 html.lt-desktop .hairline,
@@ -252,7 +254,7 @@ html.lt-desktop header:has(> nav[aria-label="Main"]) {
   top: var(--titlebar-h) !important;
 }
 html.lt-desktop nav[aria-label="Main"] {
-  background: rgba(18, 18, 26, 0.55) !important;
+  background: rgba(23, 26, 20, 0.55) !important;
   -webkit-backdrop-filter: blur(24px) saturate(150%) !important;
   backdrop-filter: blur(24px) saturate(150%) !important;
 }
@@ -324,7 +326,7 @@ html.lt-desktop .overscroll-contain * {
   .reader-surface {
     background: var(--reader);
     border: 1px solid var(--line);
-    box-shadow: 0 1px 3px rgba(20, 21, 26, 0.04);
+    box-shadow: 0 1px 3px rgba(25, 27, 21, 0.04);
   }
 
   /* Soft bottom dissolve so live text slides under a fixed dock without a hard cut. */
@@ -335,7 +337,7 @@ html.lt-desktop .overscroll-contain * {
 
   .hairline {
     height: 1px;
-    background: rgba(20, 21, 26, 0.1);
+    background: rgba(25, 27, 21, 0.1);
   }
 
   /* On-air breathing glow for the live control dock. */
@@ -375,7 +377,7 @@ html.lt-desktop .overscroll-contain * {
     background: var(--primary-fill);
     border: 1px solid transparent;
     color: #fff;
-    box-shadow: 0 1px 2px rgb(15 23 42 / 10%);
+    box-shadow: 0 1px 2px rgb(25 27 21 / 10%);
   }
   .btn-signal:hover:not(:disabled) { background: var(--primary-hover); }
   .btn-signal:active:not(:disabled), .btn-stop:active:not(:disabled) { box-shadow: inset 0 1px 3px rgb(0 0 0 / 18%); }
@@ -428,9 +430,9 @@ html.lt-desktop .overscroll-contain * {
    holds regardless of the OS reduced-motion setting. Load-bearing text is
    pushed toward full contrast so it stays readable at the lower luminance. */
 .lt-stealth {
-  --signal: #52525b; /* zinc — kill the emerald so nothing on the panel is chromatic */
-  background: #101012 !important;
-  color: #d4d4d8 !important;
+  --signal: #5a5b52; /* zinc — kill the emerald so nothing on the panel is chromatic */
+  background: #121210 !important;
+  color: #d8d8d4 !important;
   box-shadow: none !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
@@ -439,7 +441,7 @@ html.lt-desktop .overscroll-contain * {
 /* Static, low-chroma dot — no pulse, no red. */
 .lt-stealth .live-dot {
   animation: none !important;
-  background: #6b7280 !important;
+  background: #7e806b !important;
   box-shadow: none !important;
 }
 /* No hover-lift / interactive glow on the reading surface. */
@@ -448,21 +450,21 @@ html.lt-desktop .overscroll-contain * {
   box-shadow: none !important;
 }
 /* Raise load-bearing text; the reader must stay legible at low luminance. */
-.lt-stealth .text-ink { color: #e4e4e7 !important; }
+.lt-stealth .text-ink { color: #e7e7e4 !important; }
 .lt-stealth .text-black\/70,
 .lt-stealth .text-black\/60,
 .lt-stealth .text-black\/55,
 .lt-stealth .text-black\/50,
 .lt-stealth .text-black\/45,
-.lt-stealth .text-black\/40 { color: #a1a1aa !important; }
+.lt-stealth .text-black\/40 { color: #a9aaa1 !important; }
 /* Emerald/amber accents flatten to the neutral signal in stealth. */
 .lt-stealth .text-emerald-800,
-.lt-stealth .text-amber-700 { color: #a1a1aa !important; }
+.lt-stealth .text-amber-700 { color: #a9aaa1 !important; }
 /* Surfaces that were near-white flip dark so the panel reads as one dim plane. */
 .lt-stealth .bg-white,
 .lt-stealth .bg-white\/60,
 .lt-stealth .bg-white\/70,
-.lt-stealth .bg-white\/80 { background: #18181b !important; }
+.lt-stealth .bg-white\/80 { background: #1b1b18 !important; }
 /* Kill any decorative motion inside the panel. */
 .lt-stealth .rise-in,
 .lt-stealth .dock-live { animation: none !important; }
@@ -482,33 +484,33 @@ html.lt-desktop .overscroll-contain * {
    than pure #000 (less halation on white text) and body copy lands near #f0efed
    for AA contrast. */
 html.lt-dark:not(.lt-desktop) {
-  --paper: #111216;
-  --ink: #ececf0;
-  --reader: #191b21;
-  --muted: #a7aab6;
-  --line: #30323b;
-  --line-strong: #484b59;
-  --surface-soft: #21232b;
-  --sidebar: #15161b;
-  --hover-surface: #292b35;
-  --accent-soft: #2b2744;
-  --signal: #b0a8ff;
-  --primary-fill: #635ad9;
-  --primary-hover: #6a5ed8;
+  --paper: #161812;
+  --ink: #f3f1e7;
+  --reader: #1e211a;
+  --muted: #b5b8aa;
+  --line: #373b2d;
+  --line-strong: #555a46;
+  --surface-soft: #262a20;
+  --sidebar: #1b1e17;
+  --hover-surface: #303526;
+  --accent-soft: #343923;
+  --signal: #dde873;
+  --primary-fill: #a53c25;
+  --primary-hover: #94331f;
   --stop: #ff9393;
   --glass-bg: var(--reader);
   --glass-border: var(--line);
   --glass-shadow: 0 1px 3px rgb(0 0 0 / 18%);
   --panel-bg: var(--reader);
   --panel-line: var(--line);
-  --scroll-thumb: #505462;
-  --scroll-thumb-hover: #7a7f91;
+  --scroll-thumb: #555b47;
+  --scroll-thumb-hover: #898f77;
   color-scheme: dark;
 }
 html.lt-dark:not(.lt-desktop) body { color: var(--ink); background: var(--paper); }
 /* Page shells that hard-code the light paper hex (the room + record surfaces). */
 html.lt-dark:not(.lt-desktop) .bg-\[\#faf9f7\] { background-color: var(--paper) !important; }
-html.lt-dark:not(.lt-desktop) .text-\[\#16151a\],
+html.lt-dark:not(.lt-desktop) .text-\[\#1a1a15\],
 html.lt-dark:not(.lt-desktop) .text-ink { color: var(--ink) !important; }
 /* Tailwind's black/NN text ramp inverts to a white ramp at matching weights. */
 html.lt-dark:not(.lt-desktop) .text-black\/70,
@@ -594,8 +596,8 @@ html.lt-dark:not(.lt-desktop) nav[aria-label='Main'] { background: var(--reader)
 
 /* Focus reading uses the same accessible form colors in light and dark shells. */
 .lt-stealth textarea, .lt-stealth input, .lt-stealth select {
-  background-color: #18181b !important;
-  color: #e4e4e7 !important;
+  background-color: #1b1b18 !important;
+  color: #e7e7e4 !important;
   border-color: rgba(255, 255, 255, .2) !important;
 }
 
@@ -613,3 +615,14 @@ html.lt-dark:not(.lt-desktop) nav[aria-label='Main'] { background: var(--reader)
 
 /* Legacy focused-route text utilities share the readable semantic ramp. */
 html:not(.lt-desktop):not(.lt-dark) :is(.text-black\/30, .text-black\/35, .text-black\/40, .text-black\/45, .text-black\/50, .text-black\/55, .text-black\/60) { color: var(--muted); }
+
+/* A stable live edge across Record, rooms, Live and audio-context rails. */
+.live-scroll-area { position: relative; display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
+.live-scroll-viewport { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; overflow-anchor: none; scroll-behavior: auto; }
+.live-scroll-content { min-width: 0; display: flow-root; }
+.live-scroll-area[data-flow] { display: block; overflow: visible; }
+.live-scroll-area[data-flow] > .live-scroll-viewport { overflow: visible; }
+.live-scroll-resume { position: absolute; bottom: 1rem; left: 50%; transform: translateX(-50%); z-index: 5; display: inline-flex; align-items: center; gap: .4rem; min-height: 40px; padding: .5rem .9rem; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--reader); color: var(--ink); box-shadow: 0 4px 18px #0003; white-space: nowrap; font-size: .75rem; font-weight: 600; }
+.live-scroll-resume:hover { background: var(--hover-surface); }
+
+.brand-mark { color: var(--brand-citrus, #dde873); display: inline-flex; flex-shrink: 0; vertical-align: middle; }
