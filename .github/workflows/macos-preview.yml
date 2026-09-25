@@ -1,0 +1,48 @@
+name: macOS build (unsigned preview)
+on:
+  pull_request:
+    paths: ['src-tauri/**', '.github/workflows/macos-preview.yml']
+  push:
+    branches: [main]
+    paths: ['src-tauri/**', '.github/workflows/macos-preview.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: macos-preview-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  installer:
+    runs-on: macos-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: swatinem/rust-cache@v2
+        with: { workspaces: 'src-tauri -> target' }
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - name: Build ScreenCaptureKit audio sidecar
+        run: bash scripts/build-audio-helper.sh
+      - name: Build unsigned universal macOS application
+        uses: tauri-apps/tauri-action@v0
+        with:
+          projectPath: .
+          tauriScript: npx @tauri-apps/cli
+          args: --target universal-apple-darwin --bundles dmg --config src-tauri/tauri.no-updater.conf.json
+      - name: Archive test installer with exact source identity
+        run: |
+          mkdir -p artifacts/macos-preview
+          cp src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg artifacts/macos-preview/
+          printf 'Source commit: %s\nUnsigned test build, not notarized and not published to the automatic updater.\n' '${{ github.sha }}' > artifacts/macos-preview/BUILD.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-universal-unsigned-${{ github.sha }}
+          path: artifacts/macos-preview/
+          if-no-files-found: error
+          retention-days: 14

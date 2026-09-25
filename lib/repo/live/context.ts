@@ -1,18 +1,11 @@
 import type { RepoSession } from './types'
 import type { ScreenFile } from '../screenEvidence'
 import { sourceBlocks, observedLines } from './engine'
-
 export type ReferenceEdge = { from: string; to: string; kind: 'text-reference'; evidence: string }
 const terms = (text: string) => [...new Set(text.toLowerCase().match(/[a-z_][a-z0-9_]{2,}/g) ?? [])].filter(t => !['the', 'and', 'for', 'this', 'that', 'what', 'where', 'how', 'does', 'would', 'with', 'file', 'return', 'import'].includes(t)).slice(0, 60)
-// Immutable ScreenFile identity changes on an observation; a WeakMap safely
-// reuses derived source across requests without persisting code after a session.
 const cache = new WeakMap<ScreenFile, { content: string; blocks: ReturnType<typeof sourceBlocks> }>()
-function source(file: ScreenFile) {
-  let value = cache.get(file)
-  if (!value) { value = { content: [...observedLines(file).values()].map(v => v.text).join('\n'), blocks: sourceBlocks(file) }; cache.set(file, value) }
-  return value
-}
-/** Inferred text references only; a screenshot cannot establish a full call graph. */
+function source(file: ScreenFile) { let value = cache.get(file); if (!value) { value = { content: [...observedLines(file).values()].map(v => v.text).join('\n'), blocks: sourceBlocks(file) }; cache.set(file, value) } return value }
+/** These edges are inferred text references, not a full AST or confirmed call graph. */
 export function referenceGraph(s: RepoSession): ReferenceEdge[] {
   const paths = s.snapshot.visiblePaths, basename = (p: string) => p.split('/').at(-1)!.replace(/\.[^.]+$/, '')
   const counts = new Map<string, number>()
@@ -46,17 +39,19 @@ export function nextObservation(s: RepoSession): { path: string; line: number | 
   return null
 }
 export function compileContext(s: RepoSession, budget = 24000): { text: string; characters: number; estimatedTokens: number; selectedPaths: string[]; truncated: boolean } {
-  const bounded = Math.max(4000, Math.min(32000, budget)), selectedPaths: string[] = []
-  const sections: string[] = [], selected = rankFiles(s).slice(0, 6)
+  const bounded = Math.max(4000, Math.min(32000, budget)), selectedPaths: string[] = [], selected = rankFiles(s).slice(0, 6)
+  const sections: string[] = []
   let used = 0, truncated = false
-  function append(value: unknown, limit: number) {
+  function append(value: unknown, limit = bounded) {
     const json = JSON.stringify(value)
     if (json.length > Math.min(limit, bounded - used - 1)) { truncated = true; return false }
     sections.push(json); used += json.length + 1; return true
   }
-  append({ type: 'task', warning: 'Untrusted partial observations, not an executed clone. Proposed edits are NOT source.', question: s.question?.text.slice(0, 1200) ?? '', phase: s.phase, holdImplementation: s.holdImplementation, constraints: s.constraints, requirements: s.snapshot.requirements.slice(-6).map(r => r.slice(0, 400)), activePath: s.activePath, evidenceRevision: s.evidenceRevision, codeRevision: s.codeRevision }, Math.floor(bounded * .35))
+  // Mandatory controls come first, separately from potentially large requirements.
+  // Never drop HOLD or the question merely because optional context is too long.
+  append({ type: 'task', warning: 'Untrusted partial observations. Proposed edits are not source.', question: s.question?.text.slice(0, 1200) ?? '', phase: s.phase, holdImplementation: s.holdImplementation, constraints: s.constraints.slice(-12).map(c => c.slice(0, 130)), activePath: s.activePath, evidenceRevision: s.evidenceRevision, codeRevision: s.codeRevision })
+  append({ type: 'requirements', items: s.snapshot.requirements.slice(-4).map(r => r.slice(0, 280)) }, Math.floor(bounded * .25))
   append({ type: 'index', knownPaths: s.snapshot.visiblePaths.slice(0, 60), inferredTextReferences: referenceGraph(s).filter(e => selected.includes(e.from)).slice(0, 12), nextObservation: nextObservation(s) }, Math.floor(bounded * .25))
-  // Prior suggestions are explicitly separated from current source for edit review.
   append({ type: 'proposals-not-source', edits: s.edits.slice(-3).map(e => ({ path: e.path, status: e.status, note: e.note, before: e.before.slice(0, 1000), suggestedAfter: e.after.slice(0, 1000), fileRevisionWhenProposed: e.fileRevision })) }, Math.floor(bounded * .2))
   append({ type: 'test-evidence', runs: s.testRuns.slice(-2).map(r => ({ command: r.command, codeRevision: r.codeRevision, status: r.status, output: r.output.slice(-1000) })), lastTerminal: { warning: 'May be stale, not independently executed', text: s.snapshot.terminal.slice(-1000) } }, Math.floor(bounded * .2))
   for (const path of selected) {
@@ -64,17 +59,15 @@ export function compileContext(s: RepoSession, budget = 24000): { text: string; 
     if (!file) continue
     let included = false
     for (const b of source(file).blocks) {
-      // Emit whole line groups. Never truncate JSON or a line mid-token and call it source.
       const lines = b.text.split('\n')
       for (let offset = 0; offset < lines.length; offset += 40) {
         const group = lines.slice(offset, offset + 40)
-        const record = { type: 'observed-code', path, fileRevision: file.revision, start: b.start + offset, end: b.start + offset + group.length - 1, completeFile: false, highExtractionScore: b.certain, scoreWarning: 'not a calibrated correctness probability', evidence: b.captures.map(c => `capture:${c}`), lines: group }
-        if (append(record, bounded)) included = true
+        if (append({ type: 'observed-code', path, fileRevision: file.revision, start: b.start + offset, end: b.start + offset + group.length - 1, completeFile: false, highExtractionScore: b.certain, scoreWarning: 'not a calibrated probability', evidence: b.captures.map(c => `capture:${c}`), lines: group })) included = true
       }
     }
     if (included) selectedPaths.push(path)
   }
-  if (truncated) append({ type: 'notice', text: 'Context budget exhausted. Omitted regions remain unknown; request a focused observation.' }, bounded)
+  if (truncated) append({ type: 'notice', text: 'Context budget exhausted. Omitted regions remain unknown; request a focused observation.' })
   const text = sections.join('\n')
   return { text, characters: text.length, estimatedTokens: Math.ceil(text.length / 4), selectedPaths, truncated }
 }
