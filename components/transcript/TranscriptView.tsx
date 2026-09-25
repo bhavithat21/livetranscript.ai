@@ -1,12 +1,12 @@
 'use client'
 import { readingBlocks, sameSpeaker, transcriptTime } from '@/lib/transcript/reading'
 import styles from './TranscriptReader.module.css'
-import { memo, useEffect, useMemo, useRef } from 'react'
+import { memo, useMemo } from 'react'
+import { LiveScrollArea } from './LiveScrollArea'
 import { speakerColor } from '@/lib/speakers/palette'
 import { colorMap, segmentSlot } from '@/lib/room/roomStore'
 import { cn } from '@/lib/utils'
 import { paragraphize, splitSentences, type Segment } from '@/lib/transcript/store'
-import { isTauri } from '@/lib/audio/useNativeCapture'
 import { useThemeMode } from '@/lib/transcript/useThemeMode'
 
 // Sentences for a segment; never empty so a blank/whitespace interim still holds
@@ -32,7 +32,6 @@ export function TranscriptView({
   fill = false,
   overrides,
   scale = 1,
-  scrollSpeed = 0,
 }: {
   segments: Segment[]
   // Optional override. Omit it and the view follows the app-wide theme — server
@@ -56,82 +55,9 @@ export function TranscriptView({
   // Reader text-size multiplier (from useTextScale). 1 = default; scales the body
   // line font-size so people can enlarge/shrink captions for comfort.
   scale?: number
-  // Paced auto-scroll speed in px/sec. 0 = OFF (default → jump-follow the live edge,
-  // the original behavior). >0 = a gentle teleprompter creep at that rate, so the
-  // reader can consume hands-free at a chosen pace instead of snapping to newest.
-  scrollSpeed?: number
 }) {
   const globalTheme = useThemeMode().theme
   const theme = themeProp ?? globalTheme
-  const scrollRef = useRef<HTMLDivElement>(null)
-  // JUMP-FOLLOW (default, scrollSpeed=0): snap to the live edge as speech arrives,
-  // but only when already near the bottom, so scrolling up to re-read isn't yanked
-  // back. Instant (not smooth) so ~10 updates/sec don't stack competing animations.
-  useEffect(() => {
-    if (!autoScroll || scrollSpeed > 0) return
-    const el = scrollRef.current
-    if (!el) return
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120
-    if (nearBottom) el.scrollTop = el.scrollHeight
-  }, [segments, autoScroll, scrollSpeed])
-
-  // PACED CREEP (scrollSpeed>0): a teleprompter-style scroll at the chosen px/sec so
-  // the reader consumes hands-free at their pace. Won't scroll past the last line;
-  // a manual scroll-up pauses the creep briefly (never fights the reader). If new
-  // text pushes content far below the viewport it still catches up (never lags out).
-  useEffect(() => {
-    if (!autoScroll || scrollSpeed <= 0) return
-    const el = scrollRef.current
-    if (!el) return
-    if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return
-    let raf = 0
-    let last = 0
-    let pausedUntil = 0
-    const onManual = () => { pausedUntil = performance.now() + 2000 } // gesture → pause 2s
-    el.addEventListener('wheel', onManual, { passive: true })
-    el.addEventListener('touchstart', onManual, { passive: true })
-    const step = (t: number) => {
-      const atEnd = el.scrollHeight - el.scrollTop - el.clientHeight <= 1
-      if (last && t >= pausedUntil && !atEnd) {
-        el.scrollTop += (scrollSpeed * (t - last)) / 1000
-      }
-      last = t
-      raf = requestAnimationFrame(step)
-    }
-    raf = requestAnimationFrame(step)
-    return () => {
-      cancelAnimationFrame(raf)
-      el.removeEventListener('wheel', onManual)
-      el.removeEventListener('touchstart', onManual)
-    }
-  }, [autoScroll, scrollSpeed])
-
-  // SCROLL-WHILE-LOCKED (desktop): when the window is click-through, wheel events
-  // can't reach it — the shell registers global Cmd/Ctrl+Shift+↑/↓ during lock and
-  // emits 'lock-scroll'. Scroll half a viewport per press; a scroll-up also earns
-  // the same follow-pause a manual wheel gesture would (handled by nearBottom above).
-  useEffect(() => {
-    if (!isTauri()) return
-    let unlisten: (() => void) | undefined
-    let alive = true
-    ;(async () => {
-      const { listen } = await import('@tauri-apps/api/event')
-      const un = await listen<string>('lock-scroll', (e) => {
-        const el = scrollRef.current
-        if (!el) return
-        const delta = (el.clientHeight / 2) * (e.payload === 'up' ? -1 : 1)
-        el.scrollBy({ top: delta, behavior: 'smooth' })
-      })
-      // Effect torn down while listen() was in flight → release immediately.
-      if (!alive) un()
-      else unlisten = un
-    })()
-    return () => {
-      alive = false
-      unlisten?.()
-    }
-  }, [])
-
   // Color by SENDER identity (consistent across all clients), not the racy wire
   // slot. MUST run before any early return — Rules of Hooks: an early return that
   // skips this hook changes the hook count when the first segment arrives and
@@ -176,16 +102,9 @@ export function TranscriptView({
   const shadow = emphasizeSpeaker != null
 
   return (
-    <div
-      ref={scrollRef}
-      className={cn(
-        !flow && 'overflow-y-auto overscroll-contain',
-        fill && 'h-full',
-        fade && 'reading-fade',
-      )}
-      // fill → grow to the flex parent (one scrollbar); else the legacy 100dvh cap.
-      style={flow || fill ? undefined : { maxHeight: 'calc(100dvh - 72px)' }}
-    >
+    <LiveScrollArea updateKey={segments} enabled={autoScroll} flow={flow} fade={fade} nativeScroll
+      className={fill ? 'h-full' : undefined}
+      style={flow || fill ? undefined : { maxHeight: 'calc(100dvh - 72px)' }}>
       {/* Always a measured reading column (~70ch) — live AND reader — so lines
           never run 120+ chars on wide displays. Live views (fade/fill) carry a
           fixed bottom dock, so pad the column so the last lines clear it instead
@@ -243,7 +162,7 @@ export function TranscriptView({
           )
         })}
       </div>
-    </div>
+    </LiveScrollArea>
   )
 }
 

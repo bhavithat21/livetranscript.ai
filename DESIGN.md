@@ -1,179 +1,90 @@
 ---
 version: alpha
 name: LiveTranscript
-description: A precise conversation workspace with calm navigation and readable live answers.
 colors:
-  background: '#f7f7f8'
-  foreground: '#202127'
+  background: '#f5f2e9'
+  foreground: '#25271f'
   reader: '#ffffff'
-  primary: '#5750c7'
-  muted: '#626570'
-  line: '#e6e6eb'
+  primary: '#a53c25'
+  primary-hover: '#8d2e1c'
+  accent: '#dde873'
+  muted: '#65685b'
+  line: '#e1dfd4'
   danger: '#b91c1c'
-  dark-background: '#111216'
-  dark-foreground: '#ececf0'
-  dark-primary: '#b0a8ff'
-typography:
-  body:
-    fontFamily: 'Geist Sans, system-ui, sans-serif'
-  display:
-    fontFamily: 'Geist Sans, system-ui, sans-serif'
-  technical:
-    fontFamily: 'ui-monospace, monospace'
-rounded:
-  control: '0.5rem'
-  panel: '0.75rem'
-spacing:
-  page-inset: '1rem'
-  panel-padding: '1.25rem'
-  navigation-width: '224px'
-components:
-  primary-button:
-    backgroundColor: '{colors.primary}'
-    textColor: '#ffffff'
-    rounded: '{rounded.control}'
-  reader:
-    backgroundColor: '{colors.reader}'
-    textColor: '{colors.foreground}'
-    rounded: '{rounded.panel}'
+  dark-background: '#161812'
+  dark-foreground: '#f3f1e7'
+  dark-primary-text: '#dde873'
+fonts:
+  body: 'Geist Sans'
+  technical: 'Geist Mono'
 ---
 
-# LiveTranscript design
+# LiveTranscript — studio identity and live-edge reading
 
-## Overview
+## Visual direction
+The September 25 studio direction supersedes the blue/indigo palette. Use warm
+ivory, ink charcoal, terracotta actions and restrained citrus. No blue branding,
+links, speaker indicators or focus treatment. The user can retain their own
+uploaded identity; do not silently overwrite custom names or custom icons.
 
-This redesign follows the user's complete-site rebuild request and supplied
-LiveTranscript reference. The product should feel like a careful technical tool:
-compact navigation, strong reading hierarchy, distinct live and preparation
-surfaces, and clear actions. The old warm serif / translucent pill system is
-intentionally replaced across public and product routes in the same release.
+Symbol Studio informs oversized editorial typography and a consistent symbolic
+identity. Awwwards' Lando Norris and Sonar Music references inform confident
+composition, deliberate interactions and motion that serves the narrative.
+These are references, not copied trademarks, assets, source or page content.
 
-The signature is the contrast between a pale, quiet workspace and a navy live
-stage. Blue means an action or selection; green means an actual live/positive
-state. The public site shows an explicitly illustrative product view, never
-fabricated customer statistics, model results, testimonials, or live status.
+The new owned caption mark uses open brackets, short transcript lines and a live
+dot. `lib/brand/mark.ts` owns vector geometry, `BrandMark` renders it, `app/icon.svg`
+is the server favicon, and `public/brand/icon.png` matches the default preference
+and client favicon. Native installer identities are released separately.
 
-Public routes can use larger typography and spacious sections. Product pages
-prioritize the next action and reading density. English is the UI language;
-user text uses normal Unicode font fallbacks. No new locale or market support
-is implied.
+## Ownership and contrast
+`app/globals.css` owns semantic tokens, themes, focus, controls and scrolling.
+CSS modules consume the tokens. Marketing signal artwork and the charcoal Live
+stage intentionally use fixed warm variants. Color and animation are never the
+only way to express capture state, an error or an action.
 
-**Ownership: model B.** `app/globals.css` owns runtime semantic tokens, controls,
-themes and scrollbars. `app/layout.tsx` owns font loading. This file records
-accepted values and rationale. CSS modules consume those tokens; they do not
-own another copy of the shared palette. The fixed navy live stage and explicitly
-illustrative marketing preview are deliberate business variants.
+Dark-mode citrus text must not be used as a background under a white label.
+`--primary-fill` remains terracotta; `--signal` is the accessible text accent.
+Validate ink, muted, accent, button and hover contrast in light/dark. Preserve
+native high-contrast controls. Red labels remain reserved for stop/failure.
 
-## Colors
+## Typography, layout and motion
+Geist Sans and Geist Mono stay self-hosted through Next Font. Keep the interface
+readable instead of introducing several decorative font families. Public home
+uses larger tight-tracked headlines, numbered workflow rows, a symbolic poster,
+and clear section rhythm. Product routes preserve restrained controls, bounded
+transcript measure and readable code. Never shrink transcript text to fit a
+fixed side drawer.
 
-`--paper` is the surrounding work surface, `--reader` is a solid content panel,
-and `--ink` is main text. `--muted` remains readable at small sizes. `--line` and
-`--line-strong` separate panels and controls. `--surface-soft`, `--sidebar`, and
-`--hover-surface` organize the shell. `--accent-soft` and `--signal` show selection.
+`WorkspaceShell` remains the single tool-navigation owner. Existing paths,
+settings, capture permissions and stored user text are not rewritten. Historical
+shared documents use natural page scrolling; active transcripts have one
+explicit scroll owner. Every page must work from 375 through 2560 CSS px.
 
-Buttons consume `--primary-fill`, not the text accent: in dark mode the bright
-text accent must not become a background underneath white text. Dark button fill
-is #635ad9, hover #6a5ed8; dark surfaces are #111216 / #191b21 and text #ececf0.
-Semantic red is reserved for failure, stop and destructive actions. State is
-always described in text as well as color.
+Motion is progressive enhancement: SSR/no-JS text stays visible. Once-per-entry
+reveal and a finite signal entrance do not intercept wheel/touch or add a render
+loop. A Pause motion button and live `prefers-reduced-motion` changes disable
+motion. No parallax during Live, forced scrolling of the marketing page, fake
+live recordings, unverified metrics, fabricated testimonials or silent autoplay.
 
-Web dark mode uses solid surfaces. The native `lt-desktop` overlay retains its
-separate transparent outer background and title-bar reservation. Shared workspace
-navigation remains opaque enough to read. Focus mode is a reading preference;
-the design makes no invisibility or proctoring compatibility claim.
+## Latest transcript contract
+`useFollowLatest` treats follow as state, not as a near-bottom measurement after
+content has grown. Incoming batches, interim-to-final revisions, resize/font
+changes and reopened Live rails pin to the newest text immediately. There is no
+smooth-scroll animation queue and no time-based crawl that falls behind speech.
 
-## Typography
+A deliberate upward wheel/touch/key/scrollbar gesture pauses following so a user
+can inspect history. Show Jump to latest; returning to the bottom or pressing
+End resumes. Layout-triggered scroll events do not masquerade as user intent.
+Static archives never auto-scroll. Readable grouping must preserve every word.
 
-Geist Sans is shared by the wordmark, headings, paragraphs and controls, with
-weights 400/500/600/700. `--font-serif` is retained only as a compatibility alias
-to `--font-body` for focused reading routes. No serif font is loaded.
+Live answers still advance to the latest entry by default; explicit history
+navigation is respected. This is not a new backend synchronization service.
 
-Page titles are compact and semibold, usually 24–32px. Answer text has a relaxed
-line height and a bounded reading width. Monospace is for code, measured timings,
-and shortcuts. Long titles wrap; bounded navigation may truncate custom identity
-text with the complete name available in its title and appearance settings.
-
-## Layout
-
-`WorkspaceShell` is the single navigation owner for Interview, AI workspace,
-Repository, Practice, Transcripts, Remote assist and Settings. It uses a 224px
-sticky sidebar from 1024px, with its own scroll when necessary. On smaller
-screens a labeled in-flow disclosure provides all destinations; it closes on
-Escape/outside pointer and restores keyboard focus on Escape. It is not a modal.
-A skip link reaches the workspace content.
-
-Live, Mock Lab and Feedback are deep-linked views of the same mounted interview
-workspace. Capture continues during view changes. A page-owned navigation guard
-can block departure through shared navigation. The shell must not own audio or
-provider state. Recording, meeting and session reading surfaces retain a compact
-HomeMenu so a large sidebar does not compete with the transcript.
-
-Each page owns content scrolling. Long settings, Mock Lab and review forms keep
-natural document height. Only the standalone desktop AI workspace is bounded to
-the viewport, with an internal conversation scroller and reachable composer.
-The setup rail is 15rem on wide displays and a disclosure at intermediate widths.
-On phones the document scrolls normally. Form/action rows wrap; screen media
-preserves its pixel aspect ratio. Native title-bar offsets remain respected.
-
-## Elevation & Depth
-
-Solid panels and thin borders carry structure. Shared `.glass` is a compatibility
-class for solid web chrome with a minimal shadow; it no longer causes translucent
-reading layers. Floating menus/dialogs may have stronger elevation. Buttons do
-not jump on hover. The native overlay retains its platform-specific glass rule.
-
-## Shapes
-
-Shared buttons use 8px corners, panels usually 12px. Small status badges may be
-pills. Do not use the same large pill shape for navigation, text fields, headings,
-and every action. Icons are Lucide line icons paired with text; the waveform
-brand mark uses a small blue square. Custom app names/icons remain user preferences.
-
-## Components
-
-| Semantic value | Runtime owner | Consumers |
-|---|---|---|
-| Background / foreground / reader | `--paper`, `--ink`, `--reader` | pages, panels, text |
-| Muted / border | `--muted`, `--line`, `--line-strong` | secondary text, panel and field edges |
-| Primary action | `--primary-fill`, `--primary-hover` | `.btn-signal` |
-| Selected / focus | `--signal`, `--accent-soft` | navigation, focus outlines, tabs |
-| Danger | `--stop`, `.btn-stop` | error text, stop / final deletion |
-| Fonts | `--font-body`, compatibility `--font-serif` | all routes |
-| Controls | `--radius-control`, shared `.btn-*` | ordinary actions |
-| Navigation | WorkspaceShell and HomeMenu | full and focused product shells |
-| Scrollbar | global scrollbar tokens and baseline | all owned overflow regions |
-
-Native select and file picker popups are intentionally platform-owned. Controls
-retain hover/focus/pressed/disabled/busy states, minimum 44px primary touch targets,
-associated labels, and accessible status/error feedback. Reduced motion disables
-decorative animation; meaning never depends on animation. Destructive dialogs
-name the data and consequence, initially focus Cancel and restore focus.
-
-## Do's and Don'ts
-
-- Keep live actions, Stop and permission revocation visible.
-- Distinguish saved sessions from an illustrative preview and actual metrics from promises.
-- Keep source, resume and job-description context discoverable without burying the answer.
-- Use the same labels, settings, navigation and response preferences across routes.
-- Do not add fake scores, testimonials, model-speed guarantees, or active billing without a working flow.
-- Do not report mocked audio or browser-only collaboration as a physical device test.
-
-## Reconciled visual drift
-
-| Previous rule / drift | Rebuild decision |
-|---|---|
-| Warm paper, serif headings and teal glass pills | Intentional site-wide migration to cool surfaces, Geist Sans, blue actions and solid borders |
-| Each product route owned a different sidebar or HomeMenu | WorkspaceShell is canonical for tool pages; HomeMenu remains the focused-reading variant |
-| Selected button fill reused a light dark-mode text token | Separate primary-fill from signal text to preserve contrast |
-| Public home described mainly transcription | Explain actual Live / AI / repository / practice / Mock Lab workflows and link directly |
-| Library had an unbounded card collection | Bounded local pages over the 200 rows returned by the current API |
-
-The migration preserves storage, permission, provider and capture contracts.
-`UX-CONTRACT.md` owns behavior; `premium-ui.json` scopes static verification.
-
-
-## September 2026 refinement — porcelain / graphite
-- Application text: self-hosted variable Geist Sans (`--font-body`). Code, timestamps and tabular detail: Geist Mono (`--font-code`). No serif transcript labels or decorative font mixing. Fonts load through Next Font, not third-party browser font requests.
-- Surfaces are neutral porcelain in light mode and opaque graphite in dark mode. Indigo is reserved for the main action, selection and focus. Green signals capture/valid state, not general decoration.
-- Accessible text accent (`--signal`) and white-label button fill (`--primary-fill`) are separate in dark mode. Test ink/muted/signal/button contrast in both themes; borders are visual separators, not the only interaction cue.
-- Transcript reading is a presentation transform only. It groups consecutive same-speaker fragments with timestamps, preserves every saved word and exposes an original-segment view. ASR confidence and unfinalized text are never sold as verified accuracy.
+## Verification
+`qa/refinement` renders the real home/AppNav, shared reader, Audio settings,
+TranscriptView and ChatView with authored examples. CI loads actual Next-built
+Geist fonts. Test 42 presentation layouts plus 28 live layouts (7 sizes, both
+themes), burst updates, revised finals, history pause/resume, text reflow and
+motion preferences. `qa/coach` additionally tests the real integrated Live rail.
+Browser fixtures do not establish microphone, provider or physical-device quality.

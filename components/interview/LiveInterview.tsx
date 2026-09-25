@@ -1,6 +1,7 @@
 'use client'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AudioLines, Download, FileText, Headphones, Mic, Monitor, Play, Settings2, ShieldCheck, Sparkles, Square } from 'lucide-react'
+import { LiveScrollArea } from '@/components/transcript/LiveScrollArea'
 import { LiveAnswerCanvas } from './LiveAnswerCanvas'
 import { RepositoryCoach } from '@/components/coach/RepositoryCoach'
 import { useKeytermPrefs } from '@/lib/transcription/useKeytermPrefs'
@@ -164,10 +165,10 @@ export function LiveInterview({ blocked, onActivity, onComplete }: {
         </div>
         {transcriptOpen && <aside id="live-transcript" className={styles.transcriptRail}>
           <div className={styles.railHeader}><h3>Transcript</h3><button type="button" onClick={() => setTranscriptOpen(false)}>Close</button></div>
-          <div className={styles.transcriptList}>
+          <LiveScrollArea className={styles.transcriptList} updateKey={transcriptRows} label="Interviewer and microphone transcript">
             {!transcriptRows.length ? <div className={styles.transcriptEmpty}><AudioLines size={23} aria-hidden /><p>{busy ? 'Connect your audio to begin.' : 'Speech will appear here as it is transcribed.'}</p></div> : transcriptRows.map((row) => <div key={`${row.channel}-${row.id}`} className={styles.transcriptTurn}><div className={styles.turnLabel}><span>{formatTime(Math.max(0, Math.floor((row.capturedAt - captureStartedAt) / 1000)))}</span><strong>{row.label}</strong></div><p className={row.isFinal ? undefined : styles.interim}>{row.text}</p></div>)}
-          </div>
-          <div className={styles.railFooter}><div><span className={styles.waveform} aria-hidden><i /><i /><i /><i /><i /><i /><i /></span><span>{captureStatus}</span></div><p>Recent speech, ordered by arrival. Export to keep the full transcript.</p></div>
+          </LiveScrollArea>
+          <div className={styles.railFooter}><div><span className={styles.waveform} aria-hidden><i /><i /><i /><i /><i /><i /><i /></span><span>{captureStatus}</span></div><p>Following the latest speech. Scroll up to review; jump to latest to resume.</p></div>
         </aside>}
       </div>
     </section>

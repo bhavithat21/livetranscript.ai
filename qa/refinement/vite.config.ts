@@ -17,6 +17,6 @@ export default defineConfig({
       })
     },
   }],
-  resolve: { alias: { 'next/link': resolve(root, 'qa/coach/adapters/link.tsx'), '@': root } },
+  resolve: { alias: { 'next/link': resolve(root, 'qa/coach/adapters/link.tsx'), 'next/navigation': resolve(root, 'qa/refinement/navigation.ts'), '@clerk/nextjs': resolve(root, 'qa/refinement/clerk.ts'), '@': root } },
   server: { host: '127.0.0.1', port: 4181, strictPort: true },
 })

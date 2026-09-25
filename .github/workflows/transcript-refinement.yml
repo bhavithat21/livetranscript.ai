@@ -1,10 +1,10 @@
 name: Transcript and premium UI regression
 on:
   pull_request:
-    paths: ['app/**', 'components/**', 'lib/transcription/**', 'lib/transcript/**', 'qa/refinement/**', '.github/workflows/transcript-refinement.yml']
+    paths: ['app/**', 'components/**', 'lib/transcription/**', 'lib/transcript/**', 'lib/brand/**', 'lib/speakers/**', 'lib/appIdentity/**', 'public/brand/**', 'qa/refinement/**', '.github/workflows/transcript-refinement.yml']
   push:
     branches: [main]
-    paths: ['app/**', 'components/**', 'lib/transcription/**', 'lib/transcript/**', 'qa/refinement/**', '.github/workflows/transcript-refinement.yml']
+    paths: ['app/**', 'components/**', 'lib/transcription/**', 'lib/transcript/**', 'lib/brand/**', 'lib/speakers/**', 'lib/appIdentity/**', 'public/brand/**', 'qa/refinement/**', '.github/workflows/transcript-refinement.yml']
   workflow_dispatch:
 permissions:
   contents: read
