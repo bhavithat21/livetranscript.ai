@@ -25,6 +25,6 @@ jobs:
         with:
           node-version: 22
       - name: Check protocol, budgets, secret isolation and metrics without models
-        run: node --test evals/decisions/benchmark.test.mjs
+        run: node --test evals/decisions/test-benchmark.mjs
       - name: Confirm smoke plan is not a model evaluation
         run: node evals/decisions/benchmark.mjs --plan

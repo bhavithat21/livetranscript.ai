@@ -14,6 +14,12 @@ is not evidence of equivalent model capability, probability calibration or licen
   server supports `/v1/systemone`; explicit aliases include `english`,
   `multilingual`, and `typed-decisions`. Context and option budgets vary by
   checkpoint. Do not paste an entire repository into a small decision request.
+- **The original `TheoLeeCJ/openjev` is now `TheoLeeCJ/SemIf-OpenJev`.**
+  SemIf scores bounded options with frozen open models using direct logits rather
+  than generating JSON. Its MIT-licensed code offers native MLX and llama.cpp
+  paths; model licenses still apply separately. Its documented native/CLI input
+  is different from this harness's Jev HTTP protocol, so it needs a dedicated
+  adapter before comparison. No such adapter is included in this change.
 - **OpenJev is an ambiguous project name.** `razorback16/openjev` is an Apache-2.0
   server with DiffusionGemma and small-encoder backends. `openjev/openjev` on
   Hugging Face is a separate open-weight decision checkpoint licensed CC BY-NC 4.0;
@@ -35,6 +41,7 @@ Primary sources:
 - https://github.com/NandhaKishorM/laya
 - https://nandhakishorm.github.io/laya/docker/
 - https://nandhakishorm.github.io/laya/staged-adoption/
+- https://github.com/TheoLeeCJ/SemIf-OpenJev
 - https://github.com/razorback16/openjev
 - https://huggingface.co/openjev/openjev
 - https://huggingface.co/AlexWortega/openjev
@@ -78,7 +85,7 @@ or environments where the interviewer/platform permits it.
 Requires Node.js 22; no packages or provider credentials are needed.
 
 ```sh
-node --test evals/decisions/benchmark.test.mjs
+node --test evals/decisions/test-benchmark.mjs
 node evals/decisions/benchmark.mjs --plan
 ```
 
