@@ -1,0 +1,48 @@
+name: Public reference video probe
+on:
+  push:
+    branches: [verify/video-learning-20260925]
+permissions:
+  contents: read
+jobs:
+  reference:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install isolated media probe
+        run: python3 -m pip install yt-dlp
+      - name: Request the public reference without cookies or access bypass
+        run: |
+          mkdir -p /tmp/video-probe
+          python3 - <<'PY'
+          import json, pathlib, subprocess, time
+          from yt_dlp import YoutubeDL
+          from yt_dlp.version import __version__
+          from yt_dlp.utils import download_range_func
+          out=pathlib.Path('/tmp/video-probe')
+          report={'videoId':'ZE_YEn-okfk','requestedRangeSeconds':[90,240],'tool':'yt-dlp','toolVersion':__version__,'mediaAvailable':False,'providerInference':False,'startedAt':time.time()}
+          class Log:
+              def debug(self,msg): pass
+              def warning(self,msg): pass
+              def error(self,msg): pass
+          options={'quiet':True,'no_warnings':True,'logger':Log(),'noplaylist':True,'socket_timeout':15,'retries':0,'extractor_retries':0,'fragment_retries':0,'format':'best[height<=720][ext=mp4]/best[height<=720]','outtmpl':str(out/'reference.%(ext)s'),'download_ranges':download_range_func(None,[(90,240)]),'overwrites':False,'max_filesize':60_000_000}
+          try:
+              with YoutubeDL(options) as ydl:
+                  info=ydl.extract_info('https://www.youtube.com/watch?v=ZE_YEn-okfk',download=True)
+              report.update({'title':info.get('title'),'duration':info.get('duration'),'mediaAvailable':True})
+              media=next(p for p in out.glob('reference.*') if p.suffix in ['.mp4','.webm','.mkv'])
+              subprocess.run(['ffmpeg','-v','error','-i',str(media),'-t','150','-vn','-ac','1','-ar','16000',str(out/'audio.wav')],check=True,timeout=30)
+              subprocess.run(['ffmpeg','-v','error','-i',str(media),'-t','150','-vf','fps=1/15,scale=1280:-2',str(out/'frame-%03d.jpg')],check=True,timeout=30)
+              report['frames']=len(list(out.glob('frame-*.jpg')))
+          except Exception as e:
+              report['failure']=str(e)[:1000]
+          report['finishedAt']=time.time()
+          (out/'report.json').write_text(json.dumps(report,indent=2))
+          print(json.dumps(report,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: public-reference-video-probe
+          path: /tmp/video-probe/
+          retention-days: 3
