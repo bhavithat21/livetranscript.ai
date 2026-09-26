@@ -1,0 +1,51 @@
+name: Assemble verified requirement rehearsal source
+on:
+  push:
+    branches: [build/requirements-rehearsal-inputs-20260926]
+permissions:
+  contents: write
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply verified source to confirmed base
+        run: |
+          python3 - <<'PY'
+          import base64,hashlib,json,lzma,pathlib,subprocess
+          def git(*args):return subprocess.check_output(['git',*args]).decode().strip()
+          packed=base64.b64decode(''.join(pathlib.Path(f'.source-input/requirements.{i}.b64').read_text().strip() for i in range(2)),validate=True)
+          assert hashlib.sha256(packed).hexdigest()=='aaa92de2985e0dedabb7dd6054bf1b33da45b13876996ee288161c010c0aa550','Payload mismatch'
+          data=json.loads(lzma.decompress(packed));base='6ddebb82e5463b6dda899ffa228f33437e3aa668'
+          assert data['base']==base
+          subprocess.run(['git','checkout','--detach',base],check=True)
+          paths=[]
+          for f in data['files']:
+            path=f['path'];parts=pathlib.PurePosixPath(path)
+            assert not parts.is_absolute() and '..' not in parts.parts and '.git' not in parts.parts and not path.startswith('.source-input/')
+            before=subprocess.run(['git','rev-parse','HEAD:'+path],text=True,capture_output=True)
+            assert (before.stdout.strip() if before.returncode==0 else None)==f['before'],'Preimage mismatch: '+path
+            paths.append(path)
+          patch=data['patch'].encode()
+          subprocess.run(['git','apply','--check','--binary','--unidiff-zero','-'],input=patch,check=True)
+          subprocess.run(['git','apply','--binary','--unidiff-zero','-'],input=patch,check=True)
+          for f in data['files']:assert git('hash-object',f['path'])==f['after'],'Postimage mismatch: '+f['path']
+          subprocess.run(['git','add','--',*paths],check=True)
+          fulltree=git('write-tree');assert fulltree=='09b0b8f8703df77d723f0f2d17bfee2de655008a','Tree mismatch'
+          subprocess.run(['git','restore','--staged','--','.github/workflows/repository-coach.yml'],check=True)
+          subprocess.run(['git','config','user.name','LiveTranscript source assembly'],check=True)
+          subprocess.run(['git','config','user.email','41898282+github-actions[bot]@users.noreply.github.com'],check=True)
+          subprocess.run(['git','commit','-m','Persist spoken requirements and add isolated interactive rehearsal with explicit learning approval'],check=True)
+          branch='fix/spoken-requirements-rehearsal-20260926'
+          subprocess.run(['git','push','origin','HEAD:refs/heads/'+branch],check=True)
+          report={'branch':branch,'commit':git('rev-parse','HEAD'),'tree':git('rev-parse','HEAD^{tree}'),'expectedCompleteTree':fulltree,'files':len(paths),'providerCalls':0}
+          pathlib.Path('/tmp/rehearsal-source.json').write_text(json.dumps(report,indent=2));print(json.dumps(report,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-rehearsal-source
+          path: /tmp/rehearsal-source.json
+          retention-days: 7
