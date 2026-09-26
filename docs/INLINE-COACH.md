@@ -70,7 +70,9 @@ Mouse-ignore is enabled only after topmost succeeded and a recovery shortcut or
 tray is registered. Failure rolls back; mouse restoration is attempted before
 stacking restoration. Prior window geometry/resizability is restored on exit.
 A watchdog restores the main window after capture heartbeats stop for >3 seconds.
-Native UI mutations are dispatched to the main thread. Unsupported older shells
+Failed native recovery retains the original geometry for watchdog/tray retry;
+a delayed stop cannot retire a newer selected-window lease. Native UI mutations
+are dispatched to the main thread. Unsupported older shells
 show a visible update requirement instead of pretending that a click succeeded.
 
 ## Validation boundaries

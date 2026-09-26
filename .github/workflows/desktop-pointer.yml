@@ -12,6 +12,7 @@ on:
       - 'app/globals.css'
       - 'app/layout.tsx'
       - 'src-tauri/src/pointer_mode.rs'
+      - 'src-tauri/src/inline_overlay.rs'
       - 'qa/desktop-pointer/**'
       - '.github/workflows/desktop-pointer.yml'
   workflow_dispatch:
