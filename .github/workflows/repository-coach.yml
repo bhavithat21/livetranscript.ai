@@ -17,6 +17,8 @@ on:
       - 'app/api/copilot/coach/**'
       - 'qa/coach/**'
       - 'scripts/test-repo-coach.mjs'
+      - 'scripts/*rehearsal-env.mjs'
+      - 'docs/rehearsal/**'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - '.github/workflows/repository-coach.yml'
@@ -42,6 +44,7 @@ jobs:
           mkdir -p qa-results/coach
           set -o pipefail
           node --test scripts/test-repo-coach.mjs | tee qa-results/coach/contracts.txt
+          node --test scripts/test-copy-rehearsal-env.mjs | tee qa-results/coach/env-helper.txt
           SIMULATOR_REPORT=qa-results/coach/simulator-suite.json pnpm run test:simulator | tee qa-results/coach/simulator.txt
       - name: Interactive starter baseline (not an agent solution)
         run: node --test rehearsals/maze-change/starter/test/*.check.mjs

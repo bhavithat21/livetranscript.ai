@@ -13,3 +13,16 @@ it('records actual arrival counts independently of human review and report insta
   expect(JSON.parse(report.export('sha','{"events":[]}',[])).observed.callFinals).toBe(3)
   expect(JSON.parse(new RehearsalReport().export('sha','{"events":[]}',[])).observed.callFinals).toBe(0)
 })
+it('archives metadata, full final transcript and results without promoting a policy',()=>{
+ const report=new RehearsalReport([],{title:'Video rehearsal',kind:'video-replay',sourceUrl:'https://www.youtube.com/watch?v=ZE_YEn-okfk',split:'holdout',playbackRate:1,startSeconds:0,endSeconds:60})
+ const state=emptyCoach('owned-session');report.observe(state);report.finishTranscript('Final trailing words that arrived at End')
+ const data=JSON.parse(report.export('sha','{"events":[],"truncated":false}',[]))
+ expect(data.sessionId).toBe('owned-session');expect(data.metadata.split).toBe('holdout');expect(data.finalTranscript).toContain('trailing words');expect(data.benchmarks.acousticWordErrorRate).toBeNull()
+})
+it('retains dialogue beyond the current controller window and marks replay truncation',()=>{
+ const report=new RehearsalReport(),state=emptyCoach('s')
+ report.observe({...state,conversation:[{sourceId:'first',role:'interviewer',text:'First words',at:1}]})
+ report.observe({...state,conversation:[{sourceId:'last',role:'candidate',text:'Last words',at:2}]})
+ const data=JSON.parse(report.export('sha','{"events":[],"truncated":true}',[]))
+ expect(data.conversation).toHaveLength(2);expect(data.truncated).toBe(true)
+})

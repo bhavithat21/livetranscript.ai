@@ -20,4 +20,4 @@ window.fetch=async(input,init)=>{
 }
 declare global {interface Window {__rehearsalQA:{configure:()=>void;speak:typeof injectSpeech;requests:()=>ContextPacket[]}}}
 window.__rehearsalQA={configure:()=>{configured=true},speak:injectSpeech,requests:()=>requests}
-createRoot(document.getElementById('root')!).render(<InterviewTuningProvider ownerId="qa-only"><p>OFFLINE UI CONTRACTS: synthetic recognition and responses. No actual ASR/vision/model test.</p><InteractiveRehearsal/></InterviewTuningProvider>)
+createRoot(document.getElementById('root')!).render(<InterviewTuningProvider ownerId="qa-only"><p>OFFLINE UI CONTRACTS: synthetic recognition and responses. No actual ASR/vision/model test.</p><InteractiveRehearsal ownerId={new URLSearchParams(location.search).get('owner')||'qa-rehearsal'}/></InterviewTuningProvider>)
