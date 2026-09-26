@@ -1,0 +1,53 @@
+name: Assemble verified screenshot tracker source
+on:
+  push:
+    branches: [build/screenshot-tracker-inputs-20260926]
+permissions:
+  contents: write
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply checksum-verified source delta
+        run: |
+          python3 - <<'PY'
+          import base64,hashlib,json,lzma,pathlib,subprocess
+          def git(*args): return subprocess.check_output(['git',*args]).decode().strip()
+          packed=base64.b64decode(''.join(pathlib.Path(f'.source-input/tracker.{i}.b64').read_text().strip() for i in range(7)),validate=True)
+          assert hashlib.sha256(packed).hexdigest()=='764aba1e32dc887e97777ed659d1d13045050793ba5b7a171e62c3726b21273c','Source checksum mismatch'
+          data=json.loads(lzma.decompress(packed));base='94830447862f6a21490bafa8613c620bce951802'
+          assert data['base']==base
+          subprocess.run(['git','checkout','--detach',base],check=True)
+          paths=[]
+          for f in data['files']:
+            p=f['path'];obj=pathlib.PurePosixPath(p)
+            assert not obj.is_absolute() and '..' not in obj.parts and '.git' not in obj.parts and not p.startswith('.source-input/')
+            before=subprocess.run(['git','rev-parse','HEAD:'+p],text=True,capture_output=True)
+            actual=before.stdout.strip() if before.returncode==0 else None
+            assert actual==f['before'],'Preimage mismatch: '+p
+            paths.append(p)
+          patch=data['patch'].encode()
+          subprocess.run(['git','apply','--check','--binary','-'],input=patch,check=True)
+          subprocess.run(['git','apply','--binary','-'],input=patch,check=True)
+          for f in data['files']:assert git('hash-object',f['path'])==f['after'],'Output mismatch: '+f['path']
+          subprocess.run(['git','add','--',*paths],check=True)
+          complete=git('write-tree');assert complete==data['tree']=='afdbcfee3424205598978718ccc9a84b9ff9431a'
+          workflows=[p for p in paths if p.startswith('.github/workflows/')]
+          subprocess.run(['git','reset','HEAD','--',*workflows],check=True)
+          subprocess.run(['git','config','user.name','LiveTranscript source assembly'],check=True)
+          subprocess.run(['git','config','user.email','41898282+github-actions[bot]@users.noreply.github.com'],check=True)
+          subprocess.run(['git','commit','-m','Track screenshot code anchors natively and decouple semantic reads from scroll motion'],check=True)
+          branch='feat/screenshot-tracker-20260926'
+          subprocess.run(['git','push','origin','HEAD:refs/heads/'+branch],check=True)
+          report={'branch':branch,'commit':git('rev-parse','HEAD'),'tree':git('rev-parse','HEAD^{tree}'),'completeTree':complete,'files':len(paths),'workflows':workflows,'payloadSha256':hashlib.sha256(packed).hexdigest()}
+          pathlib.Path('/tmp/tracker-source-report.json').write_text(json.dumps(report,indent=2));print(json.dumps(report,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-tracker-source
+          path: /tmp/tracker-source-report.json
+          retention-days: 7
