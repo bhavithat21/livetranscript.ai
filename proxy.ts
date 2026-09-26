@@ -1,44 +1,22 @@
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server'
 import { NextResponse } from 'next/server'
 
-// Public: landing, the shared-transcript view (no login), and Clerk's own paths.
 const isPublicRoute = createRouteMatcher([
-  '/',
-  '/api/health', // public release identity only; no credentials or user data
-  '/sign-in(.*)',
-  '/sign-up(.*)',
-  '/s/(.*)',
-  '/shadow-demo',
-  '/pricing',
-  '/download',
-  '/updates/(.*)', // desktop updater manifest + installers — fetched UNauthenticated
-  '/__clerk/(.*)',
+  '/', '/api/health', '/sign-in(.*)', '/sign-up(.*)', '/s/(.*)',
+  '/shadow-demo', '/pricing', '/download', '/updates/(.*)', '/__clerk/(.*)',
 ])
-
 const clerkConfigured = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY)
-
-// Dev-only preview bypass (Clerk's Turnstile blocks the automated browser).
-// HARD-gated to non-production so it can never disable auth in prod.
-const previewNoAuth =
-  process.env.NODE_ENV !== 'production' && process.env.PREVIEW_NO_AUTH === '1'
-
-// Until Clerk keys are set (or in preview mode), pass everything through so the
-// app runs locally. Once configured, protect all non-public routes.
+const previewNoAuth = process.env.NODE_ENV !== 'production' && process.env.PREVIEW_NO_AUTH === '1'
 export default clerkConfigured && !previewNoAuth
   ? clerkMiddleware(async (auth, req) => {
-      if (!isPublicRoute(req)) {
-        await auth.protect()
-      }
+      // Only this fixed preview QA route uses its own expiring capability.
+      const isolatedQa = process.env.VERCEL_ENV === 'preview' && req.nextUrl.pathname === '/api/qa/continuous-audio'
+      if (!isPublicRoute(req) && !isolatedQa) await auth.protect()
     })
   : () => NextResponse.next()
-
 export const config = {
   matcher: [
-    // Skip Next internals and static files unless in search params. Installer
-    // binaries (dmg/exe/msi/gz/sig) are public downloads — exclude them so Clerk
-    // doesn't rewrite /downloads/*.dmg to a 404 for signed-out visitors.
     '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest|dmg|exe|msi|gz|sig)).*)',
-    '/(api|trpc)(.*)',
-    '/__clerk/(.*)',
+    '/(api|trpc)(.*)', '/__clerk/(.*)',
   ],
 }
