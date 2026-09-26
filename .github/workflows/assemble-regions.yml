@@ -1,0 +1,51 @@
+name: Assemble verified screenshot region correction
+on:
+  push:
+    branches: [build/screenshot-regions-inputs-20260926]
+permissions:
+  contents: write
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply checksum-verified source correction
+        run: |
+          python3 - <<'PY'
+          import base64,hashlib,json,lzma,pathlib,subprocess
+          def git(*args): return subprocess.check_output(['git',*args]).decode().strip()
+          packed=base64.b64decode(''.join(pathlib.Path(f'.source-input/regions.{i}.b64').read_text().strip() for i in range(3)),validate=True)
+          assert hashlib.sha256(packed).hexdigest()=='54031594cffa312b988df096a9dd29a660c953174984b95df5bca5a376accb9c','Source checksum mismatch'
+          data=json.loads(lzma.decompress(packed));base='0a3932fbefc5373f2294ea878ece07d0566fb0b1'
+          assert data['base']==base
+          subprocess.run(['git','checkout','--detach',base],check=True)
+          paths=[]
+          for f in data['files']:
+            p=f['path'];obj=pathlib.PurePosixPath(p)
+            assert not obj.is_absolute() and '..' not in obj.parts and '.git' not in obj.parts and not p.startswith('.source-input/') and not p.startswith('.github/workflows/')
+            before=subprocess.run(['git','rev-parse','HEAD:'+p],text=True,capture_output=True)
+            actual=before.stdout.strip() if before.returncode==0 else None
+            assert actual==f['before'],'Preimage mismatch: '+p
+            paths.append(p)
+          patch=data['patch'].encode()
+          subprocess.run(['git','apply','--check','--binary','-'],input=patch,check=True)
+          subprocess.run(['git','apply','--binary','-'],input=patch,check=True)
+          for f in data['files']:assert git('hash-object',f['path'])==f['after'],'Output mismatch: '+f['path']
+          subprocess.run(['git','add','--',*paths],check=True)
+          complete=git('write-tree');assert complete==data['tree']=='8d985264b07b8e2dbfc1bfbd38acf39b0bd7c9a3'
+          subprocess.run(['git','config','user.name','LiveTranscript source assembly'],check=True)
+          subprocess.run(['git','config','user.email','41898282+github-actions[bot]@users.noreply.github.com'],check=True)
+          subprocess.run(['git','commit','-m','Keep screenshot viewport motion separate from code and output changes'],check=True)
+          branch='feat/screenshot-regions-20260926'
+          subprocess.run(['git','push','origin','HEAD:refs/heads/'+branch],check=True)
+          report={'branch':branch,'commit':git('rev-parse','HEAD'),'tree':complete,'files':len(paths),'payloadSha256':hashlib.sha256(packed).hexdigest()}
+          pathlib.Path('/tmp/regions-source-report.json').write_text(json.dumps(report,indent=2));print(json.dumps(report,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-regions-source
+          path: /tmp/regions-source-report.json
+          retention-days: 7
