@@ -77,3 +77,33 @@ describe('independent visual and semantic scheduling',()=>{
    const f=observerFixture();let resolve:(value:string)=>void=()=>{};f.source.image=vi.fn(()=>new Promise<string>(r=>resolve=r));await f.observer.attach(f.source,'native');const a=f.observer.captureNow();expect(await f.observer.captureNow()).toBe(false);resolve(image);expect(await a).toBe(true);expect(f.source.image).toHaveBeenCalledTimes(1);await f.observer.stop()
  })
 })
+
+// These are actual ScreenObserver races; image recognition is deliberately a
+// fixture. They do not establish model or native-device performance.
+describe('screenshot sampling ownership', () => {
+ it('samples at a period rather than adding capture time on every frame', async () => {
+   vi.useFakeTimers(); const f=observerFixture(); const original=f.source.signal;
+   f.source.signal=async()=>{await new Promise(resolve=>setTimeout(resolve,30));return original()};
+   await f.observer.attach(f.source,'native');await f.observer.setTrackingSeed(f.seed);f.set(result());
+   f.observer.watch(true);await vi.advanceTimersByTimeAsync(1030);
+   expect(f.ticks()).toBeGreaterThanOrEqual(20); expect(f.transport).not.toHaveBeenCalled();await f.observer.stop();
+ });
+ it('does not let an old-anchor receipt invalidate the current recommendation', async () => {
+   vi.useFakeTimers();const f=observerFixture();await f.observer.attach(f.source,'native');await f.observer.setTrackingSeed(f.seed);
+   f.set({...result('retired-anchor'),status:'edited',rect:null,semanticDirty:true});f.observer.watch(true);
+   await vi.advanceTimersByTimeAsync(60);expect(f.observer.getSnapshot().trackingNeedsReview).not.toBe(true);await f.observer.stop();
+ });
+ it('an automatic full-image grab excludes simultaneous explicit recapture', async () => {
+   vi.useFakeTimers();const f=observerFixture();let resolve!:(value:string)=>void;
+   f.source.image=vi.fn(()=>new Promise<string>(done=>{resolve=done}));
+   await f.observer.attach(f.source,'native');f.observer.watch(true);await vi.advanceTimersByTimeAsync(500);
+   expect(f.source.image).toHaveBeenCalledTimes(1);expect(await f.observer.captureNow()).toBe(false);
+   resolve(image);await vi.advanceTimersByTimeAsync(100);expect(f.transport).toHaveBeenCalledTimes(1);await f.observer.stop();
+ });
+ it('stopping a dirty tracker clears its review marker for the next source', async () => {
+   vi.useFakeTimers();const f=observerFixture();await f.observer.attach(f.source,'native');await f.observer.setTrackingSeed(f.seed);
+   f.set({...result(),status:'edited',rect:null,semanticDirty:true});f.observer.watch(true);await vi.advanceTimersByTimeAsync(60);
+   expect(f.observer.getSnapshot().trackingNeedsReview).toBe(true);await f.observer.stop();
+   expect(f.observer.getSnapshot().trackingNeedsReview).toBe(false);
+ });
+});

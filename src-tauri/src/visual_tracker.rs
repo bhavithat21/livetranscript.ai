@@ -32,7 +32,10 @@ pub struct Tracker {
     baseline: Arc<Gray>, seed: Seed, features: Vec<(usize, usize, u8)>,
     last: Rect, terminal: Option<Status>,
 }
-const MAX_PROBES: usize = 1_500_000;
+// A 2x rasterized 1440px editor already exceeds 1.5M candidate positions.
+// Keep a hard ceiling, but cover ordinary Retina/4K panes without skipping the
+// full uniqueness search. Exhaustion remains an abstention, never a partial win.
+const MAX_PROBES: usize = 8_000_000;
 const MAX_FEATURES: usize = 24;
 
 impl Tracker {
@@ -60,7 +63,12 @@ impl Tracker {
         let last = seed.context;
         let mut value = Self { baseline: image.clone(), seed, features, last, terminal: None };
         let found = value.update(&image);
-        if found.status != Status::Tracking { return Err("Initial visual anchor is not unique"); }
+        match found.status {
+            Status::Tracking => {},
+            Status::Budget => return Err("Visual search budget exceeded; select a smaller source window"),
+            Status::Ambiguous => return Err("Initial visual anchor is not unique"),
+            _ => return Err("Initial visual anchor could not be validated"),
+        }
         Ok(value)
     }
     pub fn update(&mut self, image: &Gray) -> Update {
@@ -137,6 +145,15 @@ fn overlaps(a: Rect, b: Rect) -> bool { a.x < b.right() && b.x < a.right() && a.
 // average is tiny (e.g. || -> &&, > -> >=). Unquantized native-resolution luma.
 // Antialiasing differences, selection and caret occlusion can cause safe misses.
 fn same_region(a: &Gray, ar: Rect, b: &Gray, br: Rect, ignore: Option<Rect>) -> bool {
+    // Byte-equal rows are the common case after an integer-pixel scroll. Slice
+    // equality uses the platform's optimized comparison; avoid per-pixel tile
+    // work when it adds no information. The strict small-edit check below is
+    // unchanged for every non-identical region (including operator edits).
+    if ignore.is_none() && (0..ar.height).all(|y| {
+        let from_a = (ar.y + y) * a.width + ar.x;
+        let from_b = (br.y + y) * b.width + br.x;
+        a.pixels[from_a..from_a + ar.width] == b.pixels[from_b..from_b + br.width]
+    }) { return true; }
     for ty in (0..ar.height).step_by(8) {
         for tx in (0..ar.width).step_by(8) {
             let mut strong = 0; let mut sum = 0u32;
@@ -175,6 +192,27 @@ mod tests {
     #[test] fn tracks_integer_vertical_and_horizontal_motion_without_template_drift() {
         let (im, seed) = fixture(); let mut tracker = Tracker::new(im.clone(), seed.clone()).unwrap();
         for (dx,dy) in [(0,-20),(4,8),(-7,39),(0,0),(8,-5)] { let next = moved(&im,&seed,dx,dy);let out=tracker.update(&next);assert_eq!(out.status,Status::Tracking);assert_eq!(out.rect.unwrap().x as i32,seed.target.x as i32+dx);assert_eq!(out.rect.unwrap().y as i32,seed.target.y as i32+dy); }
+    }
+    #[test] fn retina_sized_search_does_not_hit_the_old_probe_ceiling() {
+        let (small, seed) = fixture();
+        let mut large = Gray { width: 2880, height: 1800, pixels: vec![22; 2880 * 1800] };
+        for y in 0..small.height { for x in 0..small.width { large.pixels[y * large.width + x] = small.at(x, y); } }
+        let seed = Seed { search: Rect { x:40,y:40,width:2700,height:1700 }, watch:vec![], ..seed };
+        let image=Arc::new(large);
+        let mut tracker=Tracker::new(image.clone(),seed.clone()).unwrap();
+        let next=moved(&image,&seed,31,480);
+        let out=tracker.update(&next);
+        assert_eq!(out.status,Status::Tracking);
+        assert!(out.probes>1_500_000);
+        assert_eq!(out.rect.unwrap().y,seed.target.y+480);
+        assert!(!tracker.semantic_dirty(&next));
+    }
+    #[test] fn byte_equal_fast_path_does_not_hide_a_single_character_sized_edit() {
+        let (im,seed)=fixture();let mut tracker=Tracker::new(im.clone(),seed.clone()).unwrap();
+        let mut next=moved(&im,&seed,3,8);
+        let index=(seed.target.y+8+2)*im.width+seed.target.x+3+10;
+        next.pixels[index]^=255;next.pixels[index+1]^=255;
+        assert_eq!(tracker.update(&next).status,Status::Edited);
     }
     #[test] fn exact_original_is_stable() { let (im,seed)=fixture();let mut t=Tracker::new(im.clone(),seed).unwrap();for _ in 0..30{assert_eq!(t.update(&im).status,Status::Tracking);} }
     #[test] fn two_pixel_operator_edit_is_sticky() { let(im,seed)=fixture();let mut t=Tracker::new(im.clone(),seed.clone()).unwrap();let mut changed=im.as_ref().clone();for x in seed.target.x..seed.target.x+2{let p=&mut changed.pixels[(seed.target.y+4)*im.width+x];*p=255-*p;}assert_eq!(t.update(&changed).status,Status::Edited);assert_eq!(t.update(&im).status,Status::Edited); }

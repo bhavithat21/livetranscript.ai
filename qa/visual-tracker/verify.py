@@ -18,7 +18,11 @@ lines.innerHTML=code.map((v,i)=>`<div class="line" id="row${i}"><span></span></d
 })();</script>'''
 
 def rectangle(page, selector, scale):
-    r=page.locator(selector).bounding_box();return [round(r[k]*scale) for k in ['x','y','width','height']]
+    r=page.locator(selector).bounding_box()
+    # Round endpoints, never origin and size independently: at 125% DPI,
+    # round(987.5)+round(137.5) reaches 1126 in a 1125px screenshot.
+    x,y=round(r['x']*scale),round(r['y']*scale)
+    return [x,y,round((r['x']+r['width'])*scale)-x,round((r['y']+r['height'])*scale)-y]
 def screenshot(page,name):
     data=page.screenshot();im=Image.open(io.BytesIO(data)).convert('L');p=OUT/(name+'.pgm');im.save(p);return p
 
@@ -44,7 +48,7 @@ def run_sequence(page,width,scale,label,actions):
         frames.append(screenshot(page,f'{label}-{n:03d}-{name}'))
         labels.append({'name':name,'expected':expected,'trueRect':target})
     result=subprocess.run([str(RUNNER),str(base),','.join(map(str,seed)),*map(str,frames)],text=True,capture_output=True,check=True,timeout=30)
-    if result.stdout.startswith('SEED_ERROR'):return {'case':label,'seedFailure':result.stdout.strip(),'passed':False}
+    if result.stdout.startswith('SEED_ERROR'):return {'case':label,'seedFailure':result.stdout.strip(),'requestedFrames':len(labels),'width':width,'deviceScale':scale,'passed':False}
     outputs=[]
     for meta,line in zip(labels,result.stdout.strip().splitlines(),strict=True):
         a=line.split(',');status=a[1];box=list(map(int,a[2:6]));ms=float(a[6]);expected=meta['expected'];should_track=expected=='tracking'
@@ -53,41 +57,46 @@ def run_sequence(page,width,scale,label,actions):
         expected_dirty = meta['name'] in ['terminal', 'return', 'off-target-change', 'off-target-still-changed'] if should_track else None
         ok=((status=='tracking' and error<=2*scale and dirty==expected_dirty) if should_track else status!='tracking')
         outputs.append({**meta,'status':status,'rect':box,'kernelMs':ms,'semanticDirty':dirty,'expectedSemanticDirty':expected_dirty,'positionErrorPx':error,'passed':ok})
-    return {'case':label,'width':width,'deviceScale':scale,'passed':all(x['passed'] for x in outputs),'frames':outputs,'seed':seed}
+    return {'case':label,'width':width,'deviceScale':scale,'passed':all(x['passed'] for x in outputs),'requestedFrames':len(labels),'frames':outputs,'seed':seed}
 
-with sync_playwright() as pw:
-    opts={'headless':True,'args':['--no-sandbox']}
-    executable=os.environ.get('CHROMIUM_PATH') or ('/usr/bin/chromium' if pathlib.Path('/usr/bin/chromium').exists() else None)
-    if executable:opts['executable_path']=executable
-    browser=pw.chromium.launch(**opts)
-    cases=[]
-    configs=[(1024,1),(1440,1),(1920,1),(2560,1),(1440,1.25),(1440,1.5),(1440,2)]
-    for width,scale in configs:
-        page=browser.new_page(viewport={'width':width,'height':900},device_scale_factor=scale)
-        actions=[]
-        for n in range(20):actions.append((f'scroll{n}',f'editor.scrollTop={480+(n%10)*8}', 'tracking'))
-        actions += [('hscroll','editor.scrollLeft=16','tracking'),('hreturn','editor.scrollLeft=0','tracking'),('terminal','terminal.textContent="$ npm test: new terminal output"','tracking'),('offscreen','editor.scrollTop=1450','hidden'),('return','editor.scrollTop=480','tracking')]
-        cases.append(run_sequence(page,width,scale,f'motion-{width}-{scale}',actions))
-        page.close()
-    page=browser.new_page(viewport={'width':1440,'height':900})
-    for label,script in [
-      ('repeated-context','for(let i=0;i<7;i++)document.querySelector(`#row${38+i} span`).textContent=document.querySelector(`#row${27+i} span`).textContent'),
-      ('operator','document.querySelector("#row30 span").textContent="  if (ready && paid) {"'),
-      ('surrounding','document.querySelector("#row29 span").textContent="  const paid = true;"'),
-      ('filename','identity.textContent="src / other.ts · not the original file"'),
-      ('occlusion','const b=document.querySelector("#row30").getBoundingClientRect();cover.style.display="block";cover.style.left=b.x+"px";cover.style.top=b.y+"px"'),
-      ('zoom','document.querySelectorAll(".line").forEach(e=>{e.style.fontSize="19px";e.style.lineHeight="28px";e.style.height="28px"})'),
-      ('two-pixel-edit','const b=document.querySelector("#row30 span").getBoundingClientRect();cover.style.cssText=`display:block;padding:0;left:${b.x+22}px;top:${b.y+8}px;width:2px;height:2px;background:white`'),
-    ]:
-        cases.append(run_sequence(page,1440,1,label,[('before','', 'tracking'),(label,script,'hidden')]))
-    cases.append(run_sequence(page,1440,1,'off-target-semantics',[
-        ('before','','tracking'),
-        ('off-target-change','document.querySelector("#row43 span").textContent="  const changed = true;"','tracking'),
-        ('off-target-still-changed','','tracking')]))
-    # Export a visible actual source screenshot for later overlay playback.
-    page.set_content(HTML);page.screenshot(path=str(OUT/'source-1440.png'))
-    browser.close()
-values=[f['kernelMs'] for c in cases for f in c.get('frames',[])]
-errors=[f['positionErrorPx'] for c in cases for f in c.get('frames',[]) if f['positionErrorPx'] is not None]
-report={'schema':'screenshot-pixel-benchmark-v1','source':'Chromium-rendered authored coding scenes','trackerInput':'PGM pixels and one initial seed only','actualVisionProvider':False,'nativeCaptureMeasured':False,'cases':cases,'passed':all(c['passed'] for c in cases),'summary':{'cases':len(cases),'frames':len(values),'trackedFrames':len(errors),'kernelP50Ms':statistics.median(values) if values else None,'kernelP95Ms':sorted(values)[int(len(values)*.95)] if values else None,'maxPositionErrorPx':max(errors,default=None),'endToEndLatencyMs':None,'wrongTargetCount':sum(1 for c in cases for f in c.get('frames',[]) if f['status']=='tracking' and (f['expected']!='tracking' or f['positionErrorPx']>2*c['deviceScale'])), 'semanticGuardFailures':sum(1 for c in cases for f in c.get('frames',[]) if f['expectedSemanticDirty'] is not None and f['semanticDirty']!=f['expectedSemanticDirty'])}}
-(OUT/'pixel-report.json').write_text(json.dumps(report,indent=2));print(json.dumps(report['summary'],indent=2));print('FAILED',[c['case'] for c in cases if not c['passed']]);raise SystemExit(0 if report['passed'] else 1)
+def main():
+    with sync_playwright() as pw:
+        opts={'headless':True,'args':['--no-sandbox']}
+        executable=os.environ.get('CHROMIUM_PATH') or ('/usr/bin/chromium' if pathlib.Path('/usr/bin/chromium').exists() else None)
+        if executable:opts['executable_path']=executable
+        browser=pw.chromium.launch(**opts)
+        cases=[]
+        configs=[(1024,1),(1440,1),(1920,1),(2560,1),(1440,1.25),(1440,1.5),(1440,2),(1920,2)]
+        for width,scale in configs:
+            if os.environ.get('TRACKER_CASES') and f'motion-{width}-{scale}' not in os.environ['TRACKER_CASES'].split(','): continue
+            page=browser.new_page(viewport={'width':width,'height':900},device_scale_factor=scale)
+            actions=[]
+            for n in range(20):actions.append((f'scroll{n}',f'editor.scrollTop={480+(n%10)*8}', 'tracking'))
+            actions += [('hscroll','editor.scrollLeft=16','tracking'),('hreturn','editor.scrollLeft=0','tracking'),('terminal','terminal.textContent="$ npm test: new terminal output"','tracking'),('offscreen','editor.scrollTop=1450','hidden'),('return','editor.scrollTop=480','tracking')]
+            cases.append(run_sequence(page,width,scale,f'motion-{width}-{scale}',actions))
+            page.close()
+        page=browser.new_page(viewport={'width':1440,'height':900})
+        for label,script in [
+          ('repeated-context','for(let i=0;i<7;i++)document.querySelector(`#row${38+i} span`).textContent=document.querySelector(`#row${27+i} span`).textContent'),
+          ('operator','document.querySelector("#row30 span").textContent="  if (ready && paid) {"'),
+          ('surrounding','document.querySelector("#row29 span").textContent="  const paid = true;"'),
+          ('filename','identity.textContent="src / other.ts · not the original file"'),
+          ('occlusion','const b=document.querySelector("#row30").getBoundingClientRect();cover.style.display="block";cover.style.left=b.x+"px";cover.style.top=b.y+"px"'),
+          ('zoom','document.querySelectorAll(".line").forEach(e=>{e.style.fontSize="19px";e.style.lineHeight="28px";e.style.height="28px"})'),
+          ('two-pixel-edit','const b=document.querySelector("#row30 span").getBoundingClientRect();cover.style.cssText=`display:block;padding:0;left:${b.x+22}px;top:${b.y+8}px;width:2px;height:2px;background:white`'),
+        ]:
+            cases.append(run_sequence(page,1440,1,label,[('before','', 'tracking'),(label,script,'hidden')]))
+        cases.append(run_sequence(page,1440,1,'off-target-semantics',[
+            ('before','','tracking'),
+            ('off-target-change','document.querySelector("#row43 span").textContent="  const changed = true;"','tracking'),
+            ('off-target-still-changed','','tracking')]))
+        # Export a visible actual source screenshot for later overlay playback.
+        page.set_content(HTML);page.screenshot(path=str(OUT/'source-1440.png'))
+        browser.close()
+    values=[f['kernelMs'] for c in cases for f in c.get('frames',[])]
+    errors=[f['positionErrorPx'] for c in cases for f in c.get('frames',[]) if f['positionErrorPx'] is not None]
+    report={'schema':'screenshot-pixel-benchmark-v2','source':'Chromium-rendered authored coding scenes','trackerInput':'PGM pixels and one initial seed only','actualVisionProvider':False,'nativeCaptureMeasured':False,'cases':cases,'passed':all(c['passed'] for c in cases),'summary':{'cases':len(cases),'seedFailures':sum('seedFailure' in c for c in cases),'requestedFrames':sum(c['requestedFrames'] for c in cases),'evaluatedFrames':len(values),'frames':len(values),'trackedFrames':len(errors),'kernelTimingIncludes':'image matching and aligned semantic comparison only; excludes capture/IPC/render/vision','kernelP50Ms':statistics.median(values) if values else None,'kernelP95Ms':sorted(values)[int(len(values)*.95)] if values else None,'maxPositionErrorPx':max(errors,default=None),'endToEndLatencyMs':None,'wrongTargetCount':sum(1 for c in cases for f in c.get('frames',[]) if f['status']=='tracking' and (f['expected']!='tracking' or f['positionErrorPx']>2*c['deviceScale'])), 'semanticGuardFailures':sum(1 for c in cases for f in c.get('frames',[]) if f['expectedSemanticDirty'] is not None and f['semanticDirty']!=f['expectedSemanticDirty'])}}
+    (OUT/'pixel-report.json').write_text(json.dumps(report,indent=2));print(json.dumps(report['summary'],indent=2));print('FAILED',[c['case'] for c in cases if not c['passed']]);raise SystemExit(0 if report['passed'] else 1)
+
+if __name__ == "__main__":
+    main()

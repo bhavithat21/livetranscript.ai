@@ -63,6 +63,7 @@ export class ScreenObserver {
     const generation = ++this.generation
     const tick = async () => {
       if (generation !== this.generation || !this.source || !this.status.watching) return
+      const tickStarted = performance.now()
       try {
         const signal = await this.source.signal()
         if (generation !== this.generation) return
@@ -71,7 +72,7 @@ export class ScreenObserver {
         const surface = this.source.surface?.() ?? null
         if (surface && typeof surface.captureMs === 'number') this.metrics.record(surface, surface.captureMs)
         const receipt = surface?.tracking
-        if (receipt && (receipt.semanticDirty || ['edited','layout-changed','identity-changed'].includes(receipt.status))) {
+        if (receipt && this.trackingId.startsWith(`${receipt.anchorId}:`) && (receipt.semanticDirty || ['edited','layout-changed','identity-changed'].includes(receipt.status))) {
           const rejection = `${receipt.anchorId}:${receipt.status}:${receipt.semanticDirty}`
           if (this.rejectedReceipt !== rejection) { this.rejectedReceipt = rejection; this.requestRefresh(); this.update({ trackingNeedsReview: true }) }
         }
@@ -80,9 +81,15 @@ export class ScreenObserver {
         // New questions/explicit refresh, changed targets and background evidence
         // still use the bounded semantic path. No pixel stream is uploaded.
         if (reuse) this.metrics.reuse()
-        const decision = reuse ? { capture: false } : this.gate.sample(signal, performance.now())
+        // Do not put the gate into busy state when an explicit grab or an older
+        // semantic request owns the lane. Its completion cannot acknowledge a
+        // frame it never acquired (notably after requestRefresh resets the gate).
+        const decision = reuse || this.controller || this.grabbing ? { capture: false } : this.gate.sample(signal, performance.now())
         if (decision.capture && !this.controller && !this.grabbing) {
-          const capturedAt = Date.now(), image = await this.source.image()
+          this.grabbing = true
+          const capturedAt = Date.now()
+          let image: string | null
+          try { image = await this.source.image() } finally { this.grabbing = false }
           if (generation !== this.generation) return
           if (!image) throw new Error('Selected screen is no longer available')
           // Local samples continue while one extraction runs. No frame queue grows.
@@ -93,7 +100,13 @@ export class ScreenObserver {
       } catch {
         if (generation === this.generation) { this.update({ watching: false, reading: false, error: 'Screen capture stopped. Check permissions or select the IDE again.' }); return }
       }
-      if (generation === this.generation && this.status.watching) this.timer = setTimeout(() => void tick(), Math.max(40, Math.min(500, this.source?.intervalMs?.() ?? 250)))
+      if (generation === this.generation && this.status.watching) {
+        // Aim at a frame period, not capture duration PLUS that period. There
+        // is still one read at a time; slow frames never create a catch-up queue.
+        const period = Math.max(40, Math.min(500, this.source?.intervalMs?.() ?? 250))
+        const delay = Math.max(8, period - (performance.now() - tickStarted))
+        this.timer = setTimeout(() => void tick(), delay)
+      }
     }
     void tick()
   }
@@ -139,7 +152,7 @@ export class ScreenObserver {
     if (this.timer) clearTimeout(this.timer)
     this.timer = null; this.controller?.abort(); this.controller = null
     const source = this.source; this.source = null
-    this.gate.reset(); this.update({ sharing: false, watching: false, reading: false, source: null, surface: null, acceptedSurfaceKey: null, acceptedSurface: null })
+    this.gate.reset(); this.update({ sharing: false, watching: false, reading: false, source: null, surface: null, acceptedSurfaceKey: null, acceptedSurface: null, trackingError: null, trackingNeedsReview: false })
     await source?.stop()
   }
   dispose() { void this.stop(); this.listeners.clear() }
