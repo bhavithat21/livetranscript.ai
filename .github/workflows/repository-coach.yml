@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - 'lib/coach/**'
+      - 'lib/copilot/**'
       - 'lib/interview/**'
       - 'components/coach/**'
       - 'components/interview/**'
@@ -37,6 +38,7 @@ jobs:
           mkdir -p qa-results/coach
           set -o pipefail
           node --test scripts/test-repo-coach.mjs | tee qa-results/coach/contracts.txt
+          SIMULATOR_REPORT=qa-results/coach/simulator-suite.json pnpm run test:simulator | tee qa-results/coach/simulator.txt
       - name: Install pinned browser test runtime
         run: |
           python3 -m pip install playwright==1.55.0
@@ -47,6 +49,7 @@ jobs:
           for i in $(seq 1 30); do curl -fsS http://127.0.0.1:4180 >/dev/null && break; sleep 1; done
           python3 qa/coach/verify.py
           python3 qa/coach/focus.py
+          python3 qa/coach/simulator.py
       - name: Record exact source snapshot (tracked files only)
         if: always()
         run: |
