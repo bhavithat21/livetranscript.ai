@@ -13,6 +13,7 @@ export function MockInterview(props: MockProps) {
   const parentActivity = props.onActivity
   const activity = useCallback((value: boolean) => { setActive(value); parentActivity(value) }, [parentActivity])
   return <div>
+    <p className="mb-3 text-sm"><a className="underline" href="/interview/rehearsal">Open the isolated interactive rehearsal</a> · Requires test configuration; no new sidebar item.</p>
     <div role="group" aria-label="Mock testing target" className="mb-5 flex flex-wrap gap-2">
       <button type="button" className="btn-ghost text-sm" aria-pressed={target === 'answers'} disabled={active} onClick={() => setTarget('answers')}>Answer prompts</button>
       <button type="button" className="btn-ghost text-sm" aria-pressed={target === 'repository'} disabled={active || props.blocked} onClick={() => setTarget('repository')}>Repository replay</button>

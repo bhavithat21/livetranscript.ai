@@ -2,6 +2,8 @@ import { abortable, systemClock, type Clock } from './clock'
 import type { CoachState, CoachEvent, ContextPacket, EventPayload, Guidance, Lane, Observation, Origin, Permission, DialogueTurn } from './types'
 import { buildContext, EvidenceIndex } from './context'
 import { emptyCoach, normalizeQuestion, parseReplayEvent, reduceCoach, resultCurrent } from './state'
+import { groupRequirementTurns } from './requirements'
+import { hashText } from './validation'
 import { lessonIds, type LessonId } from './learning/policy'
 import { LIMITS, list, object, parseGuidance, redactSecrets, text } from './validation'
 
@@ -9,6 +11,10 @@ export type ReplayReference = { id: string; lane: string; model: string; text: s
 export type CoachTransport = (lane: Lane, packet: ContextPacket, options: { signal: AbortSignal; lessons?: LessonId[]; delta: (text: string, model: string) => void }) => Promise<{ model: string; guidance: Guidance | null }>
 type Flight = { controller: AbortController; key: string; requestId: string }
 export class CoachController {
+  private requirementTimer: ReturnType<typeof setTimeout> | null = null
+  private requirementGroups = new Map<string, string>()
+  private sessionLimit = 120
+  private blockedLanes = new Set<Lane>()
   private lessons: LessonId[] = []
   private resumeLanes: Lane[] = []
   private resumeGuide = false
@@ -63,21 +69,52 @@ export class CoachController {
     if (!this.replay) void this.run('talk')
     this.scheduleGuide()
   }
+  private applySpeech(turn: DialogueTurn) {
+    if (turn.role === 'interviewer') this.emit({ type: 'speech.final', speaker: 'interviewer', text: turn.text })
+    this.emit({ type: 'requirement.update', turn })
+  }
+  private refreshSpeech(previous: number, original: string) {
+    if (this.state.evidenceVersion === previous) return
+    this.cancelStale()
+    if (!this.state.question && (this.state.task.spokenRequirements?.length || this.state.task.requirementClarifications?.length)) {
+      this.question(original); return
+    }
+    if (!this.replay) void this.run('talk')
+    this.scheduleGuide()
+  }
+  /** Legacy direct finalized speech. Rich sources should use dialogue() so ASR
+   * revisions retain an utterance identity instead of looking like new speech. */
   speech(value: string, speaker: 'interviewer' | 'candidate' = 'interviewer') {
     if (this.disposed || this.state.status !== 'running') return
     const previous = this.state.evidenceVersion
-    this.emit({ type: 'speech.final', speaker, text: value.slice(-4000) })
-    if (this.state.evidenceVersion !== previous) {
-      this.cancelStale()
-      if (!this.replay) void this.run('talk')
-      this.scheduleGuide()
-    }
+    this.applySpeech({ sourceId: `direct:${hashText(value)}`, at: this.now(), role: speaker, text: value.slice(-1000) })
+    this.refreshSpeech(previous, value)
   }
   dialogue(turn: DialogueTurn) {
     if (this.disposed || this.state.status !== 'running') return
+    const previous = this.state.conversation
     this.emit({ type: 'dialogue.update', turn })
-    // Do not interrupt for every candidate utterance. The next question or
-    // changed code receives the latest role-tagged conversation.
+    if (previous === this.state.conversation) return
+    const revisesRequirement = previous?.some(input => input.sourceId === turn.sourceId && input.role === 'interviewer') || this.state.requirementInputs?.some(input => input.sourceId === turn.sourceId)
+    if (turn.role !== 'interviewer' && !revisesRequirement) return
+    // One settle timer for a burst of finalized/revised packets, not one model
+    // call per packet. No automatic role inference from a numerical voice label.
+    if (this.requirementTimer !== null) this.clock.clearTimeout(this.requirementTimer)
+    this.requirementTimer = this.clock.setTimeout(() => { this.requirementTimer = null; this.flushRequirements() }, 700)
+  }
+  flushRequirements() {
+    if (this.disposed || this.state.status !== 'running') return
+    const before = this.state.evidenceVersion
+    let last = ''
+    for (const group of groupRequirementTurns(this.state.conversation ?? [])) {
+      const signature = JSON.stringify(group)
+      if (this.requirementGroups.get(group.sourceId) === signature) continue
+      this.requirementGroups.set(group.sourceId, signature)
+      if (this.requirementGroups.size > 1200) this.requirementGroups.delete(this.requirementGroups.keys().next().value!)
+      try { this.applySpeech(group); last = group.text }
+      catch (error) { this.publish({ ...this.state, warning: error instanceof Error ? error.message : 'Requirement update could not be applied. Pause to review.' }) }
+    }
+    this.refreshSpeech(before, last)
   }
   question(original: string) {
     if (this.state.status !== 'running' || this.disposed) return
@@ -131,9 +168,13 @@ export class CoachController {
     if (this.attempted.has(key)) return
     const now = this.now()
     this.requestTimes = this.requestTimes.filter(time => now - time < 60_000)
-    if (this.calls >= 120 || this.requestTimes.length >= 12) {
-      this.publish({ ...this.state, warning: 'Automatic model budget reached. Pause, narrow the task, or wait for the per-minute budget to recover.' }); return
+    if (this.calls >= this.sessionLimit || this.requestTimes.length >= 12) {
+      this.blockedLanes.add(lane)
+      this.publish({ ...this.state, warning: this.calls >= this.sessionLimit
+        ? `Session budget exhausted (${this.calls}/${this.sessionLimit} requests). Waiting will not reset it. Pause to authorize a bounded extension or end the session.`
+        : 'Per-minute model budget reached (12 requests). Wait up to 60 seconds, then retry explicitly.' }); return
     }
+    this.blockedLanes.delete(lane)
     this.attempted.add(key); this.calls++; this.requestTimes.push(now)
     const requestId = this.id(), controller = new AbortController()
     this.flights.set(lane, { key, requestId, controller })
@@ -160,6 +201,7 @@ export class CoachController {
   pause() {
     if (this.state.status !== 'running') return
     this.resumeLanes = [...this.flights.keys()]; this.resumeGuide = this.timer !== null
+    if (this.requirementTimer !== null) { this.clock.clearTimeout(this.requirementTimer); this.requirementTimer = null }
     this.cancelAll(); this.emit({ type: 'session.pause' })
   }
   resume() {
@@ -167,10 +209,11 @@ export class CoachController {
     const lanes = this.resumeLanes, guide = this.resumeGuide
     this.resumeLanes = []; this.resumeGuide = false
     this.emit({ type: 'session.resume' })
+    this.flushRequirements()
     if (!this.replay) { for (const lane of lanes) void this.run(lane, true); if (guide) this.scheduleGuide() }
   }
-  end() { this.cancelAll(); if (this.state.status !== 'ended') this.emit({ type: 'session.end' }) }
-  dispose() { this.cancelAll(); this.disposed = true; this.listeners.clear(); this.index.clear() }
+  end() { if (this.requirementTimer !== null) this.clock.clearTimeout(this.requirementTimer); this.requirementTimer = null; this.cancelAll(); if (this.state.status !== 'ended') this.emit({ type: 'session.end' }) }
+  dispose() { if (this.requirementTimer !== null) this.clock.clearTimeout(this.requirementTimer); this.requirementTimer = null; this.cancelAll(); this.disposed = true; this.listeners.clear(); this.index.clear() }
   exportReplay(): string {
     return JSON.stringify({ format: 'livetranscript-repo-replay-v1', sessionId: this.sessionId, truncated: this.journalTruncated, events: this.journal,
       evaluations: [...this.replayReferences.map(item => ({ ...item, referenceOnly: true })), ...this.state.results.filter(item => item.status !== 'running').map(item => ({ ...item }))], feedback: this.state.feedback,
@@ -225,7 +268,17 @@ export class CoachController {
   }
   getReplayInfo() { return { position: this.replayPosition, total: this.replayEvents.length, event: this.replayEvents[this.replayPosition - 1]?.type ?? '', references: this.replayReferences } }
   analyzeReplay() { this.replay = false; this.resume(); void this.run('talk', true); void this.run('guide', true) }
-  getMetrics() { return { modelRequests: this.calls, activeRequests: this.flights.size, journalEvents: this.journal.length, journalTruncated: this.journalTruncated } }
+  /** Explicit paid-call consent, never called by a model or imported replay. */
+  extendSessionBudget() {
+    if (this.state.status !== 'paused' || this.replay || this.disposed || this.calls < this.sessionLimit || this.sessionLimit >= 240) return false
+    this.sessionLimit += 40
+    this.resumeLanes = [...new Set([...this.resumeLanes, ...this.blockedLanes])]
+    this.blockedLanes.clear()
+    this.publish({ ...this.state, warning: 'Authorized 40 additional requests. Resume when ready; normal per-minute and provider limits still apply.' })
+    return true
+  }
+  getMetrics() { return { modelRequests: this.calls, activeRequests: this.flights.size, journalEvents: this.journal.length, journalTruncated: this.journalTruncated,
+    sessionLimit: this.sessionLimit, remainingRequests: Math.max(0, this.sessionLimit - this.calls), rateRemaining: Math.max(0, 12 - this.requestTimes.filter(at => this.now() - at < 60_000).length) } }
 }
 export const httpCoachTransport: CoachTransport = async (lane, context, options) => {
   const response = await fetch('/api/copilot/coach', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lane, context, lessons: options.lessons ?? [] }), signal: options.signal })

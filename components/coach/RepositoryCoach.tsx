@@ -10,6 +10,7 @@ import { nextInspection } from '@/lib/coach/context'
 import { safePath } from '@/lib/coach/validation'
 import type { CoachState, Permission, ResultRecord, DialogueTurn } from '@/lib/coach/types'
 import { LearningPanel } from './LearningPanel'
+import type { LessonId } from '@/lib/coach/learning/policy'
 import { useLessonPolicy } from '@/lib/coach/learning/LearningContext'
 import styles from './RepositoryCoach.module.css'
 
@@ -20,6 +21,8 @@ export type RepositoryCoachProps = {
   getConversation?: () => DialogueTurn[]
   permission?: Permission
   objective?: string
+  /** Explicit rehearsal-only policy selection; never changed during a run. */
+  frozenLessons?: LessonId[]
   onActivity?: (active: boolean) => void
   transport?: CoachTransport
   captureTransport?: CaptureTransport
@@ -33,8 +36,8 @@ function saveFile(name: string, content: string) {
 }
 export function RepositoryCoach({ transport = httpCoachTransport, captureTransport = httpCapture, onReady, ...props }: RepositoryCoachProps) {
   const lessonPolicy = useLessonPolicy()
-  const lessonRef = useRef(lessonPolicy?.state.active ?? [])
-  useEffect(() => { lessonRef.current = lessonPolicy?.state.active ?? [] }, [lessonPolicy?.state.active])
+  const lessonRef = useRef(props.frozenLessons ?? lessonPolicy?.state.active ?? [])
+  useEffect(() => { lessonRef.current = props.frozenLessons ?? lessonPolicy?.state.active ?? [] }, [props.frozenLessons, lessonPolicy?.state.active])
   const [resources, setResources] = useState<Resources | null>(null)
   const readyRef = useRef(onReady)
   useEffect(() => { readyRef.current = onReady }, [onReady])
@@ -59,7 +62,7 @@ function ReviewButtons({ result, state, controller }: { result: ResultRecord; st
     {expanded && <><label>What should improve?<select className={styles.input} value={category} onChange={event => setCategory(event.target.value)}><option value="correctness">Correctness</option><option value="directness">Directness / spoken clarity</option><option value="navigation">Wrong file or location</option><option value="stale-context">Stale or missing context</option><option value="latency">Response time</option><option value="verbosity">Too much detail</option></select></label><label>Review note<textarea className={styles.input} maxLength={1500} rows={3} value={note} onChange={event => setNote(event.target.value)} /></label><button className={styles.button} onClick={() => { controller.feedback(result.id, 'needs-work', [category], note); setExpanded(false) }}>Save review</button></>}
   </div>
 }
-function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRANSCRIPT, getConversation, permission, objective: presetObjective, onActivity }: Omit<RepositoryCoachProps, 'onReady' | 'transport' | 'captureTransport'> & Resources) {
+function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRANSCRIPT, getConversation, permission, objective: presetObjective, frozenLessons, onActivity }: Omit<RepositoryCoachProps, 'onReady' | 'transport' | 'captureTransport'> & Resources) {
   const lessonPolicy = useLessonPolicy()
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot)
   const capture = useSyncExternalStore(screen.subscribe, screen.getSnapshot, screen.getSnapshot)
@@ -76,7 +79,7 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
   const dialogueGetter = useRef(getConversation)
   useEffect(() => { dialogueGetter.current = getConversation }, [getConversation])
   const running = state.status === 'running'
-  useEffect(() => { if (!running) controller.configureLessons(lessonPolicy?.state.active ?? []) }, [controller, running, lessonPolicy?.state.active])
+  useEffect(() => { if (!running) controller.configureLessons(frozenLessons ?? lessonPolicy?.state.active ?? []) }, [controller, running, frozenLessons, lessonPolicy?.state.active])
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; activity.current?.(false) } }, [])
   useEffect(() => { activity.current?.(running) }, [running])
   useEffect(() => { if (permission && state.status === 'idle') controller.start(permission, presetObjective || 'Follow the interviewer’s task using only observed repository evidence.') }, [permission, presetObjective, controller, state.status])
@@ -91,6 +94,9 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
     if (!running) return
     const timer = setInterval(() => {
       for (const turn of dialogueGetter.current?.() ?? []) controller.dialogue(turn)
+      // Rich, role-tagged utterances own requirement ingestion. Do not also
+      // feed the flattened question transcript as trusted interviewer speech.
+      if (dialogueGetter.current) return
       const finalText = getter.current()
       if (finalText && finalText !== previousSpeech.current) {
         const previous = previousSpeech.current; previousSpeech.current = finalText
@@ -169,7 +175,7 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
   const replay = controller.getReplayInfo()
   const next = state.navigation ?? nextInspection(state), metrics = controller.getMetrics(), counts = state.files.map(fileCoverage), native = nativeAvailable()
   return <section className={styles.root} aria-label="Repository coach" data-testid="repository-coach">
-    <header className={styles.header}><h2>Repository coach</h2><span className={styles.tag}>{state.status === 'idle' ? 'Set up' : loadedReplay ? 'Replay' : state.permission === 'practice' ? 'Practice' : 'AI-permitted session'}</span><span className={`${styles.muted} ${styles.spacer}`}>{state.status} · evidence v{state.evidenceVersion}</span></header>
+    <header className={styles.header}><h2>Repository coach</h2><span className={styles.tag}>{state.status === 'idle' ? 'Set up' : loadedReplay ? 'Replay' : state.permission === 'practice' ? 'Practice' : 'AI-permitted session'}</span><span className={`${styles.muted} ${styles.spacer}`}>{state.status} · evidence v{state.evidenceVersion} · {metrics.remainingRequests} model requests left</span></header>
     {state.status === 'idle' && <div className={styles.setup}><h3>Follow the code. Keep the conversation moving.</h3><p>Share only the IDE you are allowed to show. The coach keeps observed code separate from suggestions, asks for missing evidence, and never edits files or runs commands for you.</p><label className={styles.label} htmlFor="coach-objective">Practice task</label><textarea id="coach-objective" className={styles.input} rows={3} maxLength={2000} value={objective} onChange={event => setObjective(event.target.value)} /><label className={styles.permission}><input type="checkbox" checked={consent} onChange={event => setConsent(event.target.checked)} /><span>I may share this code with the configured AI providers. This is practice or a session that explicitly permits external AI.</span></label><button className={`${styles.button} ${styles.primary}`} disabled={!consent || !objective.trim()} onClick={start}>Start repository practice</button></div>}
     {state.status !== 'idle' && <>
       <div className={styles.controls}>
@@ -189,7 +195,9 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
         <p className={styles.muted}>Seeking is offline. Future screenshots and saved model answers are excluded from this checkpoint’s context. Analyze replay with AI sends only the evidence visible so far.</p>
         {replay.references.length > 0 && <details className={styles.details}><summary>Previous responses and saved feedback · reference only</summary><ul className={styles.list}>{replay.references.map((item, index) => <li key={`${item.id}-${index}`}><strong>{item.lane} · {item.model || 'Model not recorded'} · {item.verdict || 'Not reviewed'}</strong><pre className={styles.code}>{item.text || item.summary}</pre>{item.note && <p>Review: {item.note}</p>}</li>)}</ul></details>}
       </section>}
+      {state.status === 'paused' && !loadedReplay && metrics.remainingRequests === 0 && metrics.sessionLimit < 240 && <button className={styles.button} onClick={() => controller.extendSessionBudget()}>Authorize 40 more billable model requests</button>}
       {state.status === 'paused' && <p className={styles.notice}>Coach paused. No new model calls or screen analysis. The parent interview’s audio capture has separate controls.</p>}
+      {((state.task.spokenRequirements?.length ?? 0) > 0 || (state.task.requirementClarifications?.length ?? 0) > 0) && <details className={`${styles.details} ${styles.main}`}><summary>Spoken requirements · revision {state.task.version}</summary><ul>{state.task.spokenRequirements?.map(item => <li key={item.sourceId}>{item.text}</li>)}</ul>{state.task.requirementClarifications?.map(item => <p role="status" key={item.sourceId}>Clarify before changing the plan: {item.text}</p>)}</details>}
       <div className={styles.layout}>
         <div className={styles.main} data-testid="coach-main">
           <div className={styles.eyebrow}>Current question</div><h3 className={styles.question}>{state.question?.text || 'Listening for the interviewer’s next question…'}</h3>

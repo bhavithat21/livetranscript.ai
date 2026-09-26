@@ -7,6 +7,8 @@ import { useTextScale } from '@/lib/transcript/useTextScale'
 import { liveTurns, voiceLabel, type ChannelSegment } from '@/lib/interview/liveTurns'
 import { LiveScrollArea } from '@/components/transcript/LiveScrollArea'
 import { LiveAnswerCanvas } from './LiveAnswerCanvas'
+import type { AudioEvidence } from '@/lib/rehearsal/report'
+import type { RepositoryCoachProps } from '@/components/coach/RepositoryCoach'
 import { RepositoryCoach } from '@/components/coach/RepositoryCoach'
 import { useKeytermPrefs } from '@/lib/transcription/useKeytermPrefs'
 import { liveTranscript, useInterviewRecorder } from '@/lib/interview/useInterviewRecorder'
@@ -17,7 +19,9 @@ import type { DialogueTurn } from '@/lib/coach/types'
 import type { InterviewSession } from '@/lib/interview/session'
 import styles from './Interview.module.css'
 
-export function LiveInterview({ blocked, onActivity, onComplete, videoTest = false }: {
+export function LiveInterview({ blocked, onActivity, onComplete, videoTest = false, rehearsal = false, onCoachReady, onAudioEvidence, frozenLessons }: {
+  frozenLessons?: RepositoryCoachProps['frozenLessons'];
+  rehearsal?: boolean; onCoachReady?: RepositoryCoachProps['onReady']; onAudioEvidence?: (e: AudioEvidence) => void;
   videoTest?: boolean; visible: boolean; blocked: boolean; onActivity: (active: boolean) => void
   onComplete: (session: InterviewSession) => void
 }) {
@@ -28,9 +32,9 @@ export function LiveInterview({ blocked, onActivity, onComplete, videoTest = fal
   const [interviewerSpeaker, setInterviewerSpeaker] = useState<number | null>(null)
   const { keyterms } = useKeytermPrefs()
   const [source, setSource] = useState<'both' | 'system' | 'mic'>(videoTest ? 'system' : 'both')
-  const [title, setTitle] = useState(videoTest ? 'Video coding test' : 'Live interview')
+  const [title, setTitle] = useState(rehearsal ? 'Interactive rehearsal' : videoTest ? 'Video coding test' : 'Live interview')
   const [consent, setConsent] = useState(false)
-  const [repositoryMode, setRepositoryMode] = useState(videoTest)
+  const [repositoryMode, setRepositoryMode] = useState(videoTest || rehearsal)
   const [active, setActive] = useState(false)
   const [busy, setBusy] = useState(false)
   const [finishing, setFinishing] = useState(false)
@@ -54,11 +58,11 @@ export function LiveInterview({ blocked, onActivity, onComplete, videoTest = fal
 
   // Detection consumes only finalized interviewer-channel text. The richer
   // labeled dual-channel transcript remains the answer's grounding context.
-  const questionText = useCallback(() => videoTest && interviewerSpeaker === null ? '' : detectionTranscript(
+  const questionText = useCallback(() => (videoTest || rehearsal) && interviewerSpeaker === null ? '' : detectionTranscript(
     (source === 'mic' ? getMicSegments() : getCallSegments()).filter((row) => row.capturedAt >= startTime.current),
     source === 'both' ? getMicSegments().filter((row) => row.capturedAt >= startTime.current) : [],
     interviewerSpeaker,
-  ), [getCallSegments, getMicSegments, source, interviewerSpeaker, videoTest])
+  ), [getCallSegments, getMicSegments, source, interviewerSpeaker, videoTest, rehearsal])
 
   const conversation = useCallback((): DialogueTurn[] => {
     const incoming = (source === 'mic' ? getMicSegments() : getCallSegments()).filter(row => row.isFinal && row.capturedAt >= startTime.current)
@@ -68,6 +72,12 @@ export function LiveInterview({ blocked, onActivity, onComplete, videoTest = fal
       .filter(row => row.text.trim()).sort((a,b) => a.at-b.at).slice(-24)
   }, [getCallSegments, getMicSegments, source, interviewerSpeaker])
 
+  const audioReporter = useRef(onAudioEvidence)
+  useEffect(() => { audioReporter.current = onAudioEvidence }, [onAudioEvidence])
+  useEffect(() => {
+    audioReporter.current?.({ at: Date.now(), callFinals: call.segments.filter(r => r.isFinal).length, micFinals: microphone.segments.filter(r => r.isFinal).length,
+      callPhase: call.phase, micPhase: microphone.phase, interviewerAssigned: interviewerSpeaker !== null, error: !!(call.error || microphone.error) })
+  }, [call.segments, microphone.segments, call.phase, microphone.phase, call.error, microphone.error, interviewerSpeaker])
   useEffect(() => {
     if (!active) return
     const timer = setInterval(() => setElapsed(Math.floor((Date.now() - startTime.current) / 1000)), 1000)
@@ -137,7 +147,7 @@ export function LiveInterview({ blocked, onActivity, onComplete, videoTest = fal
           <h2 id="live-setup-heading">Focus on the conversation.</h2>
           <p>Questions, grounded answers, and the live transcript stay together. Start your audio when everyone is ready.</p>
           <label className={styles.setupPermission}><input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} /><span>I have permission to record this conversation and use AI assistance where permitted.</span></label>
-          <label className={styles.setupPermission}><input type="checkbox" checked={repositoryMode} onChange={(event) => setRepositoryMode(event.target.checked)} /><span>Repository coding interview — guide navigation, track observed edits, and show Say now / Change / Verify. Share the IDE separately after starting.</span></label>
+          <label className={styles.setupPermission}><input type="checkbox" disabled={rehearsal} checked={repositoryMode} onChange={(event) => setRepositoryMode(event.target.checked)} /><span>Repository coding interview — guide navigation, track observed edits, and show Say now / Change / Verify. Share the IDE separately after starting.</span></label>
           <div className={styles.setupActions}>
             <button type="button" className={styles.startButton} disabled={blocked || !consent} onClick={() => void begin()}><Play size={15} aria-hidden />Start interview</button>
             <button type="button" className={styles.darkButton} aria-expanded={setupOpen} aria-controls="live-setup-fields" onClick={() => setSetupOpen((open) => !open)}><Settings2 size={15} aria-hidden />Configure</button>
@@ -173,10 +183,10 @@ export function LiveInterview({ blocked, onActivity, onComplete, videoTest = fal
         <ReadingControls /><span className={styles.sessionTime}>{formatTime(elapsed)}</span>
         <button type="button" className={styles.endButton} disabled={finishing} onClick={() => void finish()}><Square size={12} aria-hidden />End</button>
       </div>
-      {videoTest && interviewerSpeaker === null && <p className={styles.activityNotice}>Video test: select the interviewer in Speakers after both voices appear. Automatic answers wait for this assignment; voices are not identities.</p>}
+      {(videoTest || repositoryMode) && interviewerSpeaker === null && <p className={styles.activityNotice}>Choose the interviewer in Speakers to apply spoken requirement changes. Unknown and candidate voices cannot change the task. Video-test and rehearsal answers also wait for this assignment.</p>}
       <div className={`${styles.liveGrid} ${repositoryMode || !transcriptOpen ? styles.liveGridNoRail : ''}`}>
         <div className={styles.answerColumn}>
-          {repositoryMode ? <RepositoryCoach permission={videoTest ? 'practice' : 'external-ai-allowed'} getQuestionTranscript={questionText} getConversation={conversation} /> : <LiveAnswerCanvas getTranscript={text} getQuestionTranscript={questionText} />}
+          {repositoryMode ? <RepositoryCoach frozenLessons={rehearsal ? frozenLessons : undefined} onReady={onCoachReady} permission={videoTest || rehearsal ? 'practice' : 'external-ai-allowed'} getQuestionTranscript={questionText} getConversation={conversation} /> : <LiveAnswerCanvas getTranscript={text} getQuestionTranscript={questionText} />}
           <div className={styles.captureBar}>
             {source !== 'system' && <span className={styles.channel}><span className={`${styles.channelDot} ${microphone.phase === 'recording' ? styles.channelDotOn : ''}`} /><Mic size={12} aria-hidden />Mic · {microphone.phase === 'recording' ? 'on' : 'waiting'}</span>}
             {source !== 'mic' && <span className={styles.channel}><span className={`${styles.channelDot} ${call.phase === 'recording' ? styles.channelDotOn : ''}`} /><Monitor size={12} aria-hidden />System · {call.phase === 'recording' ? 'on' : 'waiting'}</span>}

@@ -17,6 +17,7 @@ export async function lessonRequest(body:Record<string,unknown>,signal:AbortSign
 export function LearningPanel({controller,state}:{controller:CoachController;state:CoachState}) {
   const policy=useLessonPolicy()
   const [automatic,setAutomatic]=useState(false),[busy,setBusy]=useState(false)
+  const [reviewed,setReviewed]=useState(false),[reviewNote,setReviewNote]=useState(''),[evaluatedBaseline,setEvaluatedBaseline]=useState<LessonId[]>([])
   const [message,setMessage]=useState(''),[rows,setRows]=useState<Comparison[]>([]),[candidate,setCandidate]=useState<LessonId[]>([])
   const flight=useRef<AbortController|null>(null),attempted=useRef(''),mounted=useRef(true)
   const summary=diagnostics(state),diagnosticKey=JSON.stringify(summary),running=state.status==='running'
@@ -25,8 +26,9 @@ export function LearningPanel({controller,state}:{controller:CoachController;sta
   const learn=useCallback(async()=>{
     if(!policy||flight.current||controller.getSnapshot().status==='running') return
     const abort=new AbortController();flight.current=abort
-    setBusy(true);setRows([]);setCandidate([]);setMessage('Proposing one lesson from aggregate feedback…')
+    setBusy(true);setRows([]);setCandidate([]);setReviewed(false);setReviewNote('');setMessage('Proposing one lesson from aggregate feedback…')
     const baseline=[...policy.state.active],completed:Comparison[]=[]
+    setEvaluatedBaseline(baseline)
     try {
       const proposal=await lessonRequest({action:'propose',active:baseline,diagnostics:JSON.parse(diagnosticKey)},abort.signal)
       const next=lessonIds(proposal.candidate)
@@ -43,8 +45,8 @@ export function LearningPanel({controller,state}:{controller:CoachController;sta
       }
       abort.signal.throwIfAborted()
       if(!mounted.current||controller.getSnapshot().status==='running') return
-      const gate=promotionGate(baseline,next,completed),saved=policy.apply(baseline,next,completed)
-      setMessage(`${gate.passed?'Lesson activated for the next requests. ':''}${gate.reason}${saved?'':' Device storage failed; this result is only in memory.'}`)
+      const gate=promotionGate(baseline,next,completed)
+      setMessage(`${gate.passed?'Candidate passed the small model-evaluation suite. It is NOT activated; complete independent interactive rehearsal before approving it. ':''}${gate.reason}`)
     } catch(error) {if(mounted.current) setMessage(abort.signal.aborted?'Evaluation cancelled; active lessons unchanged.':error instanceof Error?error.message:'Evaluation failed; active lessons unchanged.')}
     finally {if(flight.current===abort) flight.current=null;if(mounted.current) setBusy(false)}
   },[policy,controller,diagnosticKey])
@@ -59,7 +61,7 @@ export function LearningPanel({controller,state}:{controller:CoachController;sta
     <summary>Learning loop · {policy.state.active.length} active lessons · v{policy.state.revision}</summary>
     <p className={styles.muted}>Useful / Needs work reviews become candidate tactics, not training data or proof of correctness. Evaluation uses six separate authored scenarios, twice, with the same coach models and a different blind judge. No raw session transcript, screenshot, code, or review note is sent to the lesson proposer.</p>
     <p>{summary.reviewed} reviewed responses · {summary.needsWork} need work · {summary.failed} failed requests</p>
-    <label className={styles.permission}><input type="checkbox" checked={automatic} onChange={e=>setAutomatic(e.target.checked)} disabled={busy}/><span>Automatically propose, test, and apply passing lessons when this coach is paused or ended. Maximum 37 model calls per cycle; provider charges apply. No automatic retries.</span></label>
+    <label className={styles.permission}><input type="checkbox" checked={automatic} onChange={e=>setAutomatic(e.target.checked)} disabled={busy}/><span>Automatically propose and test lessons when paused or ended. Passing candidates still require independent rehearsal and explicit approval. Maximum 37 model calls per cycle; provider charges apply. No automatic retries.</span></label>
     <div className={styles.feedback}>
       <button className={styles.button} disabled={running||busy||(!summary.needsWork&&!summary.failed)} onClick={()=>void learn()}>Learn from feedback</button>
       {busy&&<button className={styles.button} onClick={()=>flight.current?.abort()}>Cancel evaluation</button>}
@@ -67,6 +69,11 @@ export function LearningPanel({controller,state}:{controller:CoachController;sta
     </div>
     {running&&<p className={styles.muted}>Pause the coach before evaluating or changing its lessons. Recording controls remain separate.</p>}
     {policy.state.active.length>0&&<ul className={styles.list}>{policy.state.active.map(id=><li key={id}>{LESSONS[id].label}</li>)}</ul>}
+    {candidate.length>0 && promotionGate(evaluatedBaseline,candidate,rows).passed && <section>
+      <label className={styles.permission}><input type="checkbox" checked={reviewed} disabled={running||busy} onChange={e=>setReviewed(e.target.checked)}/><span>I reviewed this exact candidate in an independent interactive rehearsal, including current requirements and actual test results. This is my attestation, not an automated certification.</span></label>
+      <label>Rehearsal report identifier and evidence<textarea className={styles.input} value={reviewNote} maxLength={1000} onChange={e=>setReviewNote(e.target.value)} disabled={running||busy}/></label>
+      <button className={styles.button} disabled={running||busy||!reviewed||reviewNote.trim().length<15} onClick={()=>{const saved=policy.apply(evaluatedBaseline,candidate,rows,{acknowledged:true,evidence:reviewNote});setMessage(saved?'Explicitly approved lesson candidate saved. Keep the rehearsal evidence with its report; rollback remains available.':'Approval could not be stored.');setReviewed(false)}}>Approve evaluated candidate after rehearsal</button>
+    </section>}
     {candidate.length>0&&<p>Candidate: {candidate.map(id=>LESSONS[id].label).join(' · ')}</p>}
     {message&&<p role="status" className={styles.notice}>{message}</p>}
     {rows.length>0&&<details><summary>Evaluation results · {rows.length}/12</summary><ul className={styles.list}>{rows.map(row=><li key={`${row.caseId}:${row.repetition}`}><strong>{row.caseId} · run {row.repetition+1}: {row.baselineScore.toFixed(2)} → {row.candidateScore.toFixed(2)} / 4</strong>{row.note}<span className={styles.muted}>Generator: {row.model}; judge: {row.judge}. Hard checks: {row.hardPass?'passed':'failed'}.</span></li>)}</ul></details>}

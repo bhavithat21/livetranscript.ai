@@ -1,3 +1,4 @@
+import type { RequirementInput, SpokenRequirement } from './requirements'
 /** Evidence-driven assistance for practice and explicitly AI-permitted sessions.
  * Scores reported by an extraction model are NOT calibrated correctness probabilities.
  * No type in this module grants filesystem, shell, browser-automation or remote-control access.
@@ -41,12 +42,13 @@ export type ResultRecord = {
   firstUsefulMs: number | null; totalMs: number | null; error: string | null
 }
 export type Feedback = { id: string; resultId: string; verdict: 'pass' | 'needs-work'; categories: string[]; note: string; at: number }
-export type Task = { objective: string; requirements: string[]; constraints: string[]; phase: Phase; implementation: 'hold' | 'allowed'; version: number }
+export type Task = { spokenRequirements?: SpokenRequirement[]; requirementClarifications?: SpokenRequirement[]; objective: string; requirements: string[]; constraints: string[]; phase: Phase; implementation: 'hold' | 'allowed'; version: number }
 export type CoachState = {
   schema: 1; sessionId: string; permission: Permission | null; status: 'idle' | 'running' | 'paused' | 'ended'
   task: Task; evidenceVersion: number; codeVersion: number; sequence: number
   files: ObservedFile[]; knownPaths: string[]; sources: Source[]; lastScreen: { sourceId: string; observation: Observation } | null
   conversation?: DialogueTurn[]
+  requirementInputs?: RequirementInput[]
   question: Question | null; questions: Question[]; navigation: Navigation | null
   patches: Patch[]; patchReviews: PatchReview[]; tests: TestEvidence[]
   results: ResultRecord[]; feedback: Feedback[]; seenEvents: string[]; warning: string | null
@@ -57,6 +59,7 @@ export type EventPayload =
   | { type: 'task.update'; objective: string; constraints: string[] }
   | { type: 'speech.final'; speaker: 'interviewer' | 'candidate'; text: string }
   | { type: 'dialogue.update'; turn: DialogueTurn }
+  | { type: 'requirement.update'; turn: DialogueTurn }
   | { type: 'question.new'; original: string; text: string }
   | { type: 'screen.observed'; origin: Origin; observation: Observation; capturedAt?: number }
   | { type: 'test.start'; command: string }

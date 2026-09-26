@@ -1,4 +1,5 @@
 import type { CoachState, ContextPacket, ObservedFile, Fragment, EvidenceRef, Navigation, Task, TestEvidence, Patch, PatchReview } from './types'
+import type { SpokenRequirement } from './requirements'
 import { dialogueContext, parseDialogueTurn } from './dialogue'
 import { fileCoverage } from './state'
 import { hashText, integer, LIMITS, list, object, parseObservation, permission, safePath, text } from './validation'
@@ -26,7 +27,7 @@ export class EvidenceIndex {
   clear() { this.cache.clear() }
 }
 export function rankFiles(state: CoachState, index = new EvidenceIndex()) {
-  const query = terms(`${state.question?.text ?? ''} ${state.task.objective}`)
+  const query = terms(`${(state.task.spokenRequirements ?? []).map(r => r.text).join(' ')} ${state.question?.text ?? ''} ${state.task.objective}`)
   const current = new Set(state.lastScreen?.observation.files.map(item => item.path) ?? [])
   const failures = state.tests.filter(run => run.status === 'observed-fail' && (run.codeVersion === null || run.codeVersion === state.codeVersion)).map(run => run.output).join('\n')
   const nodes = state.knownPaths.map(path => {
@@ -136,10 +137,16 @@ export function nextInspection(state: CoachState): Navigation | null {
 export function parseContext(raw: unknown): ContextPacket {
   const root = object(raw, ['schema', 'sessionId', 'permission', 'question', 'task', 'evidenceVersion', 'codeVersion', 'contextKey', 'files', 'knownPaths', 'relations', 'tests', 'patches', 'patchReviews', 'visibleView', 'conversation', 'budget'])
   if (root.schema !== 1 || JSON.stringify(root).length > LIMITS.context + 100) throw new Error('Invalid context envelope or size')
-  const task = object(root.task, ['objective', 'requirements', 'constraints', 'phase', 'implementation', 'version'])
+  const task = object(root.task, ['objective', 'requirements', 'constraints', 'phase', 'implementation', 'version', 'spokenRequirements', 'requirementClarifications'])
   if (!['understand', 'explore', 'plan', 'implement', 'debug', 'review'].includes(String(task.phase)) || !['hold', 'allowed'].includes(String(task.implementation))) throw new Error('Invalid task state')
   const question = object(root.question, ['id', 'original', 'text', 'at'])
   const parsedTask: Task = { objective: text(task.objective, 4000, true), requirements: list(task.requirements, 50).map(value => text(value, 1000, true)), constraints: list(task.constraints, 30).map(value => text(value, 1000, true)), phase: task.phase as Task['phase'], implementation: task.implementation as Task['implementation'], version: integer(task.version) }
+  const spoken = (value: unknown): SpokenRequirement[] => list(value, 160).map(raw => {
+    const row = object(raw, ['sourceId', 'at', 'text'])
+    return { sourceId: text(row.sourceId, 120, true), at: integer(row.at), text: text(row.text, 1000, true) }
+  })
+  if (task.spokenRequirements !== undefined) parsedTask.spokenRequirements = spoken(task.spokenRequirements)
+  if (task.requirementClarifications !== undefined) parsedTask.requirementClarifications = spoken(task.requirementClarifications)
   const knownPaths = list(root.knownPaths, 100).map(safePath)
   const files = list(root.files, 6).map(rawFile => {
     const file = object(rawFile, ['path', 'language', 'fileVersion', 'complete', 'fragments']), path = safePath(file.path)
