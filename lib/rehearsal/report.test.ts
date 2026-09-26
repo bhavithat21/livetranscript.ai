@@ -26,3 +26,11 @@ it('retains dialogue beyond the current controller window and marks replay trunc
  const data=JSON.parse(report.export('sha','{"events":[],"truncated":true}',[]))
  expect(data.conversation).toHaveLength(2);expect(data.truncated).toBe(true)
 })
+
+it('counts unique delivered screens even after the controller evicts old source history',()=>{
+ const report=new RehearsalReport(),state=emptyCoach('s')
+ report.observe({...state,sources:[{id:'one',origin:'screen',at:1,sequence:1}]})
+ report.observe({...state,sources:[{id:'two',origin:'screen',at:2,sequence:2}]})
+ report.observe({...state,sources:[{id:'two',origin:'screen',at:2,sequence:2},{id:'import',origin:'file-import',at:3,sequence:3}]})
+ expect(JSON.parse(report.export('sha','{"events":[]}',[])).observed.screenObservations).toBe(2)
+})

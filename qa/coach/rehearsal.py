@@ -53,6 +53,12 @@ with sync_playwright() as p:
     assert data['finalTranscript'] and data['sessionId']
     assert data['configuration']['commit']=='UI-fixture-not-a-production-commit'
     page.get_by_role('button',name='View saved report').first.wait_for()
+    page.get_by_role('button',name='Delete saved session').first.click()
+    page.get_by_text('No saved sessions for this account and site.',exact=True).wait_for()
+    page.wait_for_timeout(2400)
+    assert page.get_by_role('button',name='View saved report').count()==0
+    page.get_by_label('Save text evidence automatically',exact=False).check()
+    page.get_by_role('button',name='View saved report').first.wait_for()
     page.reload();page.get_by_role('button',name='View saved report').first.wait_for()
     assert page.evaluate('window.__rehearsalQA.requests().length')==0
     page.get_by_role('button',name='View saved report').first.click()
@@ -72,5 +78,5 @@ with sync_playwright() as p:
     page.get_by_role('button',name='Delete saved session').first.click()
     page.get_by_text('No saved sessions for this account and site.',exact=True).wait_for()
     assert not errors,errors
-    (out/'report.json').write_text(json.dumps({'kind':'offline-browser-storage-contract','realAudio':False,'realVision':False,'providerInference':False,'requirementRequestsBefore':count,'requirementRequestsAfter':after,'widths':widths,'errors':errors,'exportUncertified':True,'indexedDBSaveReload':True,'accountScoping':True,'readOnlyNoInference':True,'deleteVerified':True,'holdoutMetadataFrozen':True,'reviewAnnotationsExcludedFromGeneration':True},indent=2))
+    (out/'report.json').write_text(json.dumps({'kind':'offline-browser-storage-contract','realAudio':False,'realVision':False,'providerInference':False,'requirementRequestsBefore':count,'requirementRequestsAfter':after,'widths':widths,'errors':errors,'exportUncertified':True,'indexedDBSaveReload':True,'accountScoping':True,'readOnlyNoInference':True,'deleteVerified':True,'deletedSessionNotRecreatedByAutosave':True,'holdoutMetadataFrozen':True,'reviewAnnotationsExcludedFromGeneration':True},indent=2))
     browser.close()
