@@ -1,0 +1,47 @@
+name: Assemble verified screenshot tracker fixes
+on:
+  push:
+    branches: [build/screenshot-tracker-finish-20260926]
+permissions:
+  contents: write
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply exact four-file delta, preserving other pending work
+        run: |
+          python3 - <<'PY'
+          import base64,hashlib,json,lzma,pathlib,subprocess
+          def git(*args): return subprocess.check_output(['git',*args]).decode().strip()
+          payload=base64.b64decode(pathlib.Path('.source-input/tracker-fixes.b64').read_text(),validate=True)
+          assert hashlib.sha256(payload).hexdigest()=='25d8a28b8bfadb46929345a40166b7c9e1618d0e4e3d8374c19a48b058fb4a2a'
+          data=json.loads(lzma.decompress(payload))
+          base='330dcbe0eb50b1c11f57e1b6082ff00d13965843'
+          assert data['base']==base
+          subprocess.run(['git','checkout','--detach',base],check=True)
+          paths=[f['path'] for f in data['files']]
+          assert sorted(paths)==sorted(['lib/coach/inline/tracking.test.ts','lib/coach/screen.ts','qa/visual-tracker/verify.py','src-tauri/src/visual_tracker.rs'])
+          for f in data['files']: assert git('rev-parse','HEAD:'+f['path'])==f['before'],f['path']
+          patch=data['patch'].encode()
+          subprocess.run(['git','apply','--check','--binary','-'],input=patch,check=True)
+          subprocess.run(['git','apply','--binary','-'],input=patch,check=True)
+          for f in data['files']: assert git('hash-object',f['path'])==f['after'],f['path']
+          subprocess.run(['git','add','--',*paths],check=True)
+          tree=git('write-tree');assert tree=='1c7874f055bacbac7acdd81163f131cbc91c3b02'
+          subprocess.run(['git','config','user.name','LiveTranscript source assembly'],check=True)
+          subprocess.run(['git','config','user.email','41898282+github-actions[bot]@users.noreply.github.com'],check=True)
+          subprocess.run(['git','commit','-m','Fix screenshot-only Retina search, fractional scaling labels and capture scheduling races'],check=True)
+          branch='build/screenshot-tracker-assembled-20260926'
+          subprocess.run(['git','push','origin','HEAD:refs/heads/'+branch],check=True)
+          report={'branch':branch,'commit':git('rev-parse','HEAD'),'tree':tree,'base':base,'files':paths}
+          pathlib.Path('/tmp/assembly.json').write_text(json.dumps(report,indent=2));print(json.dumps(report,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screenshot-fix-assembly
+          path: /tmp/assembly.json
+          retention-days: 7
