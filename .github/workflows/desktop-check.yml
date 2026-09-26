@@ -48,3 +48,6 @@ jobs:
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml --lib pointer_mode::tests
       - name: Inline selected-window lease contracts
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml --lib inline_overlay::tests
+
+      - name: Screenshot pixel tracker contracts
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --lib visual_tracker::tests

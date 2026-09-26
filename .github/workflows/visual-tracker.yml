@@ -1,0 +1,50 @@
+name: Screenshot visual tracker QA
+on:
+  pull_request:
+    paths:
+      - 'src-tauri/src/visual_tracker.rs'
+      - 'src-tauri/src/inline_overlay.rs'
+      - 'lib/coach/inline/**'
+      - 'lib/coach/screen.ts'
+      - 'components/coach/inline/**'
+      - 'qa/visual-tracker/**'
+      - '.github/workflows/visual-tracker.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  pixels:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Compile exact native kernel and benchmark executable
+        run: |
+          mkdir -p qa-results/visual-tracker
+          rustc --edition 2021 --test -O src-tauri/src/visual_tracker.rs -o /tmp/pixel-tests
+          /tmp/pixel-tests | tee qa-results/visual-tracker/kernel-tests.txt
+          rustc --edition 2021 -O qa/visual-tracker/runner.rs -o qa-results/visual-tracker/pixel-runner
+          sha256sum src-tauri/src/visual_tracker.rs qa/visual-tracker/runner.rs qa-results/visual-tracker/pixel-runner > qa-results/visual-tracker/checksums.txt
+      - name: Install isolated browser and image test runtime
+        run: |
+          python3 -m pip install playwright==1.55.0 pillow==11.3.0
+          python3 -m playwright install --with-deps chromium
+      - name: Real screenshot pixels through native kernel, no model calls
+        run: python3 qa/visual-tracker/verify.py
+      - name: Record exact source snapshot
+        if: always()
+        run: git archive --format=tar.gz HEAD > qa-results/visual-tracker/source.tar.gz
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshot-tracker-qa-${{ github.run_id }}
+          path: |
+            qa-results/visual-tracker/*.json
+            qa-results/visual-tracker/*.png
+            qa-results/visual-tracker/*.txt
+            qa-results/visual-tracker/*.gz
+            qa-results/visual-tracker/pixel-runner
+          retention-days: 7

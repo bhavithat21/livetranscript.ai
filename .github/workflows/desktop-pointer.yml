@@ -13,6 +13,7 @@ on:
       - 'app/layout.tsx'
       - 'src-tauri/src/pointer_mode.rs'
       - 'src-tauri/src/inline_overlay.rs'
+      - 'src-tauri/src/visual_tracker.rs'
       - 'qa/desktop-pointer/**'
       - '.github/workflows/desktop-pointer.yml'
   workflow_dispatch:
@@ -34,7 +35,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec vitest run lib/desktop/pointerClient.test.ts components/TitleBar.test.tsx lib/coach/inline/inline.test.ts
+      - run: pnpm exec vitest run lib/desktop/pointerClient.test.ts components/TitleBar.test.tsx lib/coach/inline/inline.test.ts lib/coach/inline/tracking.test.ts
       - name: Build actual components with explicit mocked native IPC
         run: |
           node qa/desktop-pointer/build.mjs
