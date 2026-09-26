@@ -1,0 +1,58 @@
+name: Desktop pointer interaction QA
+on:
+  pull_request:
+    paths:
+      - 'lib/desktop/**'
+      - 'lib/coach/inline/**'
+      - 'components/coach/inline/**'
+      - 'lib/coach/screen.ts'
+      - 'lib/repo/screen*'
+      - 'qa/inline-coach/**'
+      - 'components/TitleBar*'
+      - 'app/globals.css'
+      - 'app/layout.tsx'
+      - 'src-tauri/src/pointer_mode.rs'
+      - 'qa/desktop-pointer/**'
+      - '.github/workflows/desktop-pointer.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  pointer-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec vitest run lib/desktop/pointerClient.test.ts components/TitleBar.test.tsx lib/coach/inline/inline.test.ts
+      - name: Build actual components with explicit mocked native IPC
+        run: |
+          node qa/desktop-pointer/build.mjs
+          node qa/inline-coach/build.mjs
+      - name: Install browser
+        run: |
+          python3 -m pip install playwright==1.55.0
+          python3 -m playwright install --with-deps chromium
+      - name: Verify cursors, interactions, recovery UI and browser isolation
+        run: |
+          python3 qa/desktop-pointer/verify.py
+          python3 qa/inline-coach/verify.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: desktop-pointer-qa-${{ github.run_id }}
+          path: |
+            qa-results/desktop-pointer/*.json
+            qa-results/desktop-pointer/*.png
+            qa-results/inline-coach/*.json
+            qa-results/inline-coach/*.png
+          retention-days: 14
