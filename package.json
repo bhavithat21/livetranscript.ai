@@ -19,7 +19,8 @@
     "eval:repo:review": "REPO_BENCHMARK_ACTION=review-template vitest run --config evals/repo/vitest.config.ts manageBenchmark",
     "eval:repo:select": "REPO_BENCHMARK_ACTION=select vitest run --config evals/repo/vitest.config.ts manageBenchmark",
     "eval:vision": "vitest run --config evals/vision/vitest.config.ts",
-    "eval:classifier": "vitest run --config evals/classifier/vitest.config.ts"
+    "eval:classifier": "vitest run --config evals/classifier/vitest.config.ts",
+    "test:simulator": "vitest run lib/coach/simulation/runner.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.114.0",

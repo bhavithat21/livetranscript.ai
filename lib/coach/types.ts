@@ -25,6 +25,7 @@ export type TestEvidence = {
   status: 'awaiting-output' | 'running' | 'observed-pass' | 'observed-fail' | 'incomplete' | 'stale'
   passed: number | null; failed: number | null; sourceId: string | null; output: string; outputBefore: string
 }
+export type DialogueTurn = { sourceId: string; at: number; role: 'interviewer' | 'candidate' | 'unknown'; text: string }
 export type Question = { id: string; original: string; text: string; at: number }
 export type Guidance = {
   summary: string
@@ -45,6 +46,7 @@ export type CoachState = {
   schema: 1; sessionId: string; permission: Permission | null; status: 'idle' | 'running' | 'paused' | 'ended'
   task: Task; evidenceVersion: number; codeVersion: number; sequence: number
   files: ObservedFile[]; knownPaths: string[]; sources: Source[]; lastScreen: { sourceId: string; observation: Observation } | null
+  conversation?: DialogueTurn[]
   question: Question | null; questions: Question[]; navigation: Navigation | null
   patches: Patch[]; patchReviews: PatchReview[]; tests: TestEvidence[]
   results: ResultRecord[]; feedback: Feedback[]; seenEvents: string[]; warning: string | null
@@ -54,6 +56,7 @@ export type EventPayload =
   | { type: 'session.pause' | 'session.resume' | 'session.end' }
   | { type: 'task.update'; objective: string; constraints: string[] }
   | { type: 'speech.final'; speaker: 'interviewer' | 'candidate'; text: string }
+  | { type: 'dialogue.update'; turn: DialogueTurn }
   | { type: 'question.new'; original: string; text: string }
   | { type: 'screen.observed'; origin: Origin; observation: Observation; capturedAt?: number }
   | { type: 'test.start'; command: string }
@@ -66,6 +69,7 @@ export type CoachEvent = EventPayload & { id: string; at: number; sessionId: str
 export type ContextPacket = {
   schema: 1; sessionId: string; permission: Permission; question: Question; task: Task
   evidenceVersion: number; codeVersion: number; contextKey: string
+  conversation?: DialogueTurn[]
   files: Array<{ path: string; language: string; fileVersion: number; complete: boolean; fragments: Fragment[] }>
   knownPaths: string[]; relations: Array<{ from: string; to: string; kind: 'lexical-reference'; evidence: EvidenceRef[] }>
   visibleView: { origin: Origin; files: Array<{ path: string; startLine: number | null; endLine: number | null }>; terminalVisible: boolean } | null
