@@ -1,0 +1,56 @@
+name: Assemble verified simulator source
+on:
+  push:
+    branches: [build/realtime-simulator-inputs-20260925]
+permissions:
+  contents: write
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply checked source delta to verified base
+        run: |
+          python3 - <<'PY'
+          import base64,hashlib,json,lzma,pathlib,subprocess
+          def git(*args): return subprocess.check_output(['git',*args]).decode().strip()
+          packed=base64.b64decode(''.join(pathlib.Path(f'.source-input/simulator.{i}.b64').read_text().strip() for i in range(4)),validate=True)
+          assert hashlib.sha256(packed).hexdigest()=='ab0593f4fd4e72fbaa4fed0682dee8712121ccfb110de45631d6cd59bb57d8e2', 'Source checksum mismatch'
+          data=json.loads(lzma.decompress(packed))
+          base='82a308505ee0428ad9b7e8aec6cc4c6faf285ffc'
+          assert data['base']==base
+          subprocess.run(['git','checkout','--detach',base],check=True)
+          paths=[]
+          for f in data['files']:
+            p=f['path']; obj=pathlib.PurePosixPath(p)
+            assert not obj.is_absolute() and '..' not in obj.parts and '.git' not in obj.parts and not p.startswith('.source-input/')
+            before=subprocess.run(['git','rev-parse','HEAD:'+p],text=True,capture_output=True)
+            actual=before.stdout.strip() if before.returncode==0 else None
+            assert actual==f['before'], 'Preimage mismatch: '+p
+            paths.append(p)
+          patch=data['patch'].encode()
+          subprocess.run(['git','apply','--check','--binary','-'],input=patch,check=True)
+          subprocess.run(['git','apply','--binary','-'],input=patch,check=True)
+          for f in data['files']: assert git('hash-object',f['path'])==f['after'], 'Output mismatch: '+f['path']
+          subprocess.run(['git','add','--',*paths],check=True)
+          full_tree=git('write-tree')
+          # Connector separately writes the final workflow update. Keep this
+          # Actions-created commit scoped to application/test/documentation files.
+          workflow='.github/workflows/repository-coach.yml'
+          subprocess.run(['git','restore','--staged','--',workflow],check=True)
+          subprocess.run(['git','config','user.name','LiveTranscript source assembly'],check=True)
+          subprocess.run(['git','config','user.email','41898282+github-actions[bot]@users.noreply.github.com'],check=True)
+          subprocess.run(['git','commit','-m','Add real-time Mock Lab simulator, fix controller races and gate lesson learning'],check=True)
+          branch='feat/realtime-simulator-20260925'
+          subprocess.run(['git','push','origin','HEAD:refs/heads/'+branch],check=True)
+          report={'branch':branch,'commit':git('rev-parse','HEAD'),'tree':git('rev-parse','HEAD^{tree}'),'expectedCompleteTree':full_tree,'files':len(paths),'payloadSha256':hashlib.sha256(packed).hexdigest(),'workflowBlob':next(f['after'] for f in data['files'] if f['path']==workflow)}
+          pathlib.Path('/tmp/simulator-source-report.json').write_text(json.dumps(report,indent=2)); print(json.dumps(report,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-simulator-source
+          path: /tmp/simulator-source-report.json
+          retention-days: 7
