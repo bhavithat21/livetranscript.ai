@@ -14,11 +14,13 @@
 // never seize the mic/output device, so Zoom keeps working with no echo. Frames
 // reach the web layer via an additive, feature-detected bridge
 // (lib/audio/useNativeCapture.ts).
-use std::sync::Mutex;
+use std::sync::{Mutex, atomic::{AtomicBool, Ordering}};
 use tauri::ipc::{Channel, InvokeResponseBody};
 
 mod remote_assist;
 mod coach_capture;
+mod pointer_mode;
+mod inline_overlay;
 
 #[cfg(target_os = "macos")]
 mod macos_capture;
@@ -65,15 +67,20 @@ impl Default for ProtectionState {
 // so the ONLY ways out are the global hotkey (works unfocused) and the tray item —
 // never an in-window control. This flag mirrors the window state so the tray
 // checkmark and the hotkey toggle agree. Starts unlocked.
+#[derive(Default)]
 pub struct LockState {
-    click_through: Mutex<bool>,
+    mode: Mutex<pointer_mode::PointerMode>,
+    shortcut_registered: AtomicBool,
+    tray_registered: AtomicBool,
 }
-impl Default for LockState {
-    fn default() -> Self {
-        Self {
-            click_through: Mutex::new(false),
-        }
-    }
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PointerSnapshot {
+    locked: bool,
+    revision: u64,
+    shortcut_available: bool,
+    tray_available: bool,
 }
 
 // Holds the tray's checkable items so their state can be synced when the
@@ -196,49 +203,71 @@ fn apply_protection(_app: &tauri::AppHandle, _enabled: bool) -> Result<(), Strin
     Ok(())
 }
 
-// Lock (click-through) mode, callable from the web UI's in-app button. Turning it
-// ON makes the overlay pass all mouse/keyboard through to whatever is behind it
-// AND pins it always-on-top, so the user keeps working in other apps with the
-// transcript floating above. Turning it OFF restores normal interaction.
+// All mutations run on the native UI thread, including IPC requests. This
+// avoids holding the state mutex on a worker while waiting for the UI thread
+// which may itself be processing a tray event. Web/shortcut/tray share one path.
 #[tauri::command]
-fn set_lock_mode(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
-    apply_lock(&app, enabled)
+async fn set_lock_mode(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let handle = app.clone();
+    app.run_on_main_thread(move || { let _ = tx.send(apply_lock(&handle, Some(enabled))); })
+        .map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        rx.recv().map_err(|_| "Mouse input operation was interrupted.".to_string())?
+    }).await.map_err(|e| e.to_string())?
 }
 
-// Read the current lock state so the web UI can reflect it (e.g. show the right
-// button label) and stay in sync after a hotkey/tray toggle.
 #[tauri::command]
 fn get_lock_mode(app: tauri::AppHandle) -> bool {
-    use tauri::Manager;
-    *lock(&app.state::<LockState>().click_through)
+    get_pointer_state(app).locked
 }
 
-// Single source of truth for lock mode: sets ignore-cursor-events + always-on-top
-// on the window, records the flag, and syncs the tray checkmark — so the webview
-// button, tray item, and hotkey never drift. Always-on-top is only ADDED with
-// lock (so the view-only overlay stays visible over other apps) and removed on
-// unlock, restoring normal stacking.
-#[cfg(desktop)]
-fn apply_lock(app: &tauri::AppHandle, enabled: bool) -> Result<(), String> {
+#[tauri::command]
+fn get_pointer_state(app: tauri::AppHandle) -> PointerSnapshot {
     use tauri::Manager;
     let state = app.state::<LockState>();
-    // Hold the flag lock across the whole read-modify-write so a concurrent toggle
-    // (tray vs hotkey vs webview IPC) can't leave window state and flag disagreeing.
-    let mut guard = lock(&state.click_through);
-    if let Some(win) = app.get_webview_window("main") {
-        win.set_ignore_cursor_events(enabled)
-            .map_err(|e| e.to_string())?;
-        win.set_always_on_top(enabled).map_err(|e| e.to_string())?;
+    let mode = lock(&state.mode);
+    PointerSnapshot {
+        locked: mode.locked,
+        revision: mode.revision,
+        shortcut_available: state.shortcut_registered.load(Ordering::SeqCst),
+        tray_available: state.tray_registered.load(Ordering::SeqCst),
     }
-    *guard = enabled;
+}
+
+#[cfg(desktop)]
+impl pointer_mode::PointerWindow for tauri::WebviewWindow {
+    fn topmost(&self) -> Result<bool, String> { self.is_always_on_top().map_err(|e| e.to_string()) }
+    fn set_topmost(&self, value: bool) -> Result<(), String> { self.set_always_on_top(value).map_err(|e| e.to_string()) }
+    fn ignore_mouse(&self, value: bool) -> Result<(), String> { self.set_ignore_cursor_events(value).map_err(|e| e.to_string()) }
+}
+
+#[cfg(desktop)]
+fn apply_lock(app: &tauri::AppHandle, requested: Option<bool>) -> Result<(), String> {
+    use tauri::{Manager, Emitter};
+    let window = app.get_webview_window("main").ok_or("Desktop window is unavailable.")?;
+    let state = app.state::<LockState>();
+    let recovery = state.shortcut_registered.load(Ordering::SeqCst)
+        || state.tray_registered.load(Ordering::SeqCst);
+    let (result, was_locked, locked) = {
+        let mut mode = lock(&state.mode);
+        let was_locked = mode.locked;
+        let result = mode.apply(&window, requested.unwrap_or(!was_locked), recovery);
+        (result, was_locked, mode.locked)
+    };
     if let Some(item) = lock(&app.state::<TrayHandles>().lock_item).as_ref() {
-        let _ = item.set_checked(enabled);
+        let _ = item.set_checked(locked);
     }
-    // Scroll-while-locked: a click-through window can't receive wheel events, so
-    // register GLOBAL CmdOrCtrl+Shift+Up/Down only while locked (they're common
-    // editing shortcuts — never hold them when unlocked) and emit to the webview.
-    apply_lock_scroll_hotkeys(app, enabled);
-    Ok(())
+    if was_locked != locked { apply_lock_scroll_hotkeys(app, locked); }
+    // Even a partial unlock (stacking restoration failed) publishes the actual
+    // mouse state. The web UI must not claim it is still ignoring clicks.
+    let _ = app.emit_to("main", "pointer-mode-changed", get_pointer_state(app.clone()));
+    result
+}
+
+#[cfg(not(desktop))]
+fn apply_lock(_app: &tauri::AppHandle, _requested: Option<bool>) -> Result<(), String> {
+    Err("Mouse pass-through requires a desktop build.".into())
 }
 
 // Register/release the lock-scroll hotkeys with lock mode. Fail-soft like the
@@ -271,22 +300,36 @@ fn apply_lock_scroll_hotkeys(app: &tauri::AppHandle, enabled: bool) {
     }
 }
 
-// Flip lock mode atomically (reads current, writes inverse under one lock hold).
-// Used by the tray item and the global unlock hotkey.
+// A native global shortcut keeps working when mouse events go underneath.
 #[cfg(desktop)]
 fn toggle_lock(app: &tauri::AppHandle) {
-    use tauri::Manager;
-    let next = {
-        let state = app.state::<LockState>();
-        let guard = lock(&state.click_through);
-        !*guard
-    };
-    let _ = apply_lock(app, next);
+    use tauri::Emitter;
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if inline_overlay::active(&handle) { let _ = inline_overlay::exit(&handle); return; }
+        if let Err(error) = apply_lock(&handle, None) {
+            let _ = handle.emit_to("main", "pointer-mode-error", error);
+        }
+    });
 }
 
-#[cfg(not(desktop))]
-fn apply_lock(_app: &tauri::AppHandle, _enabled: bool) -> Result<(), String> {
-    Ok(())
+// Explicit, non-toggling escape hatch: tray recovery always makes the window
+// interactive and visible, even if the web UI stopped responding or reloaded.
+#[cfg(desktop)]
+fn restore_mouse_interaction(app: &tauri::AppHandle) {
+    use tauri::{Manager, Emitter};
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let _ = inline_overlay::exit(&handle);
+        if let Err(error) = apply_lock(&handle, Some(false)) {
+            let _ = handle.emit_to("main", "pointer-mode-error", error);
+        }
+        if !get_pointer_state(handle.clone()).locked {
+            if let Some(win) = handle.get_webview_window("main") {
+                let _ = win.unminimize(); let _ = win.show(); let _ = win.set_focus();
+            }
+        }
+    });
 }
 
 // Start native system-audio capture. Returns the PCM sample rate (Hz); the
@@ -355,13 +398,12 @@ fn toggle_main_window(app: &tauri::AppHandle) {
         match win.is_visible() {
             Ok(true) if !minimized => {
                 remote_assist::stop_all(app, "Stopped because the host hid the desktop window.");
+                inline_overlay::stop_all(app);
                 coach_capture::stop_all(app);
                 let _ = win.hide();
             }
             _ => {
-                let _ = win.unminimize();
-                let _ = win.show();
-                let _ = win.set_focus();
+                restore_mouse_interaction(app);
             }
         }
     }
@@ -393,15 +435,16 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     // Lock (click-through) mode: toggle here or via the global hotkey. This is the
     // primary UNLOCK path — a locked window can't be clicked, so the tray + hotkey
     // are the only ways back to interactive.
-    let lock_on = *lock(&app.state::<LockState>().click_through);
+    let lock_on = get_pointer_state(app.clone()).locked;
     let lock_item = CheckMenuItem::with_id(
         app,
         "toggle_lock",
-        "Lock (click-through) mode",
+        "Pass-through (clicks go underneath)",
         true,
         lock_on,
         None::<&str>,
     )?;
+    let restore_pointer = MenuItem::with_id(app, "restore_pointer", "Restore mouse interaction", true, None::<&str>)?;
     let update = MenuItem::with_id(
         app,
         "check_update",
@@ -419,7 +462,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let quit = MenuItem::with_id(app, "quit", "Quit LiveTranscript", true, None::<&str>)?;
     let menu = Menu::with_items(
         app,
-        &[&show, &remote_stop, &protect, &lock_item, &update, &quit],
+        &[&show, &restore_pointer, &remote_stop, &protect, &lock_item, &update, &quit],
     )?;
 
     // Stash the checkboxes so apply_protection / apply_lock keep them in sync.
@@ -446,6 +489,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             "show_hide" => toggle_main_window(app),
             "toggle_protection" => toggle_protection(app),
             "toggle_lock" => toggle_lock(app),
+            "restore_pointer" => restore_mouse_interaction(app),
             "remote_stop" => remote_assist::stop_all(app, "Stopped from the host's tray menu."),
             "check_update" => {
                 // Manual update check from the tray. Runs off the UI thread; shows
@@ -456,6 +500,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
                 });
             }
             "quit" => {
+                inline_overlay::stop_all(app);
                 coach_capture::stop_all(app);
                 remote_assist::stop_for_exit(app);
                 app.exit(0);
@@ -476,6 +521,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             }
         })
         .build(app)?;
+    app.state::<LockState>().tray_registered.store(true, Ordering::SeqCst);
     remote_assist::set_tray_registered(app);
     Ok(())
 }
@@ -496,7 +542,8 @@ pub fn run() {
         .manage(remote_assist::RemoteAssistState::default())
         .manage(coach_capture::CoachCaptureState::default())
         .manage(ProtectionState::default())
-        .manage(LockState::default());
+        .manage(LockState::default())
+        .manage(inline_overlay::InlineState::default());
     #[cfg(desktop)]
     let builder = builder.manage(TrayHandles::default());
 
@@ -505,6 +552,14 @@ pub fn run() {
             set_content_protection,
             set_lock_mode,
             get_lock_mode,
+            get_pointer_state,
+            inline_overlay::inline_targets,
+            inline_overlay::inline_start,
+            inline_overlay::inline_frame,
+            inline_overlay::inline_enter,
+            inline_overlay::inline_exit,
+            inline_overlay::inline_stop,
+            inline_overlay::inline_active,
             request_screen_capture_access,
             start_native_audio,
             stop_native_audio,
@@ -527,6 +582,7 @@ pub fn run() {
                 event,
                 tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed
             ) {
+                inline_overlay::stop_all(window.app_handle());
                 coach_capture::stop_all(window.app_handle());
                 remote_assist::stop_for_exit(window.app_handle());
             }
@@ -585,9 +641,9 @@ pub fn run() {
                 // Lock toggle: CmdOrCtrl+Shift+L. This is the ESCAPE HATCH — a
                 // click-through locked window can't be clicked, so a GLOBAL hotkey
                 // (fires even when the window is ignoring the cursor / unfocused) is
-                // the guaranteed way back to interactive. Also togglable from the tray.
+                // an available way back to interactive when registration succeeds. Also togglable from the tray.
                 let lock_toggle = Shortcut::new(Some(Modifiers::SHIFT | primary), Code::KeyL);
-                app.global_shortcut()
+                let lock_registered = app.global_shortcut()
                     .on_shortcut(lock_toggle, move |app, shortcut, event| {
                         if event.state == ShortcutState::Pressed && shortcut == &lock_toggle {
                             // Must leave the shortcut dispatch thread before calling
@@ -597,7 +653,20 @@ pub fn run() {
                             std::thread::spawn(move || toggle_lock(&handle));
                         }
                     })
-                    .ok();
+                    .is_ok();
+                {
+                    use tauri::Manager;
+                    app.state::<LockState>().shortcut_registered.store(lock_registered, Ordering::SeqCst);
+                }
+
+                inline_overlay::watchdog(app.handle());
+                for (code, direction) in [(Code::ArrowRight, 1i32), (Code::ArrowLeft, -1i32)] {
+                    let sc = Shortcut::new(Some(Modifiers::ALT | Modifiers::SHIFT | primary), code);
+                    let _ = app.global_shortcut().on_shortcut(sc, move |app, _, event| {
+                        use tauri::Emitter;
+                        if event.state == ShortcutState::Pressed && inline_overlay::active(app) { let _ = app.emit_to("main", "inline-step", direction); }
+                    });
+                }
 
                 // Tray-only mode: build the tray FIRST, then hide the Dock icon
                 // (macOS Accessory policy; Windows uses skipTaskbar in the config).
@@ -639,6 +708,7 @@ pub fn run() {
                 event,
                 tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
             ) {
+                inline_overlay::stop_all(app);
                 coach_capture::stop_all(app);
                 remote_assist::stop_for_exit(app);
             }

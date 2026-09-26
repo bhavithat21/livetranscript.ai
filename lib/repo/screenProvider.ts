@@ -22,6 +22,7 @@ export async function extractScreenEvidence(input: {
   model: string
   image: ReturnType<typeof parseRepoImage>
   signal?: AbortSignal
+  locateRows?: boolean
 }): Promise<ScreenExtractionResult> {
   if (!validRepoModel(input.model) || !input.model.startsWith('claude-') || !process.env.ANTHROPIC_API_KEY) {
     throw new ScreenExtractionError('Screenshot reconstruction requires ANTHROPIC_API_KEY and a Claude vision model', 503)
@@ -32,7 +33,8 @@ export async function extractScreenEvidence(input: {
   const result = await client.messages.create({
     model: input.model,
     max_tokens: 6000,
-    system: SCREEN_EXTRACTION_PROMPT,
+    system: SCREEN_EXTRACTION_PROMPT + (input.locateRows ? `
+For the inline annotation mode ONLY, each file entry may include optional lineRects:[{line:12,rect:{x:0.2,y:0.3,width:0.5,height:0.02}}]. Coordinates are normalized to the WHOLE supplied screenshot (top-left 0,0; bottom-right 1,1). Give the actual visible source-text rectangle for that exact numbered line, excluding its number gutter. At most 80 rows per file. Do not infer rows by uniform line height, including across wrapping/folding. Omit any clipped, wrapped or ambiguous row. Never label a file from a code suggestion or annotation as the actual IDE file. Omit lineRects entirely if you cannot locate visible lines. All original exact transcription rules still apply.` : ''),
     messages: [{ role: 'user', content: [
       { type: 'image', source: { type: 'base64', media_type: input.image.mediaType, data: input.image.data } },
       { type: 'text', text: 'Transcribe the visible code, paths, requirements and terminal evidence.' },

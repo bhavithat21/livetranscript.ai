@@ -1,3 +1,4 @@
+import { parseLineRects, type LineRect } from '../coach/inline/geometry'
 /** A screenshot is partial, untrusted evidence. Missing text is never reconstructed. */
 export interface ScreenObservation {
   files: Array<{
@@ -7,6 +8,7 @@ export interface ScreenObservation {
     lines: string[]
     confidence: number
     endOfFile: boolean
+    lineRects?: LineRect[]
   }>
   visiblePaths: string[]
   terminal: string
@@ -88,7 +90,10 @@ function array(value: unknown, limit: number, label: string): unknown[] {
 export function parseScreenObservation(input: unknown): ScreenObservation {
   const root = record(input, ['files', 'visiblePaths', 'terminal', 'requirements'], 'Screen observation')
   const files = array(root.files, 12, 'Files').map((value) => {
-    const file = record(value, ['path', 'language', 'startLine', 'lines', 'confidence', 'endOfFile'], 'File observation')
+    const candidate = value as Record<string,unknown>
+    const fields = ['path', 'language', 'startLine', 'lines', 'confidence', 'endOfFile']
+    if (candidate && Object.hasOwn(candidate, 'lineRects')) fields.push('lineRects')
+    const file = record(value, fields, 'File observation')
     const language = text(file.language, 40, 'Language')
     if (!/^[a-zA-Z0-9_+#.-]+$/.test(language)) throw new Error('Language must be a short language identifier')
     const startLine = file.startLine
@@ -106,7 +111,7 @@ export function parseScreenObservation(input: unknown): ScreenObservation {
       throw new Error('Confidence must be between zero and one')
     }
     if (typeof file.endOfFile !== 'boolean') throw new Error('endOfFile must be a boolean')
-    return { path: path(file.path), language, startLine, lines, confidence: file.confidence, endOfFile: file.endOfFile }
+    return { path: path(file.path), language, startLine, lines, confidence: file.confidence, endOfFile: file.endOfFile, ...(file.lineRects === undefined ? {} : { lineRects: parseLineRects(file.lineRects, startLine, lines) }) }
   }).filter((file) => !SECRET_PATH.test(file.path))
   const result: ScreenObservation = {
     files,

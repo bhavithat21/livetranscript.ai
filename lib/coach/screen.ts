@@ -1,12 +1,13 @@
+import type { SurfaceFrame } from './inline/geometry'
 import { KeyframeGate, type FrameSignal } from './keyframes'
 import { hashText, parseObservation } from './validation'
 import type { Observation } from './types'
 
-export type ScreenStatus = { sharing: boolean; watching: boolean; reading: boolean; captures: number; localSamples: number; error: string | null; source: 'browser' | 'native' | null }
-export type FrameSource = { signal: () => Promise<FrameSignal | null>; image: () => Promise<string | null>; stop: () => void | Promise<void> }
-export type CaptureTransport = (image: string, signal: AbortSignal) => Promise<Observation>
-export const httpCapture: CaptureTransport = async (image, signal) => {
-  const response = await fetch('/api/copilot/repo-screen', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image }), signal })
+export type ScreenStatus = { sharing: boolean; watching: boolean; reading: boolean; captures: number; localSamples: number; error: string | null; source: 'browser' | 'native' | null; surface?: SurfaceFrame | null; acceptedSurfaceKey?: string | null }
+export type FrameSource = { signal: () => Promise<FrameSignal | null>; image: () => Promise<string | null>; stop: () => void | Promise<void>; surface?: () => SurfaceFrame | null }
+export type CaptureTransport = (image: string, signal: AbortSignal, locateRows?: boolean) => Promise<Observation>
+export const httpCapture: CaptureTransport = async (image, signal, locateRows = false) => {
+  const response = await fetch('/api/copilot/repo-screen', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image, locateRows }), signal })
   if (!response.ok) throw new Error('Screenshot extraction failed')
   const raw = await response.text()
   if (raw.length > 400_000) throw new Error('Screenshot response exceeded its budget')
@@ -31,21 +32,21 @@ export class ScreenObserver {
     await stopping
     if (expectedGeneration !== this.generation) { await source.stop(); return }
     this.source = source; this.gate.reset()
-    this.update({ sharing: true, watching: false, source: type, error: null })
+    this.update({ sharing: true, watching: false, source: type, error: null, surface: null, acceptedSurfaceKey: null })
   }
   watch(enabled: boolean) {
     if (this.timer) clearTimeout(this.timer)
     this.timer = null
-    if (!enabled) { this.generation++; this.controller?.abort(); this.controller = null; this.gate.reset(); this.update({ watching: false, reading: false }); return }
+    if (!enabled) { this.generation++; this.controller?.abort(); this.controller = null; this.gate.reset(); this.update({ watching: false, reading: false, surface: null, acceptedSurfaceKey: null }); return }
     if (!this.source) return
-    this.update({ watching: true, error: null })
+    this.update({ watching: true, error: null, acceptedSurfaceKey: null })
     const generation = ++this.generation
     const tick = async () => {
       if (generation !== this.generation || !this.source || !this.status.watching) return
       try {
         const signal = await this.source.signal()
         if (generation !== this.generation) return
-        this.update({ localSamples: this.status.localSamples + 1 })
+        this.update({ localSamples: this.status.localSamples + 1, surface: this.source.surface?.() ?? null })
         if (!signal) throw new Error('Selected screen is no longer available')
         const decision = this.gate.sample(signal, performance.now())
         if (decision.capture) {
@@ -53,7 +54,7 @@ export class ScreenObserver {
           if (generation !== this.generation) return
           if (!image) throw new Error('Selected screen is no longer available')
           // Local samples continue while one extraction runs. No frame queue grows.
-          void this.capture(image, capturedAt).then(accepted => {
+          void this.capture(image, capturedAt, this.source.surface?.() ?? null).then(accepted => {
             if (generation === this.generation) this.gate.finish(signal, accepted)
           })
         }
@@ -64,7 +65,7 @@ export class ScreenObserver {
     }
     void tick()
   }
-  async capture(image: string, capturedAt = Date.now()): Promise<boolean> {
+  async capture(image: string, capturedAt = Date.now(), capturedSurface: SurfaceFrame | null = null): Promise<boolean> {
     if (this.controller) return false
     if (!/^data:image\/(?:png|jpeg|webp);base64,/.test(image) || image.length > 6_000_000) { this.update({ error: 'Use a PNG, JPEG or WebP screenshot under 4.4 MB.', watching: false }); return false }
     const now = Date.now()
@@ -75,10 +76,10 @@ export class ScreenObserver {
     this.update({ reading: true, error: null })
     const timeout = setTimeout(() => controller.abort(), 18_000)
     try {
-      const observation = parseObservation(await this.transport(image, controller.signal))
+      const observation = parseObservation(await this.transport(image, controller.signal, !!capturedSurface))
       if (controller.signal.aborted || generation !== this.generation) return false
       this.onObservation(observation, capturedAt)
-      this.update({ captures: this.status.captures + 1 })
+      this.update({ captures: this.status.captures + 1, acceptedSurfaceKey: capturedSurface?.key ?? null })
       return true
     } catch {
       if (generation === this.generation) this.update({ watching: false, error: 'Screenshot could not be safely read. Watch is paused. Recapture explicitly; no automatic retry is made.' })
@@ -92,14 +93,14 @@ export class ScreenObserver {
     const generation = this.generation, capturedAt = Date.now(), image = await this.source?.image()
     if (generation !== this.generation) return false
     if (!image) { this.update({ error: 'Select the IDE or upload a screenshot first.' }); return false }
-    return this.capture(image, capturedAt)
+    return this.capture(image, capturedAt, this.source?.surface?.() ?? null)
   }
   async stop() {
     this.generation++
     if (this.timer) clearTimeout(this.timer)
     this.timer = null; this.controller?.abort(); this.controller = null
     const source = this.source; this.source = null
-    this.gate.reset(); this.update({ sharing: false, watching: false, reading: false, source: null })
+    this.gate.reset(); this.update({ sharing: false, watching: false, reading: false, source: null, surface: null, acceptedSurfaceKey: null })
     await source?.stop()
   }
   dispose() { void this.stop(); this.listeners.clear() }

@@ -1,81 +1,46 @@
 'use client'
 import { useSyncExternalStore } from 'react'
-import { Minus, Square, X } from 'lucide-react'
+import { Minus, Square, X, MousePointer2, Layers2 } from 'lucide-react'
 import { isTauri } from '@/lib/audio/useNativeCapture'
+import { useLockMode } from '@/lib/desktop/useLockMode'
+import styles from './TitleBar.module.css'
 
-// Custom frameless title bar for the Tauri desktop shell. The native window runs
-// with `decorations: false`, so this thin bar replaces the OS title bar: it's the
-// window's drag handle (data-tauri-drag-region) and carries minimize / maximize /
-// close controls. Renders ONLY inside Tauri — the web app at livetranscript.ai
-// never shows it (isTauri() is false in a browser).
-//
-// Height is exposed as --titlebar-h so the app content can offset below it; the
-// lt-desktop theme wires that up in globals.css.
-
+// Global desktop control surface, present in Live, Mock, transcript and settings.
+// A dedicated drag region never consumes clicks intended for the controls.
 export function TitleBar() {
   const show = useSyncExternalStore(subscribeToDesktopRuntime, isTauri, () => false)
-
-  if (!show) return null
-
+  return show ? <DesktopTitleBar /> : null
+}
+function DesktopTitleBar() {
+  const mode = useLockMode()
+  const mac = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform)
+  const shortcut = mac ? '⌘⇧L' : 'Ctrl+Shift+L'
+  const recovery = mode.shortcutAvailable ? `${shortcut} to restore clicks` : mode.trayAvailable ? 'Tray → Restore mouse interaction' : 'Desktop update or recovery control required'
   const win = async () => (await import('@tauri-apps/api/window')).getCurrentWindow()
-
-  return (
-    <div
-      data-tauri-drag-region
-      className="fixed inset-x-0 top-0 z-[200] flex h-[var(--titlebar-h)] items-center justify-end px-2"
-    >
-      {/* Buttons opt OUT of the drag region so clicks register as clicks, not drags. */}
-      <div className="flex items-center gap-1" data-tauri-drag-region="false">
-        <TitleBarButton
-          label="Minimize"
-          onClick={async () => (await win()).minimize()}
-        >
-          <Minus size={14} />
-        </TitleBarButton>
-        <TitleBarButton
-          label="Maximize"
-          onClick={async () => (await win()).toggleMaximize()}
-        >
-          <Square size={11} />
-        </TitleBarButton>
-        <TitleBarButton
-          label="Close"
-          danger
-          onClick={async () => (await win()).close()}
-        >
-          <X size={14} />
-        </TitleBarButton>
+  const inputLabel = mode.busy ? 'Changing input…' : mode.locked ? 'Pass-through on' : 'Pass through'
+  return <>
+    <div className={styles.bar} role="toolbar" aria-label="Desktop window controls">
+      <button type="button" className={styles.input} aria-label="Pass through mouse clicks" aria-pressed={mode.locked}
+        disabled={mode.busy || (!mode.locked && !mode.canEnable)}
+        title={`Clicks go to the window underneath, not to both apps. ${recovery}. Fixed arrow inside LiveTranscript.`}
+        onClick={() => void mode.toggle()}>
+        {mode.locked ? <Layers2 size={13} /> : <MousePointer2 size={13} />}{inputLabel}
+      </button>
+      <span className={styles.recovery} role="status" title={recovery}>{mode.locked ? recovery : mode.shortcutAvailable ? shortcut : 'Fixed arrow'}</span>
+      <div data-tauri-drag-region className={styles.drag} aria-label="Drag window" />
+      <div className={styles.controls}>
+        <TitleBarButton label="Minimize" onClick={async () => (await win()).minimize()}><Minus size={14} /></TitleBarButton>
+        <TitleBarButton label="Maximize" onClick={async () => (await win()).toggleMaximize()}><Square size={11} /></TitleBarButton>
+        <TitleBarButton label="Close" danger onClick={async () => (await win()).close()}><X size={14} /></TitleBarButton>
       </div>
     </div>
-  )
+    {mode.error && <div className={styles.error} role="alert"><span>{mode.error}</span><button type="button" aria-label="Dismiss mouse input message" onClick={mode.clearError}><X size={14} /></button></div>}
+  </>
 }
-
-function subscribeToDesktopRuntime(): () => void {
-  return () => {}
-}
-
-function TitleBarButton({
-  children,
-  onClick,
-  label,
-  danger = false,
-}: {
-  children: React.ReactNode
-  onClick: () => void
-  label: string
-  danger?: boolean
+function subscribeToDesktopRuntime(): () => void { return () => {} }
+function TitleBarButton({ children, onClick, label, danger = false }: {
+  children: React.ReactNode; onClick: () => Promise<void>; label: string; danger?: boolean
 }) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      onClick={onClick}
-      className={`inline-flex h-6 w-6 items-center justify-center rounded-md text-white/60 transition-colors hover:text-white ${
-        danger ? 'hover:bg-red-500/80' : 'hover:bg-white/15'
-      }`}
-    >
-      {children}
-    </button>
-  )
+  return <button type="button" aria-label={label} title={label} onClick={() => { void onClick().catch(() => { /* OS window controls can be unavailable while closing. */ }) }}
+    className={`${styles.control} ${danger ? styles.danger : ''}`}>{children}</button>
 }

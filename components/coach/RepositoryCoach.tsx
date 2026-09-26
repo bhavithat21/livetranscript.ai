@@ -11,6 +11,8 @@ import { safePath } from '@/lib/coach/validation'
 import type { CoachState, Permission, ResultRecord, DialogueTurn } from '@/lib/coach/types'
 import { LearningPanel } from './LearningPanel'
 import { useLessonPolicy } from '@/lib/coach/learning/LearningContext'
+import { InlineCoach } from './inline/InlineCoach'
+import { inlineTargets, inlineFrameSource, exitInline, type InlineTarget, type InlineFrameSource } from '@/lib/coach/inline/native'
 import styles from './RepositoryCoach.module.css'
 
 const EMPTY_TRANSCRIPT = () => ''
@@ -63,6 +65,9 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
   const lessonPolicy = useLessonPolicy()
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot)
   const capture = useSyncExternalStore(screen.subscribe, screen.getSnapshot, screen.getSnapshot)
+  const [inline, setInline] = useState(false), [targets, setTargets] = useState<InlineTarget[]>([]), [targetId, setTargetId] = useState('')
+  const inlineSource = useRef<InlineFrameSource | null>(null)
+  const closeInline = useCallback(() => { setInline(false) }, [])
   const [consent, setConsent] = useState(false)
   const [objective, setObjective] = useState(presetObjective || 'Investigate the current task and identify the smallest safe implementation change.')
   const [error, setError] = useState<string | null>(null), [reading, setReading] = useState(false), [exportAllowed, setExportAllowed] = useState(false)
@@ -76,6 +81,7 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
   const dialogueGetter = useRef(getConversation)
   useEffect(() => { dialogueGetter.current = getConversation }, [getConversation])
   const running = state.status === 'running'
+  useEffect(() => { if (inline && (!running || !capture.watching || capture.error)) { void exitInline().catch(() => {}).finally(() => { if (mounted.current) setInline(false) }) } }, [inline, running, capture.watching, capture.error])
   useEffect(() => { if (!running) controller.configureLessons(lessonPolicy?.state.active ?? []) }, [controller, running, lessonPolicy?.state.active])
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; activity.current?.(false) } }, [])
   useEffect(() => { activity.current?.(running) }, [running])
@@ -100,6 +106,25 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
     }, 400)
     return () => clearInterval(timer)
   }, [controller, running])
+  async function selectInlineWindow() {
+    setError(null); setSelecting(true)
+    const token = ++generation.current
+    try {
+      const source = await inlineFrameSource(Number(targetId))
+      if (!mounted.current || token !== generation.current || controller.getSnapshot().status !== 'running') { await source.stop(); return }
+      await screen.attach(source, 'native')
+      if (!mounted.current || token !== generation.current) { await source.stop(); return }
+      inlineSource.current = source
+      screen.watch(true)
+    } catch { setError('Selected-window capture needs the updated desktop app, Screen Recording permission, and an IDE fully on one display.') }
+    finally { if (mounted.current && token === generation.current) setSelecting(false) }
+  }
+  async function enterInline() {
+    if (!inlineSource.current || !capture.surface || !capture.watching) return
+    setError(null)
+    try { await inlineSource.current.enter(); if (mounted.current) setInline(true) }
+    catch { setError('Cannot enter Inline Coach. Restore the app to a normal window and verify a recovery shortcut or tray control is available.'); await exitInline().catch(() => {}) }
+  }
   async function selectScreen(native = false) {
     setError(null); setSelecting(true)
     const token = ++generation.current
@@ -169,6 +194,7 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
   const replay = controller.getReplayInfo()
   const next = state.navigation ?? nextInspection(state), metrics = controller.getMetrics(), counts = state.files.map(fileCoverage), native = nativeAvailable()
   return <section className={styles.root} aria-label="Repository coach" data-testid="repository-coach">
+    <InlineCoach state={state} capture={capture} active={inline} onExit={closeInline} />
     <header className={styles.header}><h2>Repository coach</h2><span className={styles.tag}>{state.status === 'idle' ? 'Set up' : loadedReplay ? 'Replay' : state.permission === 'practice' ? 'Practice' : 'AI-permitted session'}</span><span className={`${styles.muted} ${styles.spacer}`}>{state.status} · evidence v{state.evidenceVersion}</span></header>
     {state.status === 'idle' && <div className={styles.setup}><h3>Follow the code. Keep the conversation moving.</h3><p>Share only the IDE you are allowed to show. The coach keeps observed code separate from suggestions, asks for missing evidence, and never edits files or runs commands for you.</p><label className={styles.label} htmlFor="coach-objective">Practice task</label><textarea id="coach-objective" className={styles.input} rows={3} maxLength={2000} value={objective} onChange={event => setObjective(event.target.value)} /><label className={styles.permission}><input type="checkbox" checked={consent} onChange={event => setConsent(event.target.checked)} /><span>I may share this code with the configured AI providers. This is practice or a session that explicitly permits external AI.</span></label><button className={`${styles.button} ${styles.primary}`} disabled={!consent || !objective.trim()} onClick={start}>Start repository practice</button></div>}
     {state.status !== 'idle' && <>
@@ -181,6 +207,13 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
         {state.status !== 'ended' && <button className={styles.button} onClick={end}>End coach</button>}
       </div>
       {native && <details className={`${styles.details} ${styles.main}`}><summary>Desktop display capture</summary><p>Use a selected display through the native app. This does not grant remote control. Screen-recording permission is required.</p><button className={styles.button} disabled={!running || selecting} onClick={() => { void nativeDisplays().then(items => { setDisplays(items); setDisplayId(items[0]?.id || '') }).catch(() => setError('Native capture requires the updated desktop installer and screen-recording permission.')) }}>Find displays</button>{displays.length > 0 && <label className={styles.label}>Display<select className={styles.input} value={displayId} onChange={event => setDisplayId(event.target.value)}>{displays.map(display => <option key={display.id} value={display.id}>{display.name} · {display.width} × {display.height}</option>)}</select><button className={styles.button} disabled={!running || !displayId || selecting} onClick={() => void selectScreen(true)}>Share selected display</button></label>}</details>}
+      {native && <details className={`${styles.details} ${styles.main}`}><summary>Inline Coach · changes beside code (experimental)</summary>
+        <p>Select the IDE window, not the entire display. Full-display screenshots can capture the annotation itself and cannot safely anchor this mode. The overlay shows one current line change and its explanation; it never applies code.</p>
+        <button className={styles.button} disabled={!running || selecting} onClick={() => void inlineTargets().then(items => { setTargets(items); setTargetId(String(items[0]?.id ?? '')) }).catch(() => setError('Update the desktop installer and allow Screen Recording to select an IDE window.'))}>Find IDE windows</button>
+        {targets.length > 0 && <><label className={styles.label}>IDE window<select aria-label="Inline IDE window" className={styles.input} value={targetId} onChange={event => setTargetId(event.target.value)}>{targets.map(t => <option key={t.id} value={t.id}>{t.title}</option>)}</select></label><button className={styles.button} disabled={!running || selecting || !targetId} onClick={() => void selectInlineWindow()}>Share selected IDE window</button></>}
+        <button className={styles.button} disabled={!running || !capture.surface || !capture.watching || selecting} onClick={() => void enterInline()}>Enter Inline Coach</button>
+        <p className={styles.muted}>Cmd/Ctrl+Shift+L restores the workspace. Cmd/Ctrl+Alt+Shift+Left/Right selects a change. Clicks and scrolling go to the IDE. Location estimates need visual confirmation; unseen, moved or stale targets are not highlighted.</p>
+      </details>}
       {(capture.sharing || capture.reading || reading) && <p className={styles.notice} role="status">{capture.reading ? 'Reading a changed view…' : reading ? 'Importing selected evidence…' : capture.watching ? 'Watching the selected IDE. Stable changed screenshots are sent to your configured vision provider.' : 'Screen selected; automatic screenshot analysis paused.'}</p>}
       {loadedReplay && <section className={styles.main} aria-label="Replay timeline">
         <label className={styles.label} htmlFor="coach-replay-checkpoint">Observation {replay.position} of {replay.total} · {replay.event}</label>
