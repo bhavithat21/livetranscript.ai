@@ -1,0 +1,29 @@
+name: Screenshot visual tracker QA
+on:
+  push:
+    branches: [verify/screenshot-kernel-20260926]
+  pull_request:
+    paths: ['src-tauri/src/visual_tracker.rs', 'qa/visual-tracker/**', 'lib/coach/inline/**', '.github/workflows/visual-tracker.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  pixels:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Compile exact native pixel kernel and standalone benchmark executable
+        run: |
+          mkdir -p qa-results/visual-tracker
+          rustc --edition 2021 --test -O src-tauri/src/visual_tracker.rs -o /tmp/pixel-tests
+          /tmp/pixel-tests | tee qa-results/visual-tracker/kernel-tests.txt
+          rustc --edition 2021 -O qa/visual-tracker/runner.rs -o qa-results/visual-tracker/pixel-runner
+          sha256sum src-tauri/src/visual_tracker.rs qa/visual-tracker/runner.rs qa-results/visual-tracker/pixel-runner > qa-results/visual-tracker/checksums.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshot-tracker-kernel-${{ github.run_id }}
+          path: qa-results/visual-tracker/
+          retention-days: 7
