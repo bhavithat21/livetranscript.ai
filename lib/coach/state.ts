@@ -1,6 +1,7 @@
 import type { CoachState, CoachEvent, ObservedFile, Fragment, Observation, FileObservation, Navigation, PatchReview, Source, Task, EventPayload } from './types'
 import { hashText, LIMITS, parseObservation, text, list, integer, permission, object } from './validation'
 import { parseDialogueTurn, updateDialogue } from './dialogue'
+import { projectRequirements, updateRequirementInputs } from './requirements'
 import { parseTestOutput } from './testOutput'
 export { parseTestOutput } from './testOutput'
 
@@ -159,6 +160,17 @@ export function reduceCoach(previous: CoachState, event: CoachEvent): CoachState
       const conversation = updateDialogue(state.conversation ?? [], event.turn)
       return conversation === previous.conversation ? previous : { ...state, conversation }
     }
+    case 'requirement.update': {
+      const inputs = updateRequirementInputs(state.requirementInputs ?? [], event.turn)
+      if (inputs === state.requirementInputs) return previous
+      const { active, pending } = projectRequirements(inputs)
+      const changed = JSON.stringify([active.map(r => r.text), pending.map(r => r.text)]) !== JSON.stringify([(state.task.spokenRequirements ?? []).map(r => r.text), (state.task.requirementClarifications ?? []).map(r => r.text)])
+      if (!changed) return { ...state, requirementInputs: inputs }
+      const task = { ...state.task, spokenRequirements: active, requirementClarifications: pending, version: state.task.version + 1 }
+      // Changed requirements invalidate proposals/navigation, NOT observed code.
+      return invalidate({ ...state, requirementInputs: inputs, task, evidenceVersion: state.evidenceVersion + 1, navigation: null, patches: [], patchReviews: [],
+        tests: state.tests.map(run => ({ ...run, status: 'stale' as const })) })
+    }
     case 'speech.final': {
       if (event.speaker !== 'interviewer') return state
       const task = intentFromSpeech(state.task, text(event.text, 4000))
@@ -249,6 +261,7 @@ export function parseReplayEvent(raw: unknown): CoachEvent {
     case 'session.pause': case 'session.resume': case 'session.end': payload = { type: item.type }; break
     case 'task.update': payload = { type: item.type, objective: text(item.objective, 4000, true), constraints: list(item.constraints, 30).map(value => text(value, 1000, true)) }; break
     case 'speech.final': if (!['interviewer', 'candidate'].includes(String(item.speaker))) throw new Error('Invalid replay speaker'); payload = { type: item.type, speaker: item.speaker as 'interviewer' | 'candidate', text: text(item.text, 4000) }; break
+    case 'requirement.update': payload = { type: item.type, turn: parseDialogueTurn(item.turn) }; break
     case 'dialogue.update': payload = { type: item.type, turn: parseDialogueTurn(item.turn) }; break
     case 'question.new': payload = { type: item.type, original: text(item.original, 4000, true), text: text(item.text, 2000, true) }; break
     case 'screen.observed': payload = { type: item.type, origin: item.origin === 'file-import' ? 'file-import' : 'replay', observation: parseObservation(item.observation), ...(item.capturedAt === undefined ? {} : { capturedAt: integer(item.capturedAt, 0, base.at) }) }; break

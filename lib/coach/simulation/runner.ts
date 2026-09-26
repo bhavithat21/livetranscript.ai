@@ -93,7 +93,7 @@ export class RealtimeSimulator {
         if (row.isFinal) {
           const role = action.channel === 'mic' || (action.speaker !== null && action.speaker !== this.interviewer) ? 'candidate' : action.speaker === this.interviewer ? 'interviewer' : 'unknown'
           this.controller.dialogue({ sourceId: `${action.channel}:${row.id}`, at: row.capturedAt, role, text: row.text })
-          if (role === 'interviewer') this.controller.speech(row.text)
+          // dialogue() is the shared settled requirement/intent ingestion path.
         }
       } else if (action.kind === 'screen') this.controller.observe(action.observation, action.importOnly ? 'file-import' : 'screen', action.capturedAt === undefined ? undefined : this.startAt + action.capturedAt)
       else if (action.kind === 'test') this.controller.markTestStart(action.command)

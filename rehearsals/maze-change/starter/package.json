@@ -1,0 +1,1 @@
+{"name":"maze-rehearsal-starter","private":true,"type":"module","scripts":{"test":"node --test test/*.check.mjs","start":"node server.js"},"engines":{"node":">=20"}}

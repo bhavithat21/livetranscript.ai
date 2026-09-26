@@ -1,0 +1,3 @@
+import http from 'node:http';import {readFile} from 'node:fs/promises';
+const files=new Map([['/', ['index.html','text/html']],['/src/ui.js',['src/ui.js','text/javascript']],['/src/maze.js',['src/maze.js','text/javascript']]]);
+http.createServer(async(req,res)=>{const item=files.get(new URL(req.url,'http://localhost').pathname);if(!item){res.writeHead(404);res.end();return}try{const data=await readFile(new URL(item[0],import.meta.url));res.writeHead(200,{'Content-Type':item[1],'Cache-Control':'no-store'});res.end(data)}catch{res.writeHead(500);res.end('Could not load fixture')}}).listen(4177,'127.0.0.1',()=>console.log('Rehearsal fixture: http://127.0.0.1:4177'));
