@@ -30,7 +30,7 @@ struct VisualLease {
 #[derive(Clone, Copy, Serialize, Deserialize)]
 pub struct NormalRect { x:f64, y:f64, width:f64, height:f64 }
 #[derive(Clone, Deserialize)]
-pub struct TrackingSeed { target:NormalRect, context:NormalRect, search:NormalRect, identity:NormalRect }
+pub struct TrackingSeed { target:NormalRect, context:NormalRect, search:NormalRect, identity:NormalRect, #[serde(default)] watch:Vec<NormalRect> }
 #[derive(Serialize)]
 #[serde(rename_all="camelCase")]
 pub struct TrackingReceipt {
@@ -53,10 +53,11 @@ pub async fn inline_tracking(window:WebviewWindow,app:tauri::AppHandle,lease_id:
  let selected=lease(&app.state::<InlineState>(),&lease_id)?;
  let (epoch,pending)={let mut visual=crate::lock(&selected.visual);visual.epoch+=1;visual.active=None;(visual.epoch,visual.pending.clone())};
  let Some(seed)=seed else{return Ok(())};
+ if seed.watch.len()>3{return Err("At most three watched screenshot regions are allowed".into())}
  let (_,image,at)=pending.filter(|(id,_,at)|id==&capture_id&&at.elapsed()<Duration::from_secs(30)).ok_or("Reference screenshot expired; read the current screen again")?;
  let visual=selected.visual.clone();
  let tracker=tauri::async_runtime::spawn_blocking(move||{
-   let pixel_seed=PixelSeed{target:pixel_rect(seed.target,&image)?,context:pixel_rect(seed.context,&image)?,search:pixel_rect(seed.search,&image)?,identity:pixel_rect(seed.identity,&image)?};
+   let pixel_seed=PixelSeed{target:pixel_rect(seed.target,&image)?,context:pixel_rect(seed.context,&image)?,search:pixel_rect(seed.search,&image)?,identity:pixel_rect(seed.identity,&image)?,watch:seed.watch.into_iter().map(|r|pixel_rect(r,&image)).collect::<Result<Vec<_>,_>>()?};
    Tracker::new(image,pixel_seed).map_err(str::to_owned)
  }).await.map_err(|_|"Visual anchor worker interrupted".to_string())??;
  lease(&app.state::<InlineState>(),&lease_id)?;

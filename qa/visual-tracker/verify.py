@@ -31,9 +31,11 @@ def run_sequence(page,width,scale,label,actions):
     nearby=[rectangle(page,f'#row{i} span',scale) for i in range(27,34)]
     cx=min(v[0] for v in nearby)-round(4*scale);cy=upper[1]
     c=[cx,cy,max(v[0]+v[2] for v in nearby)-cx+round(4*scale),lower[1]+lower[3]-cy]
-    search=rectangle(page,'#editor',scale);search[2]-=round(18*scale);search[3]-=round(18*scale)
+    search=rectangle(page,'#editor',scale)
+    client=page.evaluate('({width:editor.clientWidth,height:editor.clientHeight})')
+    search[2]=round(client['width']*scale);search[3]=round(client['height']*scale)
     identity=rectangle(page,'#identity',scale)
-    seed=t+c+search+identity
+    seed=t+c+search+identity+rectangle(page,'#terminal',scale)
     frames=[]; labels=[]
     for n,(name,script,expected) in enumerate(actions):
         if script:page.evaluate(script)

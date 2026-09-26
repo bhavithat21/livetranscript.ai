@@ -1,14 +1,22 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { inlineFixture } from '../../../qa/inline-coach/fixture'
 import { anchorKey, buildVisualSeed, trackedRect, parseTrackingReceipt, TrackingMetrics, type VisualSeed, type TrackingReceipt } from './tracking'
-import { hashText } from '../validation'
+import { hashText, parseObservation } from '../validation'
+import {parseScreenObservation} from '../../repo/screenEvidence'
+import {buildContext} from '../context'
+import {parseTrackingRegions} from './geometry'
 import { ScreenObserver, type FrameSource } from '../screen'
 
 const result = (id='a'): TrackingReceipt => ({ anchorId:id,status:'tracking',rect:{x:.1,y:.2,width:.3,height:.03},dx:0,dy:-20,processingMs:3,probes:2000,semanticDirty:false })
 function fixture() {
- const f=inlineFixture();f.surface.captureId='capture-1';f.surface.observationKey=hashText(JSON.stringify(f.state.lastScreen!.observation));return f
+ const f=inlineFixture();f.state.lastScreen!.observation.files[0].trackingRegions={editor:{x:.05,y:.2,width:.8,height:.65},identity:{x:.05,y:.03,width:.8,height:.05},watch:[]};f.surface.captureId='capture-1';f.surface.observationKey=hashText(JSON.stringify(f.state.lastScreen!.observation));return f
 }
 describe('screenshot-only anchor bridge',()=>{
+ it('requires explicit screenshot region evidence rather than inferring a header from a clipped row',()=>{const f=fixture();delete f.state.lastScreen!.observation.files[0].trackingRegions;f.surface.observationKey=hashText(JSON.stringify(f.state.lastScreen!.observation));expect(buildVisualSeed(f.state,f.step,f.surface)).toBeNull()})
+ it('validates region bounds and separation at both extraction boundaries',()=>{const f=fixture();const o=f.state.lastScreen!.observation;expect(parseObservation(parseScreenObservation(o)).files[0].trackingRegions?.watch).toEqual([]);o.files[0].trackingRegions!.identity=o.files[0].trackingRegions!.editor;expect(()=>parseScreenObservation(o)).toThrow();expect(()=>parseObservation(o)).toThrow()})
+ it('rejects unbounded or overlapping watched output and malformed geometry',()=>{const r=fixture().state.lastScreen!.observation.files[0].trackingRegions!;for(const bad of [{...r,watch:[r.editor]},{...r,watch:Array(4).fill(r.identity)},{...r,identity:{x:NaN,y:0,width:.2,height:.1}}])expect(()=>parseTrackingRegions(bad)).toThrow()})
+ it('keeps region metadata out of the reasoning context',()=>{const f=fixture();f.state.files[0].fragments[0].trackingRegions=f.state.lastScreen!.observation.files[0].trackingRegions;expect(JSON.stringify(buildContext(f.state))).not.toContain('trackingRegions')})
+
  it('seeds only an exact observed preimage tied to its retained screenshot',()=>{const f=fixture(),seed=buildVisualSeed(f.state,f.step,f.surface);expect(seed).not.toBeNull();expect(seed?.captureId).toBe('capture-1')})
  it('does not bind a new interpretation to old image pixels',()=>{const f=fixture();f.surface.observationKey='different';expect(buildVisualSeed(f.state,f.step,f.surface)).toBeNull()})
  it('requires enough surrounding observed rows',()=>{const f=fixture();f.state.lastScreen!.observation.files[0].lineRects!.splice(1);f.surface.observationKey=hashText(JSON.stringify(f.state.lastScreen!.observation));expect(buildVisualSeed(f.state,f.step,f.surface)).toBeNull()})
@@ -42,7 +50,7 @@ function observerFixture() {
  }
  const transport=vi.fn(async()=>({files:[],visiblePaths:[],requirements:[],terminal:''})), observed=vi.fn()
  const observer=new ScreenObserver(observed,transport)
- const seed={anchorId:'a',captureId:'first',target:result().rect!,context:result().rect!,search:result().rect!,identity:result().rect!} satisfies VisualSeed
+ const seed={anchorId:'a',captureId:'first',target:result().rect!,context:result().rect!,search:result().rect!,identity:result().rect!,watch:[]} satisfies VisualSeed
  return {observer,source,transport,observed,seed,set:(r:TrackingReceipt|null,key='moved')=>{rec=r;fingerprint=key},ticks:()=>tick}
 }
 afterEach(()=>vi.useRealTimers())

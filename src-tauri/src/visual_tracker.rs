@@ -26,7 +26,7 @@ impl Status {
 #[derive(Clone, Debug)]
 pub struct Update { pub status: Status, pub rect: Option<Rect>, pub dx: i32, pub dy: i32, pub probes: usize }
 #[derive(Clone, Debug)]
-pub struct Seed { pub target: Rect, pub context: Rect, pub search: Rect, pub identity: Rect }
+pub struct Seed { pub target: Rect, pub context: Rect, pub search: Rect, pub identity: Rect, pub watch: Vec<Rect> }
 #[derive(Clone, Debug)]
 pub struct Tracker {
     baseline: Arc<Gray>, seed: Seed, features: Vec<(usize, usize, u8)>,
@@ -39,6 +39,7 @@ impl Tracker {
     pub fn new(image: Arc<Gray>, seed: Seed) -> Result<Self, &'static str> {
         if !image.valid() || !seed.context.inside(seed.search) || !seed.search.inside(image.bounds()) || !seed.target.inside(seed.context) || !seed.identity.inside(image.bounds()) { return Err("Invalid visual seed geometry"); }
         if seed.context.width * seed.context.height > 600_000 || seed.target.width < 16 || seed.target.height < 5 || seed.identity.width * seed.identity.height > 1_500_000 { return Err("Visual seed outside memory/size limits"); }
+        if seed.watch.len()>3 || seed.watch.iter().any(|r|!r.inside(image.bounds())||overlaps(*r,seed.search)||overlaps(*r,seed.identity)) { return Err("Invalid stationary watched regions"); }
         if overlaps(seed.identity, seed.search) { return Err("File identity must be outside the moving editor region"); }
         // Surrounding pixels, NOT the target itself, locate a changed target too.
         // Collect separated edges across different bands; flat/repetitive targets
@@ -120,12 +121,12 @@ impl Tracker {
         let current = Rect { x:x as usize, y:y as usize, width:(right-x) as usize, height:(bottom-y) as usize };
         let before = Rect { x:(x-dx) as usize, y:(y-dy) as usize, ..current };
         if !same_region(&self.baseline, before, image, current, None) { return true; }
-        // Background widgets use a coarse trigger, not a correctness guarantee.
-        // The target and known editor overlap above use every full-resolution pixel.
-        let mut changes=0;
-        for y in (0..image.height).step_by(8) { for x in (0..image.width).step_by(8) {
-            if !s.contains(x,y) && self.baseline.at(x,y).abs_diff(image.at(x,y)) > 24 { changes+=1; if changes>=6{return true;} }
-        } }
+        // Only separately identified output regions are watched. Comparing ALL
+        // pixels outside the code viewport mistakes scrollbars/clipped edges for
+        // semantic changes. Unknown areas are not claimed to be monitored.
+        for region in &self.seed.watch {
+            if !same_region(&self.baseline,*region,image,*region,None) { return true; }
+        }
         false
     }
 
@@ -158,7 +159,7 @@ mod tests {
     use super::*;
     fn fixture() -> (Arc<Gray>, Seed) {
         let mut im = Gray { width: 360, height: 280, pixels: vec![22; 360 * 280] };
-        let seed = Seed { target: Rect { x: 70, y: 100, width: 130, height: 16 }, context: Rect { x: 60, y: 70, width: 180, height: 90 }, search: Rect { x: 40, y: 40, width: 270, height: 220 }, identity: Rect { x: 10, y: 4, width: 310, height: 24 } };
+        let seed = Seed { target: Rect { x: 70, y: 100, width: 130, height: 16 }, context: Rect { x: 60, y: 70, width: 180, height: 90 }, search: Rect { x: 40, y: 40, width: 270, height: 220 }, identity: Rect { x: 10, y: 4, width: 310, height: 24 }, watch:vec![Rect{x:0,y:270,width:360,height:10}] };
         let mut rng = 0x12345678u32;
         for y in seed.context.y..seed.context.bottom() { for x in seed.context.x..seed.context.right() { rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5; im.pixels[y * im.width + x] = if rng % 11 < 2 { 190 + (rng % 60) as u8 } else { 22 }; } }
         (Arc::new(im), seed)
@@ -187,6 +188,6 @@ mod tests {
     #[test] fn unrelated_terminal_pixels_do_not_move_target() { let(im,seed)=fixture();let mut t=Tracker::new(im.clone(),seed).unwrap();let mut changed=im.as_ref().clone();changed.pixels[279*im.width+10]=255;assert_eq!(t.update(&changed).status,Status::Tracking); }
     #[test] fn pure_scroll_is_not_a_semantic_edit() { let(im,seed)=fixture();let mut t=Tracker::new(im.clone(),seed.clone()).unwrap();let next=moved(&im,&seed,0,-18);assert_eq!(t.update(&next).status,Status::Tracking);assert!(!t.semantic_dirty(&next)); }
     #[test] fn off_target_editor_edit_requires_semantic_review() { let(im,seed)=fixture();let mut t=Tracker::new(im.clone(),seed.clone()).unwrap();let mut next=im.as_ref().clone();for x in 60..64{next.pixels[220*im.width+x]=200;}assert_eq!(t.update(&next).status,Status::Tracking);assert!(t.semantic_dirty(&next)); }
-    #[test] fn persistent_terminal_change_remains_dirty() { let(im,seed)=fixture();let mut t=Tracker::new(im.clone(),seed).unwrap();let mut next=im.as_ref().clone();for x in (0..80).step_by(8){next.pixels[272*im.width+x]=200;}for _ in 0..3{assert_eq!(t.update(&next).status,Status::Tracking);assert!(t.semantic_dirty(&next));} }
+    #[test] fn persistent_terminal_change_remains_dirty() { let(im,seed)=fixture();let mut t=Tracker::new(im.clone(),seed).unwrap();let mut next=im.as_ref().clone();for x in 0..80{next.pixels[272*im.width+x]=200;}for _ in 0..3{assert_eq!(t.update(&next).status,Status::Tracking);assert!(t.semantic_dirty(&next));} }
 
 }

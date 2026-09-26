@@ -52,7 +52,7 @@ export function rankFiles(state: CoachState, index = new EvidenceIndex()) {
   return { nodes: nodes.sort((a, b) => b.score - a.score || a.path.localeCompare(b.path)), relations: relations.slice(0, 50) }
 }
 function usefulFragment(fragment: Fragment, question: string): Fragment {
-  fragment = { ...fragment }; delete fragment.lineRects // Visual locations are ephemeral, not reasoning context.
+  fragment = { ...fragment }; delete fragment.lineRects; delete fragment.trackingRegions // Visual locations are ephemeral, not reasoning context.
   if (fragment.lines.length <= 70) return fragment
   const query = terms(question)
   const hit = fragment.lines.findIndex(line => query.some(term => line.toLowerCase().includes(term)))

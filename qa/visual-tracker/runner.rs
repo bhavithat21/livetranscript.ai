@@ -14,7 +14,7 @@ fn main() {
     let args = std::env::args().collect::<Vec<_>>();
     let numbers = args[2].split(',').map(|s| s.parse::<usize>().unwrap()).collect::<Vec<_>>();
     let rect = |n| Rect { x: numbers[n], y: numbers[n+1], width: numbers[n+2], height: numbers[n+3] };
-    let seed=Seed{target:rect(0),context:rect(4),search:rect(8),identity:rect(12)};
+    let seed=Seed{target:rect(0),context:rect(4),search:rect(8),identity:rect(12),watch:(16..numbers.len()).step_by(4).map(rect).collect()};
     let baseline=Arc::new(pgm(&args[1])); let mut tracker=match Tracker::new(baseline,seed){Ok(t)=>t,Err(error)=>{println!("SEED_ERROR,{error}");return}};
     for file in &args[3..] { let image=pgm(file); let t=Instant::now();let o=tracker.update(&image);let dirty=o.status==visual_tracker::Status::Tracking && tracker.semantic_dirty(&image);let ms=t.elapsed().as_secs_f64()*1000.;let r=o.rect.unwrap_or(Rect{x:0,y:0,width:0,height:0});println!("{},{},{},{},{},{},{:.4},{},{},{}",file,o.status.name(),r.x,r.y,r.width,r.height,ms,o.probes,o.dy,dirty); }
 }

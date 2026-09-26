@@ -3,11 +3,11 @@
  */
 import type { CoachState } from '../types'
 import type { Rect, SurfaceFrame } from './geometry'
-import { validRect } from './geometry'
+import { validRect, parseTrackingRegions } from './geometry'
 import { currentSteps, type EditStep } from './steps'
 import { hashText } from '../validation'
 
-export type VisualSeed = { anchorId: string; captureId: string; target: Rect; context: Rect; search: Rect; identity: Rect }
+export type VisualSeed = { anchorId: string; captureId: string; target: Rect; context: Rect; search: Rect; identity: Rect; watch: Rect[] }
 export type TrackingReceipt = {
   anchorId: string; status: string; rect: Rect | null; dx: number; dy: number
   processingMs: number; probes: number; semanticDirty: boolean
@@ -53,13 +53,15 @@ export function buildVisualSeed(state: CoachState, step: EditStep, reference: Su
   if (targetRows.length !== count || nearby.length < count + 2) return null
   const target = union(targetRows.map(r => r.rect))
   const context = expand(union(nearby.map(r => r.rect)), .004, .002)
-  // Search only the band supported by observed rows, never an unrelated terminal.
-  // Wide padding permits horizontal movement but is not a guessed editor API.
-  const search = expand(union(rows.map(r => r.rect)), .04, .003)
-  const identity: Rect = { x: search.x, y: 0, width: search.width, height: Math.max(0, search.y - .005) }
-  if (!insideUnit(identity) || identity.height * reference.source.height < 24 ||
+  const regionInputs = files.map(f=>f.trackingRegions).filter(Boolean)
+  if (!regionInputs.length || regionInputs.some(v=>JSON.stringify(v)!==JSON.stringify(regionInputs[0]))) return null
+  let regions
+  try { regions=parseTrackingRegions(regionInputs[0]) } catch { return null }
+  if (!regions) return null
+  const search=regions.editor,identity=regions.identity
+  if (identity.height * reference.source.height < 12 ||
       context.x < search.x || context.y < search.y || context.x + context.width > search.x + search.width + 1e-6 || context.y + context.height > search.y + search.height + 1e-6) return null
-  return { anchorId: anchorKey(state,step,reference.sourceId), captureId: reference.captureId, target, context, search, identity }
+  return { anchorId: anchorKey(state,step,reference.sourceId), captureId: reference.captureId, target, context, search, identity, watch:regions.watch }
 }
 export function trackedRect(state: CoachState, step: EditStep, frame: SurfaceFrame, now: number): Rect | null {
   const receipt = frame.tracking

@@ -4,6 +4,24 @@ import type { TrackingReceipt } from './tracking'
  */
 export type Rect = { x: number; y: number; width: number; height: number }
 export type LineRect = { line: number; rect: Rect }
+export type TrackingRegions = { editor: Rect; identity: Rect; watch: Rect[] }
+/** Screenshot-derived regions, not guessed from the first visible text row.
+ * A clipped row and scrollbars must never be mistaken for the stationary header.
+ */
+export function parseTrackingRegions(raw: unknown): TrackingRegions | undefined {
+  if (raw === undefined) return undefined
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw) || Object.keys(raw).sort().join(',') !== 'editor,identity,watch') throw new Error('Invalid screenshot tracking regions')
+  const input = raw as TrackingRegions
+  const rect = (v: Rect): Rect => {
+    if (!v || typeof v !== 'object' || Object.keys(v).sort().join(',') !== 'height,width,x,y' || !validRect(v) || v.x < 0 || v.y < 0 || v.x+v.width > 1.000001 || v.y+v.height > 1.000001) throw new Error('Tracking region must fit source screenshot')
+    return {...v}
+  }
+  const editor=rect(input.editor),identity=rect(input.identity)
+  if (!Array.isArray(input.watch) || input.watch.length>3 || intersects(editor,identity)) throw new Error('Tracking header overlaps moving code')
+  const watch=input.watch.map(rect)
+  if (watch.some(w=>intersects(w,editor)||intersects(w,identity))) throw new Error('Watched output must be separate from editor/header')
+  return {editor,identity,watch}
+}
 export type SurfaceFrame = {
   key: string; sourceId: string; sampledAt: number; focused: boolean
   captureId?: string; observationKey?: string; tracking?: TrackingReceipt | null; captureMs?: number

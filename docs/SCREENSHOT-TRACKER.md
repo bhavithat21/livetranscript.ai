@@ -5,7 +5,10 @@ The agent still receives only selected-window screenshots and permitted audio.
 There is no DOM/text-model/IDE extension/accessibility/file-system reader in this
 tracker. Native window coordinates are used for capture/placement, not code.
 
-A semantic screenshot supplies the initial code/line rectangles. The UI checks
+A semantic screenshot supplies the initial code/line rectangles and separate
+editor, visible-file identity, and optional watched-output rectangles. Missing
+or ambiguous region boundaries disable continuous tracking; we no longer guess
+a stationary header from the topmost complete source line. The UI checks
 exact patch preimage, task/question/file version, source origin and observation
 hash, then sends rectangles + a capture ID to `inline_tracking`. Native retains
 one full-resolution reference capture for up to 30 seconds and validates that it
@@ -21,7 +24,9 @@ its own potentially wrong prediction. Out-of-view targets may reacquire locally
 if the same unambiguous evidence returns before semantic context changes.
 
 Separate aligned comparison of known editor pixels catches changes away from
-the target. Background/terminal areas use a coarse reread trigger. These checks
+the target. Only explicitly located terminal/test/problem-output regions are watched outside
+the editor. Scrollbars, minimaps and unrelated chrome are not semantic triggers.
+Unknown or off-screen areas are not claimed to be monitored. These checks
 are conservative evidence, not proof of all repository state. Newly exposed
 scroll edges are unknown; no off-screen code is reconstructed from motion.
 
