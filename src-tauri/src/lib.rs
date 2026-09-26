@@ -21,6 +21,7 @@ mod remote_assist;
 mod coach_capture;
 mod pointer_mode;
 mod inline_overlay;
+mod visual_tracker;
 
 #[cfg(target_os = "macos")]
 mod macos_capture;
@@ -556,6 +557,7 @@ pub fn run() {
             inline_overlay::inline_targets,
             inline_overlay::inline_start,
             inline_overlay::inline_frame,
+            inline_overlay::inline_tracking,
             inline_overlay::inline_enter,
             inline_overlay::inline_exit,
             inline_overlay::inline_stop,

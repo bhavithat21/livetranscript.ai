@@ -2,7 +2,9 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { CoachState } from '@/lib/coach/types'
-import type { ScreenStatus } from '@/lib/coach/screen'
+import type { ScreenStatus, ScreenObserver } from '@/lib/coach/screen'
+import { buildVisualSeed, trackedRect } from '@/lib/coach/inline/tracking'
+import { project } from '@/lib/coach/inline/geometry'
 import { currentSteps, locateStep, type EditStep } from '@/lib/coach/inline/steps'
 import { placeCallout, type Rect } from '@/lib/coach/inline/geometry'
 import { inlineActive, exitInline } from '@/lib/coach/inline/native'
@@ -32,13 +34,24 @@ export function EditCallout({step,target,viewport,index,total}:{step:EditStep;ta
    </section>
  </>
 }
-export function InlineCoach({state,capture,active,onExit}:{state:CoachState;capture:ScreenStatus;active:boolean;onExit:()=>void}){
+export function InlineCoach({state,capture,active,onExit,observer}:{state:CoachState;capture:ScreenStatus;active:boolean;onExit:()=>void;observer?:ScreenObserver}){
  const [selection,setSelection]=useState({key:'',index:0}),[now,setNow]=useState(Date.now)
  const steps=currentSteps(state),key=steps.map(s=>s.id).join('|')
  const index=selection.key===key?Math.min(selection.index,Math.max(0,steps.length-1)):0,step=steps[index]
+ // Arm from the exact image previously interpreted, not the current moving
+ // frame. Native acknowledgement alone never shows a pin; a fresh pixel receipt
+ // must match this step/task/source revision on the next sample.
+ const seed=active&&step?buildVisualSeed(state,step,capture.acceptedSurface??null):null
+ const seedKey=seed?`${seed.anchorId}:${seed.captureId}`:''
+ const seedJson=JSON.stringify(seed)
+ useEffect(()=>{
+   if(!observer)return
+   void observer.setTrackingSeed(JSON.parse(seedJson))
+   return()=>{void observer.setTrackingSeed(null)}
+ },[observer,seedKey,seedJson])
  useEffect(()=>{
    if(!active)return
-   const timer=setInterval(()=>setNow(Date.now()),250)
+   const timer=setInterval(()=>setNow(Date.now()),100)
    let alive=true,unlisten:(()=>void)|undefined
    void import('@tauri-apps/api/event').then(async({listen})=>{
      const off=await listen<number>('inline-step',e=>setSelection(previous=>({key,index:Math.max(0,Math.min((previous.key===key?previous.index:0)+(e.payload>0?1:-1),steps.length-1))})))
@@ -59,10 +72,11 @@ export function InlineCoach({state,capture,active,onExit}:{state:CoachState;capt
  // A fresh native viewport must match the actual overlay CSS viewport. Never
  // reuse another monitor's origin, DPI, browser zoom or resized geometry.
  const aligned=surface&&Math.abs(surface.viewport.width-window.innerWidth)<3&&Math.abs(surface.viewport.height-window.innerHeight)<3
- const target=step&&aligned&&capture.watching?locateStep(state,step,surface,capture.acceptedSurfaceKey??null,now):null
+ const visual=step&&surface?.tracking?trackedRect(state,step,surface,now):null
+ const target=step&&aligned&&capture.watching&&!capture.trackingNeedsReview?(surface?.tracking?(visual?{rect:project(visual,surface),sourceId:surface.sourceId}:null):locateStep(state,step,surface,capture.acceptedSurfaceKey??null,now)):null
  const shortcut=/Mac/.test(navigator.platform)?'⌘⇧':'Ctrl+Shift+'
  return createPortal(<div data-inline-root className={styles.root} aria-label="Inline Coach annotation layer">
-   {target&&step&&surface?<EditCallout step={step} target={target.rect} viewport={surface.viewport} index={index} total={steps.length}/>:<div className={styles.status}>{state.task.implementation==='hold'?'Explain first — implementation is on hold.':step?`Locate ${step.path}:${step.anchorLine} — waiting for a fresh, legible target.`:'Listening — the next grounded edit will appear beside its source.'}</div>}
+   {target?.rect&&step&&surface?<EditCallout step={step} target={target.rect} viewport={surface.viewport} index={index} total={steps.length}/>:<div className={styles.status}>{state.task.implementation==='hold'?'Explain first — implementation is on hold.':step?`Locate ${step.path}:${step.anchorLine} — waiting for a fresh, legible target.`:'Listening — the next grounded edit will appear beside its source.'}</div>}
    <div className={styles.recovery}>Inline Coach · clicks go to IDE · {shortcut}Alt+← / → edit · {shortcut}L restore workspace</div>
  </div>,document.body)
 }

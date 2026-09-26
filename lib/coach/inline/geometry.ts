@@ -1,3 +1,4 @@
+import type { TrackingReceipt } from './tracking'
 /** Source-normalized visual locations, never line-height extrapolation.
  * Vision coordinates remain estimates, not calibrated correctness probabilities.
  */
@@ -5,6 +6,7 @@ export type Rect = { x: number; y: number; width: number; height: number }
 export type LineRect = { line: number; rect: Rect }
 export type SurfaceFrame = {
   key: string; sourceId: string; sampledAt: number; focused: boolean
+  captureId?: string; observationKey?: string; tracking?: TrackingReceipt | null; captureMs?: number
   viewport: { width: number; height: number }; source: Rect
 }
 export function validRect(r: Rect): boolean {

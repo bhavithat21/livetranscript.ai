@@ -1,13 +1,14 @@
 //! Explicitly selected IDE-window capture for spatial annotations. The main
 //! webview becomes a borderless, click-through monitor-sized annotation surface.
 //! Captures target the selected window, never our own composited overlay.
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
+use crate::visual_tracker::{Gray, Rect as PixelRect, Seed as PixelSeed, Tracker};
 use std::sync::{Mutex, Arc, atomic::{AtomicBool, AtomicU64, Ordering}};
 use std::time::{Duration, Instant};
 use tauri::{Manager, Emitter, WebviewWindow};
 
 #[derive(Clone)]
-struct Lease { id:String, window_id:u32, pid:u32, created:Instant, busy:Arc<AtomicBool> }
+struct Lease { id:String, window_id:u32, pid:u32, created:Instant, busy:Arc<AtomicBool>, visual:Arc<Mutex<VisualLease>> }
 struct Restore { position:tauri::PhysicalPosition<i32>, size:tauri::PhysicalSize<u32>, resizable:bool }
 #[derive(Default)]
 pub struct InlineState { lease:Mutex<Option<Lease>>, restore:Mutex<Option<Restore>>, heartbeat:Mutex<Option<Instant>>, epoch:AtomicU64, recovering:AtomicBool, active_geometry:Mutex<Option<Geometry>> }
@@ -18,7 +19,52 @@ pub struct Geometry { x:i32,y:i32,width:u32,height:u32,monitor_x:i32,monitor_y:i
 pub struct Target { id:u32, title:String }
 #[derive(Serialize)]
 #[serde(rename_all="camelCase")]
-pub struct WindowFrame { geometry:Geometry, focused:bool, width:u32,height:u32,pixels:Vec<u8>,image:Option<Vec<u8>> }
+pub struct WindowFrame { geometry:Geometry, focused:bool, width:u32,height:u32,pixels:Vec<u8>,image:Option<Vec<u8>>,capture_id:Option<String>,tracking:Option<TrackingReceipt>,capture_ms:f64 }
+
+#[derive(Default)]
+struct VisualLease {
+ pending: Option<(String, Arc<Gray>, Instant)>,
+ active: Option<(String, Tracker)>,
+ epoch: u64,
+}
+#[derive(Clone, Copy, Serialize, Deserialize)]
+pub struct NormalRect { x:f64, y:f64, width:f64, height:f64 }
+#[derive(Clone, Deserialize)]
+pub struct TrackingSeed { target:NormalRect, context:NormalRect, search:NormalRect, identity:NormalRect }
+#[derive(Serialize)]
+#[serde(rename_all="camelCase")]
+pub struct TrackingReceipt {
+ anchor_id:String, status:String, rect:Option<NormalRect>, dx:i32, dy:i32,
+ processing_ms:f64, probes:usize, semantic_dirty:bool,
+}
+fn pixel_rect(r:NormalRect,image:&Gray)->Result<PixelRect,String>{
+ if ![r.x,r.y,r.width,r.height].into_iter().all(f64::is_finite)||r.x<0.||r.y<0.||r.width<=0.||r.height<=0.||r.x+r.width>1.000001||r.y+r.height>1.000001{return Err("Invalid normalized tracking rectangle".into())}
+ let x=(r.x*image.width as f64).round() as usize;let y=(r.y*image.height as f64).round() as usize;
+ let right=((r.x+r.width)*image.width as f64).round() as usize;let bottom=((r.y+r.height)*image.height as f64).round() as usize;
+ let result=PixelRect{x,y,width:right.saturating_sub(x),height:bottom.saturating_sub(y)};
+ if !result.inside(image.bounds()){return Err("Tracking rectangle exceeds source pixels".into())}Ok(result)
+}
+/// Arm only from a retained semantic capture of this explicit source. Templates
+/// never come from the frontend, clipboard, arbitrary files or an editor API.
+#[tauri::command]
+pub async fn inline_tracking(window:WebviewWindow,app:tauri::AppHandle,lease_id:String,anchor_id:String,capture_id:String,seed:Option<TrackingSeed>)->Result<(),String>{
+ crate::coach_capture::trusted(&window)?;
+ if anchor_id.len()>300||capture_id.len()>100{return Err("Invalid tracking identity".into())}
+ let selected=lease(&app.state::<InlineState>(),&lease_id)?;
+ let (epoch,pending)={let mut visual=crate::lock(&selected.visual);visual.epoch+=1;visual.active=None;(visual.epoch,visual.pending.clone())};
+ let Some(seed)=seed else{return Ok(())};
+ let (_,image,at)=pending.filter(|(id,_,at)|id==&capture_id&&at.elapsed()<Duration::from_secs(30)).ok_or("Reference screenshot expired; read the current screen again")?;
+ let visual=selected.visual.clone();
+ let tracker=tauri::async_runtime::spawn_blocking(move||{
+   let pixel_seed=PixelSeed{target:pixel_rect(seed.target,&image)?,context:pixel_rect(seed.context,&image)?,search:pixel_rect(seed.search,&image)?,identity:pixel_rect(seed.identity,&image)?};
+   Tracker::new(image,pixel_seed).map_err(str::to_owned)
+ }).await.map_err(|_|"Visual anchor worker interrupted".to_string())??;
+ lease(&app.state::<InlineState>(),&lease_id)?;
+ let mut current=crate::lock(&visual);
+ if current.epoch!=epoch||at.elapsed()>Duration::from_secs(30){return Err("Visual anchor request was superseded".into())}
+ current.active=Some((anchor_id,tracker));Ok(())
+}
+
 fn lease(state:&InlineState,id:&str)->Result<Lease,String>{crate::lock(&state.lease).as_ref().filter(|s|s.id==id&&s.created.elapsed()<Duration::from_secs(90*60)).cloned().ok_or("IDE capture ended or expired".into())}
 #[tauri::command]
 pub async fn inline_targets(window:WebviewWindow)->Result<Vec<Target>,String>{
@@ -33,7 +79,7 @@ pub async fn inline_start(window:WebviewWindow,state:tauri::State<'_,InlineState
  if crate::lock(&state.restore).is_some(){return Err("Restore the workspace before selecting another IDE window".into())}
  let id=uuid::Uuid::new_v4().to_string();
  state.epoch.fetch_add(1,Ordering::SeqCst);
- *crate::lock(&state.lease)=Some(Lease{id:id.clone(),window_id,pid:0,created:Instant::now(),busy:Arc::new(AtomicBool::new(false))});
+ *crate::lock(&state.lease)=Some(Lease{id:id.clone(),window_id,pid:0,created:Instant::now(),busy:Arc::new(AtomicBool::new(false)),visual:Arc::new(Mutex::new(VisualLease::default()))});
  let checked=tauri::async_runtime::spawn_blocking(move||target_pid(window_id)).await.map_err(|_|"Window validation interrupted".to_string()).and_then(|r|r);
  let mut guard=crate::lock(&state.lease);
  let selected=guard.as_mut().filter(|s|s.id==id).ok_or("IDE selection was superseded")?;
@@ -174,7 +220,7 @@ fn geometry(w:&xcap::Window)->Result<Geometry,String>{
 fn geometry_for(s:&Lease)->Result<Geometry,String>{geometry(&selected(s)?)}
 #[cfg(any(target_os="macos",target_os="windows"))]
 fn frame(s:&Lease,full:bool)->Result<WindowFrame,String>{
- let w=selected(s)?;let before=geometry(&w)?;
+ let started=Instant::now();let w=selected(s)?;let before=geometry(&w)?;
  let mut focused=w.is_focused().unwrap_or(false);
  #[cfg(target_os="macos")]
  {focused=focused && xcap::Window::all().ok().and_then(|list|list.into_iter().find(|win|win.pid().ok()==Some(s.pid)&&!win.is_minimized().unwrap_or(true))).and_then(|win|win.id().ok())==Some(s.window_id);}
@@ -185,9 +231,27 @@ fn frame(s:&Lease,full:bool)->Result<WindowFrame,String>{
  let expected=before.width as f64/before.height as f64;
  if ((pixels.width() as f64/pixels.height() as f64)/expected-1.0).abs()>0.01{return Err("Captured IDE bounds do not match its visible window. Inline anchors disabled.".into())}
  let picture=image::DynamicImage::ImageRgba8(pixels);
- let gray=picture.resize(640,640,image::imageops::FilterType::Triangle).to_luma8();
+ // Full-resolution pixels remain in the native worker. Only small receipts and
+ // the existing 640px semantic-gate thumbnail cross IPC on tracking samples.
+ let mut visual=crate::lock(&s.visual);
+ let mut tracking=None;let mut capture_id=None;
+ if full||visual.active.is_some(){
+   if u64::from(picture.width())*u64::from(picture.height())>16_000_000{return Err("Visual tracker source exceeds 16 million pixels; use a smaller IDE window".into())}
+   let full_luma=picture.to_luma8();let current=Arc::new(Gray{width:full_luma.width() as usize,height:full_luma.height() as usize,pixels:full_luma.into_raw()});
+   if full{let id=uuid::Uuid::new_v4().to_string();visual.pending=Some((id.clone(),current.clone(),Instant::now()));capture_id=Some(id);}
+   if let Some((id,tracker))=visual.active.as_mut(){
+     let time=Instant::now();let out=tracker.update(&current);let(width,height)=tracker.image_size();
+     let dirty=out.status==crate::visual_tracker::Status::Tracking && tracker.semantic_dirty(&current);
+     tracking=Some(TrackingReceipt{anchor_id:id.clone(),status:if focused{out.status.name()}else{"unfocused"}.into(),rect:if focused{out.rect.map(|r|NormalRect{x:r.x as f64/width as f64,y:r.y as f64/height as f64,width:r.width as f64/width as f64,height:r.height as f64/height as f64})}else{None},dx:out.dx,dy:out.dy,processing_ms:time.elapsed().as_secs_f64()*1000.,probes:out.probes,semantic_dirty:dirty});
+   }
+ }
+ // Retain at most one pending source frame; expire it without an ongoing pin.
+ if visual.pending.as_ref().is_some_and(|(_,_,at)|at.elapsed()>Duration::from_secs(30)){visual.pending=None;}
+ drop(visual);
+ let sample_size=if !full&&tracking.as_ref().is_some_and(|r|r.status=="tracking"&&!r.semantic_dirty){160}else{640};
+ let gray=picture.resize(sample_size,sample_size,image::imageops::FilterType::Triangle).to_luma8();
  let jpeg=if full{let mut bytes=Vec::new();let scaled=picture.resize(2400,2400,image::imageops::FilterType::Triangle).to_rgb8();image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes,94).encode_image(&scaled).map_err(|_|"Image encoding failed")?;if bytes.len()>4_400_000{return Err("IDE screenshot exceeds size limit".into())}Some(bytes)}else{None};
- Ok(WindowFrame{geometry:current,focused,width:gray.width(),height:gray.height(),pixels:gray.into_raw().into_iter().map(|p|(p/8)*8).collect(),image:jpeg})
+ Ok(WindowFrame{geometry:current,focused,width:gray.width(),height:gray.height(),pixels:gray.into_raw().into_iter().map(|p|(p/8)*8).collect(),image:jpeg,capture_id,tracking,capture_ms:started.elapsed().as_secs_f64()*1000.})
 }
 #[cfg(not(any(target_os="macos",target_os="windows")))]
 fn targets()->Result<Vec<Target>,String>{Err("Selected-window capture requires Windows or macOS".into())}
@@ -201,7 +265,7 @@ fn frame(_:&Lease,_:bool)->Result<WindowFrame,String>{Err("Unsupported platform"
 #[cfg(test)]
 mod tests {
  use super::*;
- fn seeded()->InlineState { let s=InlineState::default();*crate::lock(&s.lease)=Some(Lease{id:"one".into(),window_id:42,pid:10,created:Instant::now(),busy:Arc::new(AtomicBool::new(false))});s }
+ fn seeded()->InlineState { let s=InlineState::default();*crate::lock(&s.lease)=Some(Lease{id:"one".into(),window_id:42,pid:10,created:Instant::now(),busy:Arc::new(AtomicBool::new(false)),visual:Arc::new(Mutex::new(VisualLease::default()))});s }
  #[test]fn recovery_failure_keeps_geometry_until_retry_succeeds(){
    let mut saved=Some(42);assert_eq!(recover_saved(&mut saved,|_|Err("native failure")),Err("native failure"));assert_eq!(saved,Some(42));
    recover_saved(&mut saved,|value|{assert_eq!(*value,42);Ok::<(),&str>(())}).unwrap();assert!(saved.is_none());
