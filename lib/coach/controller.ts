@@ -1,12 +1,17 @@
-import type { CoachState, CoachEvent, ContextPacket, EventPayload, Guidance, Lane, Observation, Origin, Permission } from './types'
+import { abortable, systemClock, type Clock } from './clock'
+import type { CoachState, CoachEvent, ContextPacket, EventPayload, Guidance, Lane, Observation, Origin, Permission, DialogueTurn } from './types'
 import { buildContext, EvidenceIndex } from './context'
 import { emptyCoach, normalizeQuestion, parseReplayEvent, reduceCoach, resultCurrent } from './state'
+import { lessonIds, type LessonId } from './learning/policy'
 import { LIMITS, list, object, parseGuidance, redactSecrets, text } from './validation'
 
 export type ReplayReference = { id: string; lane: string; model: string; text: string; summary: string; note: string; verdict: string }
-export type CoachTransport = (lane: Lane, packet: ContextPacket, options: { signal: AbortSignal; delta: (text: string, model: string) => void }) => Promise<{ model: string; guidance: Guidance | null }>
+export type CoachTransport = (lane: Lane, packet: ContextPacket, options: { signal: AbortSignal; lessons?: LessonId[]; delta: (text: string, model: string) => void }) => Promise<{ model: string; guidance: Guidance | null }>
 type Flight = { controller: AbortController; key: string; requestId: string }
 export class CoachController {
+  private lessons: LessonId[] = []
+  private resumeLanes: Lane[] = []
+  private resumeGuide = false
   private state: CoachState
   private listeners = new Set<() => void>()
   private flights = new Map<Lane, Flight>()
@@ -25,7 +30,7 @@ export class CoachController {
   private replayReferences: ReplayReference[] = []
   private retrySerial = 0
   readonly sessionId: string
-  constructor(private transport: CoachTransport, private now: () => number = Date.now, private id: () => string = () => crypto.randomUUID(), sessionId?: string) {
+  constructor(private transport: CoachTransport, private now: () => number = Date.now, private id: () => string = () => crypto.randomUUID(), sessionId?: string, private clock: Clock = systemClock) {
     this.sessionId = sessionId ?? this.id()
     this.state = emptyCoach(this.sessionId)
   }
@@ -45,7 +50,13 @@ export class CoachController {
     }
     return event
   }
-  start(permission: Permission, objective: string) { this.emit({ type: 'session.start', permission, objective }) }
+  configureLessons(ids: LessonId[]) {
+    if (this.state.status === 'running') return
+    const next = lessonIds(ids)
+    if (JSON.stringify(next) === JSON.stringify(this.lessons)) return
+    this.lessons = next; this.attempted.clear()
+  }
+  start(permission: Permission, objective: string) { if (this.disposed) return; this.emit({ type: 'session.start', permission, objective }) }
   task(objective: string, constraints: string[]) {
     if (this.state.status !== 'running' || this.disposed) return
     this.emit({ type: 'task.update', objective, constraints }); this.cancelStale()
@@ -53,7 +64,7 @@ export class CoachController {
     this.scheduleGuide()
   }
   speech(value: string, speaker: 'interviewer' | 'candidate' = 'interviewer') {
-    if (this.state.status !== 'running') return
+    if (this.disposed || this.state.status !== 'running') return
     const previous = this.state.evidenceVersion
     this.emit({ type: 'speech.final', speaker, text: value.slice(-4000) })
     if (this.state.evidenceVersion !== previous) {
@@ -61,6 +72,12 @@ export class CoachController {
       if (!this.replay) void this.run('talk')
       this.scheduleGuide()
     }
+  }
+  dialogue(turn: DialogueTurn) {
+    if (this.disposed || this.state.status !== 'running') return
+    this.emit({ type: 'dialogue.update', turn })
+    // Do not interrupt for every candidate utterance. The next question or
+    // changed code receives the latest role-tagged conversation.
   }
   question(original: string) {
     if (this.state.status !== 'running' || this.disposed) return
@@ -82,9 +99,9 @@ export class CoachController {
     }
   }
   private scheduleGuide() {
-    if (this.timer) clearTimeout(this.timer)
+    if (this.timer) this.clock.clearTimeout(this.timer)
     if (this.replay || this.disposed || this.state.status !== 'running' || !this.state.question) return
-    this.timer = setTimeout(() => {
+    this.timer = this.clock.setTimeout(() => {
       this.timer = null
       if (this.state.patches.length && this.state.patchReviews.some(review => ['differs', 'matches-proposal', 'reverted'].includes(review.status))) void this.run('review')
       else void this.run('guide')
@@ -97,7 +114,7 @@ export class CoachController {
     }
   }
   private cancelAll() {
-    if (this.timer) clearTimeout(this.timer)
+    if (this.timer) this.clock.clearTimeout(this.timer)
     this.timer = null
     for (const flight of this.flights.values()) flight.controller.abort()
     this.flights.clear()
@@ -121,11 +138,11 @@ export class CoachController {
     const requestId = this.id(), controller = new AbortController()
     this.flights.set(lane, { key, requestId, controller })
     this.emit({ type: 'result.start', lane, requestId, questionId: packet.question.id, evidenceVersion: packet.evidenceVersion, contextKey: packet.contextKey }, false)
-    const timeout = setTimeout(() => controller.abort(), lane === 'talk' ? 9000 : 30_000)
+    const timeout = this.clock.setTimeout(() => controller.abort(), lane === 'talk' ? 9000 : 30_000)
     try {
-      const result = await this.transport(lane, packet, { signal: controller.signal, delta: (value, model) => {
+      const result = await abortable(this.transport(lane, packet, { signal: controller.signal, lessons: [...this.lessons], delta: (value, model) => {
         if (!this.disposed && !controller.signal.aborted) this.emit({ type: 'result.delta', requestId, text: value, model }, false)
-      } })
+      } }), controller.signal)
       if (controller.signal.aborted) throw new Error('Cancelled')
       if (this.disposed) return
       const guidance = result.guidance ? parseGuidance({ ...result.guidance, patches: result.guidance.patches.map(({ path, fileVersion, startLine, before, after, reason }) => ({ path, fileVersion, startLine, before, after, reason })) }, packet) : null
@@ -134,14 +151,24 @@ export class CoachController {
       if (!this.disposed) this.emit({ type: 'result.fail', requestId, cancelled: controller.signal.aborted,
         error: controller.signal.aborted ? 'Stopped or timed out. Retry explicitly when ready.' : 'The model request failed or returned unsupported evidence. Retry explicitly; no automatic retries are billed.' }, false)
     } finally {
-      clearTimeout(timeout)
+      this.clock.clearTimeout(timeout)
       if (this.flights.get(lane)?.requestId === requestId) this.flights.delete(lane)
     }
   }
-  markTestStart(command: string) { if (this.state.status === 'running') this.emit({ type: 'test.start', command }) }
+  markTestStart(command: string) { if (!this.disposed && this.state.status === 'running') this.emit({ type: 'test.start', command }) }
   feedback(resultId: string, verdict: 'pass' | 'needs-work', categories: string[], note: string) { this.emit({ type: 'feedback.add', resultId, verdict, categories, note }, false) }
-  pause() { this.cancelAll(); if (this.state.status === 'running') this.emit({ type: 'session.pause' }) }
-  resume() { if (this.state.status === 'paused') this.emit({ type: 'session.resume' }) }
+  pause() {
+    if (this.state.status !== 'running') return
+    this.resumeLanes = [...this.flights.keys()]; this.resumeGuide = this.timer !== null
+    this.cancelAll(); this.emit({ type: 'session.pause' })
+  }
+  resume() {
+    if (this.disposed || this.state.status !== 'paused') return
+    const lanes = this.resumeLanes, guide = this.resumeGuide
+    this.resumeLanes = []; this.resumeGuide = false
+    this.emit({ type: 'session.resume' })
+    if (!this.replay) { for (const lane of lanes) void this.run(lane, true); if (guide) this.scheduleGuide() }
+  }
   end() { this.cancelAll(); if (this.state.status !== 'ended') this.emit({ type: 'session.end' }) }
   dispose() { this.cancelAll(); this.disposed = true; this.listeners.clear(); this.index.clear() }
   exportReplay(): string {
@@ -201,7 +228,7 @@ export class CoachController {
   getMetrics() { return { modelRequests: this.calls, activeRequests: this.flights.size, journalEvents: this.journal.length, journalTruncated: this.journalTruncated } }
 }
 export const httpCoachTransport: CoachTransport = async (lane, context, options) => {
-  const response = await fetch('/api/copilot/coach', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lane, context }), signal: options.signal })
+  const response = await fetch('/api/copilot/coach', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lane, context, lessons: options.lessons ?? [] }), signal: options.signal })
   if (!response.ok || !response.body) throw new Error(`Coach unavailable (${response.status})`)
   const reader = response.body.getReader(), decoder = new TextDecoder()
   let buffer = '', received = 0, done = false, model = '', guidance: Guidance | null = null

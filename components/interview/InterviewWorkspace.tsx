@@ -4,6 +4,7 @@ import { Activity, ArrowLeft, Check, ShieldCheck } from 'lucide-react'
 import { WorkspaceShell, type InterviewView } from '@/components/nav/WorkspaceShell'
 import { createInterviewHistory } from '@/lib/interview/history'
 import type { InterviewSession } from '@/lib/interview/session'
+import { LearningProvider } from '@/lib/coach/learning/LearningContext'
 import { InterviewTuningProvider, useInterviewTuning } from '@/lib/interview/TuningContext'
 import { LiveInterview } from './LiveInterview'
 import { MockInterview } from './MockInterview'
@@ -85,5 +86,5 @@ function Workspace({ ownerId }: { ownerId: string }) {
 }
 
 export function InterviewWorkspace({ ownerId }: { ownerId: string }) {
-  return <InterviewTuningProvider ownerId={ownerId}><Workspace ownerId={ownerId} /></InterviewTuningProvider>
+  return <LearningProvider ownerId={ownerId}><InterviewTuningProvider ownerId={ownerId}><Workspace ownerId={ownerId} /></InterviewTuningProvider></LearningProvider>
 }

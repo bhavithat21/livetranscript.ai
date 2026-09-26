@@ -13,11 +13,12 @@ import { liveTranscript, useInterviewRecorder } from '@/lib/interview/useIntervi
 import { detectionTranscript } from '@/lib/interview/detectionTranscript'
 import { downloadInterview } from '@/lib/interview/client'
 import { useInterviewTuning } from '@/lib/interview/TuningContext'
+import type { DialogueTurn } from '@/lib/coach/types'
 import type { InterviewSession } from '@/lib/interview/session'
 import styles from './Interview.module.css'
 
-export function LiveInterview({ blocked, onActivity, onComplete }: {
-  visible: boolean; blocked: boolean; onActivity: (active: boolean) => void
+export function LiveInterview({ blocked, onActivity, onComplete, videoTest = false }: {
+  videoTest?: boolean; visible: boolean; blocked: boolean; onActivity: (active: boolean) => void
   onComplete: (session: InterviewSession) => void
 }) {
   const call = useInterviewRecorder()
@@ -26,10 +27,10 @@ export function LiveInterview({ blocked, onActivity, onComplete }: {
   const { scale } = useTextScale()
   const [interviewerSpeaker, setInterviewerSpeaker] = useState<number | null>(null)
   const { keyterms } = useKeytermPrefs()
-  const [source, setSource] = useState<'both' | 'system' | 'mic'>('both')
-  const [title, setTitle] = useState('Live interview')
+  const [source, setSource] = useState<'both' | 'system' | 'mic'>(videoTest ? 'system' : 'both')
+  const [title, setTitle] = useState(videoTest ? 'Video coding test' : 'Live interview')
   const [consent, setConsent] = useState(false)
-  const [repositoryMode, setRepositoryMode] = useState(false)
+  const [repositoryMode, setRepositoryMode] = useState(videoTest)
   const [active, setActive] = useState(false)
   const [busy, setBusy] = useState(false)
   const [finishing, setFinishing] = useState(false)
@@ -53,11 +54,19 @@ export function LiveInterview({ blocked, onActivity, onComplete }: {
 
   // Detection consumes only finalized interviewer-channel text. The richer
   // labeled dual-channel transcript remains the answer's grounding context.
-  const questionText = useCallback(() => detectionTranscript(
+  const questionText = useCallback(() => videoTest && interviewerSpeaker === null ? '' : detectionTranscript(
     (source === 'mic' ? getMicSegments() : getCallSegments()).filter((row) => row.capturedAt >= startTime.current),
     source === 'both' ? getMicSegments().filter((row) => row.capturedAt >= startTime.current) : [],
     interviewerSpeaker,
-  ), [getCallSegments, getMicSegments, source, interviewerSpeaker])
+  ), [getCallSegments, getMicSegments, source, interviewerSpeaker, videoTest])
+
+  const conversation = useCallback((): DialogueTurn[] => {
+    const incoming = (source === 'mic' ? getMicSegments() : getCallSegments()).filter(row => row.isFinal && row.capturedAt >= startTime.current)
+    const local = source === 'both' ? getMicSegments().filter(row => row.isFinal && row.capturedAt >= startTime.current) : []
+    return [...incoming.map(row => ({ sourceId: `call:${row.id}`, at: row.capturedAt, role: (interviewerSpeaker === null || row.speaker === null ? 'unknown' : row.speaker === interviewerSpeaker ? 'interviewer' : 'candidate') as DialogueTurn['role'], text: row.text.slice(-1000) })),
+      ...local.map(row => ({ sourceId: `mic:${row.id}`, at: row.capturedAt, role: 'candidate' as const, text: row.text.slice(-1000) }))]
+      .filter(row => row.text.trim()).sort((a,b) => a.at-b.at).slice(-24)
+  }, [getCallSegments, getMicSegments, source, interviewerSpeaker])
 
   useEffect(() => {
     if (!active) return
@@ -164,9 +173,10 @@ export function LiveInterview({ blocked, onActivity, onComplete }: {
         <ReadingControls /><span className={styles.sessionTime}>{formatTime(elapsed)}</span>
         <button type="button" className={styles.endButton} disabled={finishing} onClick={() => void finish()}><Square size={12} aria-hidden />End</button>
       </div>
+      {videoTest && interviewerSpeaker === null && <p className={styles.activityNotice}>Video test: select the interviewer in Speakers after both voices appear. Automatic answers wait for this assignment; voices are not identities.</p>}
       <div className={`${styles.liveGrid} ${repositoryMode || !transcriptOpen ? styles.liveGridNoRail : ''}`}>
         <div className={styles.answerColumn}>
-          {repositoryMode ? <RepositoryCoach permission="external-ai-allowed" getQuestionTranscript={questionText} /> : <LiveAnswerCanvas getTranscript={text} getQuestionTranscript={questionText} />}
+          {repositoryMode ? <RepositoryCoach permission={videoTest ? 'practice' : 'external-ai-allowed'} getQuestionTranscript={questionText} getConversation={conversation} /> : <LiveAnswerCanvas getTranscript={text} getQuestionTranscript={questionText} />}
           <div className={styles.captureBar}>
             {source !== 'system' && <span className={styles.channel}><span className={`${styles.channelDot} ${microphone.phase === 'recording' ? styles.channelDotOn : ''}`} /><Mic size={12} aria-hidden />Mic · {microphone.phase === 'recording' ? 'on' : 'waiting'}</span>}
             {source !== 'mic' && <span className={styles.channel}><span className={`${styles.channelDot} ${call.phase === 'recording' ? styles.channelDotOn : ''}`} /><Monitor size={12} aria-hidden />System · {call.phase === 'recording' ? 'on' : 'waiting'}</span>}

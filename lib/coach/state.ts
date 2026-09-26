@@ -1,5 +1,6 @@
 import type { CoachState, CoachEvent, ObservedFile, Fragment, Observation, FileObservation, Navigation, PatchReview, Source, Task, EventPayload } from './types'
 import { hashText, LIMITS, parseObservation, text, list, integer, permission, object } from './validation'
+import { parseDialogueTurn, updateDialogue } from './dialogue'
 import { parseTestOutput } from './testOutput'
 export { parseTestOutput } from './testOutput'
 
@@ -154,6 +155,10 @@ export function reduceCoach(previous: CoachState, event: CoachEvent): CoachState
     case 'task.update':
       state = { ...state, task: { ...state.task, objective: text(event.objective, 4000, true), constraints: list(event.constraints, 30).map(item => text(item, 1000, true)), version: state.task.version + 1 }, evidenceVersion: state.evidenceVersion + 1 }
       return invalidate({ ...state, navigation: null, patches: [], patchReviews: [] })
+    case 'dialogue.update': {
+      const conversation = updateDialogue(state.conversation ?? [], event.turn)
+      return conversation === previous.conversation ? previous : { ...state, conversation }
+    }
     case 'speech.final': {
       if (event.speaker !== 'interviewer') return state
       const task = intentFromSpeech(state.task, text(event.text, 4000))
@@ -190,7 +195,7 @@ export function reduceCoach(previous: CoachState, event: CoachEvent): CoachState
       const terminalChanged = !!observation.terminal && observation.terminal !== oldTerminal
       changed ||= terminalChanged
       state = { ...state, files: nextFiles, knownPaths, sources: [...state.sources, source].slice(-LIMITS.events), lastScreen: { sourceId: source.id, observation }, evidenceVersion: state.evidenceVersion + Number(changed), codeVersion: state.codeVersion + Number(edited), task: { ...state.task, requirements, version: state.task.version + Number(requirementsChanged) } }
-      if (state.navigation && navigationSeen(state.navigation, observation)) state.navigation = { ...state.navigation, status: 'seen' }
+      if (event.origin !== 'file-import' && state.navigation && navigationSeen(state.navigation, observation)) state.navigation = { ...state.navigation, status: 'seen' }
       state.patchReviews = reviewEdits(state)
       if (edited) state.tests = state.tests.map(run => run.codeVersion !== null && run.codeVersion !== state.codeVersion ? { ...run, status: 'stale' } : run)
       if (terminalChanged) {
@@ -221,7 +226,7 @@ export function reduceCoach(previous: CoachState, event: CoachEvent): CoachState
       if (event.guidance && result.lane !== 'talk') {
         const first = event.guidance.look[0]
         state.navigation = first ? { ...first, status: 'pending', requestedAfter: state.sequence } : null
-        if (state.navigation && state.lastScreen && navigationSeen(state.navigation, state.lastScreen.observation)) state.navigation.status = 'seen'
+        if (state.navigation && state.lastScreen && state.sources.find(item => item.id === state.lastScreen!.sourceId)?.origin !== 'file-import' && navigationSeen(state.navigation, state.lastScreen.observation)) state.navigation.status = 'seen'
         state.patches = event.guidance.patches.length ? event.guidance.patches : state.patches
         state.patchReviews = reviewEdits(state)
       }
@@ -244,8 +249,9 @@ export function parseReplayEvent(raw: unknown): CoachEvent {
     case 'session.pause': case 'session.resume': case 'session.end': payload = { type: item.type }; break
     case 'task.update': payload = { type: item.type, objective: text(item.objective, 4000, true), constraints: list(item.constraints, 30).map(value => text(value, 1000, true)) }; break
     case 'speech.final': if (!['interviewer', 'candidate'].includes(String(item.speaker))) throw new Error('Invalid replay speaker'); payload = { type: item.type, speaker: item.speaker as 'interviewer' | 'candidate', text: text(item.text, 4000) }; break
+    case 'dialogue.update': payload = { type: item.type, turn: parseDialogueTurn(item.turn) }; break
     case 'question.new': payload = { type: item.type, original: text(item.original, 4000, true), text: text(item.text, 2000, true) }; break
-    case 'screen.observed': payload = { type: item.type, origin: 'replay', observation: parseObservation(item.observation), ...(item.capturedAt === undefined ? {} : { capturedAt: integer(item.capturedAt, 0, base.at) }) }; break
+    case 'screen.observed': payload = { type: item.type, origin: item.origin === 'file-import' ? 'file-import' : 'replay', observation: parseObservation(item.observation), ...(item.capturedAt === undefined ? {} : { capturedAt: integer(item.capturedAt, 0, base.at) }) }; break
     case 'test.start': payload = { type: item.type, command: text(item.command, 500, true) }; break
     default: throw new Error('Replay can only import observations and session actions; model outputs are not evidence')
   }

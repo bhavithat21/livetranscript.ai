@@ -8,13 +8,16 @@ import { nativeAvailable, nativeDisplays, nativeFrameSource, type NativeDisplay 
 import { fileCoverage, resultCurrent } from '@/lib/coach/state'
 import { nextInspection } from '@/lib/coach/context'
 import { safePath } from '@/lib/coach/validation'
-import type { CoachState, Permission, ResultRecord } from '@/lib/coach/types'
+import type { CoachState, Permission, ResultRecord, DialogueTurn } from '@/lib/coach/types'
+import { LearningPanel } from './LearningPanel'
+import { useLessonPolicy } from '@/lib/coach/learning/LearningContext'
 import styles from './RepositoryCoach.module.css'
 
 const EMPTY_TRANSCRIPT = () => ''
 type Resources = { controller: CoachController; screen: ScreenObserver }
 export type RepositoryCoachProps = {
   getQuestionTranscript?: () => string
+  getConversation?: () => DialogueTurn[]
   permission?: Permission
   objective?: string
   onActivity?: (active: boolean) => void
@@ -29,11 +32,15 @@ function saveFile(name: string, content: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 export function RepositoryCoach({ transport = httpCoachTransport, captureTransport = httpCapture, onReady, ...props }: RepositoryCoachProps) {
+  const lessonPolicy = useLessonPolicy()
+  const lessonRef = useRef(lessonPolicy?.state.active ?? [])
+  useEffect(() => { lessonRef.current = lessonPolicy?.state.active ?? [] }, [lessonPolicy?.state.active])
   const [resources, setResources] = useState<Resources | null>(null)
   const readyRef = useRef(onReady)
   useEffect(() => { readyRef.current = onReady }, [onReady])
   useEffect(() => {
     const controller = new CoachController(transport)
+    controller.configureLessons(lessonRef.current)
     const screen = new ScreenObserver((observation, at) => controller.observe(observation, 'screen', at), captureTransport)
     const resource = { controller, screen }
     let active = true
@@ -52,7 +59,8 @@ function ReviewButtons({ result, state, controller }: { result: ResultRecord; st
     {expanded && <><label>What should improve?<select className={styles.input} value={category} onChange={event => setCategory(event.target.value)}><option value="correctness">Correctness</option><option value="directness">Directness / spoken clarity</option><option value="navigation">Wrong file or location</option><option value="stale-context">Stale or missing context</option><option value="latency">Response time</option><option value="verbosity">Too much detail</option></select></label><label>Review note<textarea className={styles.input} maxLength={1500} rows={3} value={note} onChange={event => setNote(event.target.value)} /></label><button className={styles.button} onClick={() => { controller.feedback(result.id, 'needs-work', [category], note); setExpanded(false) }}>Save review</button></>}
   </div>
 }
-function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRANSCRIPT, permission, objective: presetObjective, onActivity }: Omit<RepositoryCoachProps, 'onReady' | 'transport' | 'captureTransport'> & Resources) {
+function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRANSCRIPT, getConversation, permission, objective: presetObjective, onActivity }: Omit<RepositoryCoachProps, 'onReady' | 'transport' | 'captureTransport'> & Resources) {
+  const lessonPolicy = useLessonPolicy()
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot)
   const capture = useSyncExternalStore(screen.subscribe, screen.getSnapshot, screen.getSnapshot)
   const [consent, setConsent] = useState(false)
@@ -65,16 +73,24 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
   useEffect(() => { activity.current = onActivity }, [onActivity])
   const getter = useRef(getQuestionTranscript)
   useEffect(() => { getter.current = getQuestionTranscript }, [getQuestionTranscript])
+  const dialogueGetter = useRef(getConversation)
+  useEffect(() => { dialogueGetter.current = getConversation }, [getConversation])
   const running = state.status === 'running'
+  useEffect(() => { if (!running) controller.configureLessons(lessonPolicy?.state.active ?? []) }, [controller, running, lessonPolicy?.state.active])
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; activity.current?.(false) } }, [])
   useEffect(() => { activity.current?.(running) }, [running])
   useEffect(() => { if (permission && state.status === 'idle') controller.start(permission, presetObjective || 'Follow the interviewer’s task using only observed repository evidence.') }, [permission, presetObjective, controller, state.status])
-  const ask = useCallback((question: string) => { controller.question(question) }, [controller])
+  const ask = useCallback((question: string) => {
+    // Snapshot dialogue before dispatch; the periodic observer may be one tick behind.
+    for (const turn of dialogueGetter.current?.() ?? []) controller.dialogue(turn)
+    controller.question(question)
+  }, [controller])
   const getQuestions = useCallback(() => getter.current(), [])
   useProactive(running, getQuestions, ask, { latestWins: true })
   useEffect(() => {
     if (!running) return
     const timer = setInterval(() => {
+      for (const turn of dialogueGetter.current?.() ?? []) controller.dialogue(turn)
       const finalText = getter.current()
       if (finalText && finalText !== previousSpeech.current) {
         const previous = previousSpeech.current; previousSpeech.current = finalText
@@ -200,6 +216,7 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
       </div>
     </>}
     {(error || capture.error || state.warning) && <p className={`${styles.notice} ${styles.error}`} role="alert">{error || capture.error || state.warning}</p>}
+    <LearningPanel controller={controller} state={state} />
     <footer className={styles.footer}><span>{metrics.modelRequests} model calls · {capture.captures} extracted frames · {capture.localSamples} local samples</span><span>No repository writes or command execution</span></footer>
     <details className={`${styles.details} ${styles.main}`}><summary>Mock replay and feedback</summary><p>Replay imports only observations. Loading is offline; Analyze replay explicitly makes model calls. Exports include selected source code and transcript fragments, so inspect them before sharing.</p><label className={styles.permission}><input type="checkbox" checked={exportAllowed} onChange={event => setExportAllowed(event.target.checked)} /><span>I may export this session’s selected code, transcript fragments, model outputs, and reviews.</span></label><div className={styles.feedback}><button className={styles.button} disabled={!exportAllowed || !state.sequence} onClick={() => saveFile('repository-coach-replay.json', controller.exportReplay())}>Export replay + feedback</button><button className={styles.button} disabled={running || reading} onClick={() => replayInput.current?.click()}>Load replay offline</button><input hidden type="file" accept="application/json,.json" ref={replayInput} aria-label="Load repository replay" onChange={event => void loadReplay(event.target.files?.[0])} /></div></details>
   </section>

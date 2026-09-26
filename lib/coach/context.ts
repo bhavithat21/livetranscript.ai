@@ -1,4 +1,5 @@
 import type { CoachState, ContextPacket, ObservedFile, Fragment, EvidenceRef, Navigation, Task, TestEvidence, Patch, PatchReview } from './types'
+import { dialogueContext, parseDialogueTurn } from './dialogue'
 import { fileCoverage } from './state'
 import { hashText, integer, LIMITS, list, object, parseObservation, permission, safePath, text } from './validation'
 
@@ -64,6 +65,7 @@ export function buildContext(state: CoachState, maxCharacters: number = LIMITS.c
   const packet: ContextPacket = {
     schema: 1, sessionId: state.sessionId, permission: state.permission, question: { ...state.question }, task: { ...state.task, requirements: [...state.task.requirements], constraints: [...state.task.constraints] },
     evidenceVersion: state.evidenceVersion, codeVersion: state.codeVersion, contextKey: '', files: [], knownPaths: ranked.nodes.slice(0, 100).map(node => node.path), relations: [],
+    conversation: dialogueContext(state.conversation ?? []),
     visibleView: state.lastScreen ? {
       origin: state.sources.find(source => source.id === state.lastScreen!.sourceId)?.origin ?? 'screen',
       files: state.lastScreen.observation.files.map(file => ({ path: file.path, startLine: file.startLine, endLine: file.startLine === null ? null : file.startLine + file.lines.length - 1 })),
@@ -76,6 +78,7 @@ export function buildContext(state: CoachState, maxCharacters: number = LIMITS.c
   // Characters are bounded; this is not an exact token count.
   const fits = () => JSON.stringify(packet).length + 800 <= maxCharacters
   if (!fits()) {
+    packet.conversation = packet.conversation?.slice(-3)
     packet.tests = packet.tests.slice(-1)
     packet.patches = []
     if (!fits()) throw new Error('Task and constraints exceed the context budget. Narrow the session objective.')
@@ -131,7 +134,7 @@ export function nextInspection(state: CoachState): Navigation | null {
   return { path: selected.path, startLine, endLine: startLine, symbol: '', reason, status: 'pending', requestedAfter: state.sequence }
 }
 export function parseContext(raw: unknown): ContextPacket {
-  const root = object(raw, ['schema', 'sessionId', 'permission', 'question', 'task', 'evidenceVersion', 'codeVersion', 'contextKey', 'files', 'knownPaths', 'relations', 'tests', 'patches', 'patchReviews', 'visibleView', 'budget'])
+  const root = object(raw, ['schema', 'sessionId', 'permission', 'question', 'task', 'evidenceVersion', 'codeVersion', 'contextKey', 'files', 'knownPaths', 'relations', 'tests', 'patches', 'patchReviews', 'visibleView', 'conversation', 'budget'])
   if (root.schema !== 1 || JSON.stringify(root).length > LIMITS.context + 100) throw new Error('Invalid context envelope or size')
   const task = object(root.task, ['objective', 'requirements', 'constraints', 'phase', 'implementation', 'version'])
   if (!['understand', 'explore', 'plan', 'implement', 'debug', 'review'].includes(String(task.phase)) || !['hold', 'allowed'].includes(String(task.implementation))) throw new Error('Invalid task state')
@@ -204,8 +207,9 @@ export function parseContext(raw: unknown): ContextPacket {
       }),
     }
   }
+  const conversation = root.conversation === undefined ? [] : list(root.conversation, 8).map(parseDialogueTurn)
   const budget = object(root.budget, ['maxCharacters', 'usedCharacters', 'omittedPaths'])
   return { schema: 1, sessionId: text(root.sessionId, 100, true), permission: permission(root.permission), question: { id: text(question.id, 100, true), original: text(question.original, 4000, true), text: text(question.text, 2000, true), at: integer(question.at) }, task: parsedTask,
-    evidenceVersion: integer(root.evidenceVersion), codeVersion: integer(root.codeVersion), contextKey: text(root.contextKey, 100, true), files, knownPaths, relations, visibleView, tests, patches, patchReviews,
+    evidenceVersion: integer(root.evidenceVersion), codeVersion: integer(root.codeVersion), contextKey: text(root.contextKey, 100, true), files, knownPaths, relations, visibleView, conversation, tests, patches, patchReviews,
     budget: { maxCharacters: integer(budget.maxCharacters, 4000, LIMITS.context), usedCharacters: integer(budget.usedCharacters, 0, LIMITS.context), omittedPaths: list(budget.omittedPaths, 20).map(safePath) } }
 }
