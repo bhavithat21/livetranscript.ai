@@ -5,6 +5,10 @@ on:
       - 'lib/coach/**'
       - 'lib/copilot/**'
       - 'lib/interview/**'
+      - 'lib/rehearsal/**'
+      - 'components/rehearsal/**'
+      - 'app/api/rehearsal/**'
+      - 'rehearsals/**'
       - 'components/coach/**'
       - 'components/interview/**'
       - 'components/nav/**'
@@ -39,6 +43,8 @@ jobs:
           set -o pipefail
           node --test scripts/test-repo-coach.mjs | tee qa-results/coach/contracts.txt
           SIMULATOR_REPORT=qa-results/coach/simulator-suite.json pnpm run test:simulator | tee qa-results/coach/simulator.txt
+      - name: Interactive starter baseline (not an agent solution)
+        run: node --test rehearsals/maze-change/starter/test/*.check.mjs
       - name: Install pinned browser test runtime
         run: |
           python3 -m pip install playwright==1.55.0
@@ -50,6 +56,7 @@ jobs:
           python3 qa/coach/verify.py
           python3 qa/coach/focus.py
           python3 qa/coach/simulator.py
+          python3 qa/coach/rehearsal.py
       - name: Record exact source snapshot (tracked files only)
         if: always()
         run: |
