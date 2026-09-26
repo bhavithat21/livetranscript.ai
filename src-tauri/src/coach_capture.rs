@@ -18,7 +18,7 @@ pub struct Started { lease_id: String }
 #[derive(Serialize)]
 pub struct Sample { width: u32, height: u32, pixels: Vec<u8> }
 
-fn trusted(window: &WebviewWindow) -> Result<(), String> {
+pub(crate) fn trusted(window: &WebviewWindow) -> Result<(), String> {
     let url = window.url().map_err(|_| "Cannot verify desktop origin")?;
     let approved = url.scheme() == "https" && url.host_str() == Some("livetranscript.ai") && url.port_or_known_default() == Some(443);
     #[cfg(debug_assertions)]
@@ -121,16 +121,16 @@ fn platform_image(display: &str) -> Result<Vec<u8>, String> {
     Ok(output)
 }
 #[cfg(target_os = "macos")]
-fn request_permission() -> Result<(), String> {
+pub(crate) fn request_permission() -> Result<(), String> {
     #[link(name = "CoreGraphics", kind = "framework")]
     extern "C" { fn CGPreflightScreenCaptureAccess() -> bool; fn CGRequestScreenCaptureAccess() -> bool; }
     // SAFETY: stable zero-argument macOS Screen Recording permission APIs.
     if unsafe { CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess() } { Ok(()) } else { Err("Allow Screen Recording in System Settings before sharing".into()) }
 }
 #[cfg(target_os = "windows")]
-fn request_permission() -> Result<(), String> { Ok(()) }
+pub(crate) fn request_permission() -> Result<(), String> { Ok(()) }
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn request_permission() -> Result<(), String> { Err("Native screen evidence is supported on macOS and Windows".into()) }
+pub(crate) fn request_permission() -> Result<(), String> { Err("Native screen evidence is supported on macOS and Windows".into()) }
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn platform_displays() -> Result<Vec<Display>, String> { Err("Native screen evidence is unsupported on this platform".into()) }
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]

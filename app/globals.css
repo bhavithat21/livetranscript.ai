@@ -259,28 +259,27 @@ html.lt-desktop nav[aria-label="Main"] {
   backdrop-filter: blur(24px) saturate(150%) !important;
 }
 
-/* Steady cursor in the desktop overlay. In a floating always-on-top panel the
-   default web cursors feel jittery: an I-beam over every heading/label, resize
-   arrows at the undecorated window edges, text-select drag across the UI. Scope
-   this to lt-desktop ONLY so the web app at livetranscript.ai keeps normal
-   browser behavior.
-   - Default arrow everywhere, and kill accidental text selection of chrome.
-   - Interactive elements keep the pointer (hand) so affordance is preserved.
-   - Real text surfaces (transcript reader, inputs) stay selectable with the
-     I-beam — copying transcripts is a core action, don't break it. */
+/* Fixed arrow throughout our desktop web content, including nested icons,
+   disabled controls and module/inline cursor styles. This does NOT hide the
+   cursor, intercept events or change the underlying application's cursor.
+   Text stays editable/selectable independently of its cursor appearance. */
 html.lt-desktop,
+html.lt-desktop *,
+html.lt-desktop *::before,
+html.lt-desktop *::after {
+  cursor: default !important;
+}
 html.lt-desktop * {
-  cursor: default;
   -webkit-user-select: none;
   user-select: none;
 }
-html.lt-desktop a,
-html.lt-desktop button,
-html.lt-desktop summary,
-html.lt-desktop [role="button"],
-html.lt-desktop label {
-  cursor: pointer;
-}
+
+html.lt-desktop [data-pointer-selectable],
+html.lt-desktop [data-pointer-selectable] *,
+html.lt-desktop [contenteditable="true"],
+html.lt-desktop [contenteditable="true"] *,
+html.lt-desktop pre,
+html.lt-desktop pre *,
 html.lt-desktop .reader-surface,
 html.lt-desktop .reader-surface *,
 html.lt-desktop input,
@@ -293,7 +292,6 @@ html.lt-desktop textarea,
    no chrome (nav, headers, buttons) uses it, so selection stays off elsewhere. */
 html.lt-desktop .overscroll-contain,
 html.lt-desktop .overscroll-contain * {
-  cursor: text;
   -webkit-user-select: text;
   user-select: text;
 }
@@ -626,3 +624,13 @@ html:not(.lt-desktop):not(.lt-dark) :is(.text-black\/30, .text-black\/35, .text-
 .live-scroll-resume:hover { background: var(--hover-surface); }
 
 .brand-mark { color: var(--brand-citrus, #dde873); display: inline-flex; flex-shrink: 0; vertical-align: middle; }
+
+/* Inline Coach replaces all application chrome, not merely a panel inside it.
+   The original controller/audio tree stays mounted. Only the annotation portal
+   is visible; native mouse pass-through handles OS input underneath. */
+html.lt-inline,html.lt-inline body{background:transparent!important;background-image:none!important}
+html.lt-inline body>*:not([data-inline-root]){visibility:hidden!important}
+html.lt-inline [data-inline-root],html.lt-inline [data-inline-root] *{visibility:visible!important}
+html.lt-inline::before,html.lt-inline::after,html.lt-inline body::before,html.lt-inline body::after{display:none!important}
+
+html.lt-inline body{overflow:hidden!important}

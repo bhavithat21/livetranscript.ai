@@ -1,3 +1,4 @@
+import type { LineRect, TrackingRegions } from './inline/geometry'
 /** Evidence-driven assistance for practice and explicitly AI-permitted sessions.
  * Scores reported by an extraction model are NOT calibrated correctness probabilities.
  * No type in this module grants filesystem, shell, browser-automation or remote-control access.
@@ -7,7 +8,7 @@ export type Permission = 'practice' | 'external-ai-allowed'
 export type Lane = 'talk' | 'guide' | 'review'
 export type Origin = 'screen' | 'file-import' | 'replay'
 export type EvidenceRef = { sourceId: string; path: string; fileVersion: number; startLine: number | null; endLine: number | null }
-export type FileObservation = { path: string; language: string; startLine: number | null; lines: string[]; confidence: number; endOfFile: boolean }
+export type FileObservation = { path: string; language: string; startLine: number | null; lines: string[]; confidence: number; endOfFile: boolean; lineRects?: LineRect[]; trackingRegions?: TrackingRegions }
 export type Observation = { files: FileObservation[]; visiblePaths: string[]; terminal: string; requirements: string[] }
 export type Fragment = FileObservation & { sources: string[] }
 export type ObservedFile = {

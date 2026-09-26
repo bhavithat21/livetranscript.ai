@@ -57,7 +57,7 @@ export default function RootLayout({
             allowed; if a script-src is added later it needs a nonce. */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem("lt.theme");if(t!=="dark"&&t!=="light")t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";if(t==="dark")document.documentElement.classList.add("lt-dark")}catch(e){}})()`,
+            __html: `(function(){if("__TAURI_INTERNALS__" in window)document.documentElement.classList.add("lt-desktop");try{var t=localStorage.getItem("lt.theme");if(t!=="dark"&&t!=="light")t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";if(t==="dark")document.documentElement.classList.add("lt-dark")}catch(e){}})()`,
           }}
         />
         {/* Prime DNS + TLS to the ASR hosts before the user clicks record, so the

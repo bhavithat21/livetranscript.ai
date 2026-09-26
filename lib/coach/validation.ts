@@ -1,3 +1,4 @@
+import { parseLineRects, parseTrackingRegions } from './inline/geometry'
 import type { Observation, FileObservation, EvidenceRef, ContextPacket, Guidance, Patch, Finding, Navigation, Permission } from './types'
 
 export const LIMITS = { files: 100, paths: 500, fragments: 28, sourceText: 600_000, events: 1200, replayBytes: 4_000_000, context: 24_000, output: 60_000 } as const
@@ -36,7 +37,7 @@ export function parseObservation(raw: unknown): Observation {
   const root = object(raw, ['files', 'visiblePaths', 'terminal', 'requirements'])
   const files: FileObservation[] = []
   for (const rawFile of list(root.files, 12)) {
-    const item = object(rawFile, ['path', 'language', 'startLine', 'lines', 'confidence', 'endOfFile'])
+    const item = object(rawFile, ['path', 'language', 'startLine', 'lines', 'confidence', 'endOfFile', 'lineRects', 'trackingRegions'])
     const rawPath = text(item.path, 320, true).replaceAll('\\', '/')
     if (SECRET_PATH.test(rawPath)) continue
     const path = safePath(rawPath), language = text(item.language, 40, true)
@@ -44,7 +45,7 @@ export function parseObservation(raw: unknown): Observation {
     const startLine = item.startLine === null ? null : integer(item.startLine, 1, 100_000)
     const lines = list(item.lines, 240).map(line => { const value = text(line, 2000); if (/[\r\n]/.test(value)) throw new Error('One code line per item required'); return redactSecrets(value) })
     if (!lines.length || (startLine !== null && startLine + lines.length > 100_001) || typeof item.endOfFile !== 'boolean') throw new Error('Invalid observed range')
-    files.push({ path, language, startLine, lines, confidence: probability(item.confidence), endOfFile: item.endOfFile })
+    files.push({ path, language, startLine, lines, confidence: probability(item.confidence), endOfFile: item.endOfFile, ...(item.lineRects === undefined ? {} : { lineRects: parseLineRects(item.lineRects, startLine, lines) }), ...(item.trackingRegions === undefined ? {} : { trackingRegions: parseTrackingRegions(item.trackingRegions) }) })
   }
   const visiblePaths = list(root.visiblePaths, 300).map(value => text(value, 320, true).replaceAll('\\', '/')).filter(path => !SECRET_PATH.test(path)).map(safePath)
   const result = { files, visiblePaths: [...new Set(visiblePaths)], terminal: redactSecrets(text(root.terminal, 12_000)), requirements: list(root.requirements, 30).map(value => redactSecrets(text(value, 1000, true))) }
