@@ -1,0 +1,68 @@
+name: Requested playlist metadata review
+on:
+  push:
+    branches: [verify/playlist-readiness-20260926]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Install public metadata reader
+        run: python3 -m pip install yt-dlp
+      - name: Enumerate requested playlist and inspect public metadata
+        run: |
+          mkdir -p /tmp/playlist-review
+          python3 - <<'PY'
+          import concurrent.futures, datetime, json, pathlib, urllib.request
+          from yt_dlp import YoutubeDL
+          from yt_dlp.version import __version__
+          out=pathlib.Path('/tmp/playlist-review')
+          url='https://www.youtube.com/playlist?list=PLtVcREFQDb6Y45wg6A7I9nryrd3SE8r7b'
+          report={'playlistUrl':url,'checkedAt':datetime.datetime.now(datetime.timezone.utc).isoformat(),'readerVersion':__version__,'mediaDownloaded':False,'modelCalls':0,'videos':[]}
+          class Quiet:
+            def debug(self,x): pass
+            def warning(self,x): pass
+            def error(self,x): pass
+          opts={'quiet':True,'no_warnings':True,'logger':Quiet(),'socket_timeout':12,'retries':0,'extractor_retries':0,'skip_download':True,'playlistend':40}
+          try:
+            with YoutubeDL({**opts,'extract_flat':True}) as y:
+              p=y.extract_info(url,download=False)
+            report.update({'title':p.get('title'),'description':p.get('description'),'channel':p.get('channel'),'playlistCount':p.get('playlist_count'),'enumerated':True})
+            for i,e in enumerate(p.get('entries',[])):
+              report['videos'].append({'index':i+1,'id':e.get('id'),'title':e.get('title'),'duration':e.get('duration'),'channel':e.get('channel'),'url':e.get('url')})
+          except Exception as e:
+            report.update({'enumerated':False,'error':str(e)[:600]})
+          def detail(v):
+            try:
+              with YoutubeDL({**opts,'noplaylist':True}) as y:
+                d=y.extract_info('https://www.youtube.com/watch?v='+v['id'],download=False)
+              v.update({'description':d.get('description'),'chapters':d.get('chapters'),'uploadDate':d.get('upload_date'),'detailsAvailable':True,'subtitles':list((d.get('subtitles') or {}).keys()),'automaticCaptions':list((d.get('automatic_captions') or {}).keys())})
+              tracks=d.get('subtitles') or {}
+              track=tracks.get('en')
+              auto=False
+              if not track:
+                auto=True; tracks=d.get('automatic_captions') or {}; track=tracks.get('en-orig') or tracks.get('en')
+              if track:
+                t=next((t for t in track if t.get('ext')=='json3'),None) or next((t for t in track if t.get('ext')=='vtt'),None)
+                if t:
+                  with urllib.request.urlopen(t['url'],timeout=12) as r:
+                    raw=r.read(2_000_000)
+                  suffix=t.get('ext','txt'); (out/(v['id']+'.'+suffix)).write_bytes(raw)
+                  v['captionsRetrieved']={'type':suffix,'automatic':auto,'bytes':len(raw)}
+            except Exception as e:
+              v.update({'detailsAvailable':False,'detailsError':str(e)[:500]})
+            return v
+          if report['videos']:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+              vals=list(pool.map(detail,report['videos'][:16]))
+            report['videos'][:len(vals)]=vals
+          (out/'playlist-report.json').write_text(json.dumps(report,indent=2))
+          print(json.dumps(report,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: requested-playlist-review
+          path: /tmp/playlist-review/
+          retention-days: 3
