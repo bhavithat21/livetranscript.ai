@@ -137,7 +137,7 @@ export function LiveInterview({ blocked, onActivity, onComplete, videoTest = fal
           <h2 id="live-setup-heading">Focus on the conversation.</h2>
           <p>Questions, grounded answers, and the live transcript stay together. Start your audio when everyone is ready.</p>
           <label className={styles.setupPermission}><input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} /><span>I have permission to record this conversation and use AI assistance where permitted.</span></label>
-          <label className={styles.setupPermission}><input type="checkbox" checked={repositoryMode} onChange={(event) => setRepositoryMode(event.target.checked)} /><span>Screen-aware coding session — continuously follow the selected screen, track only what becomes visible, and show Say now / Change / Verify. No IDE, editor, repository, or filesystem access.</span></label>
+          <label className={styles.setupPermission}><input type="checkbox" checked={repositoryMode} onChange={(event) => setRepositoryMode(event.target.checked)} /><span>Repository coding interview — continuously follow the selected screen, track only what becomes visible, and show Say now / Change / Verify. No IDE, editor, repository, or filesystem access.</span></label>
           <div className={styles.setupActions}>
             <button type="button" className={styles.startButton} disabled={blocked || !consent} onClick={() => void begin()}><Play size={15} aria-hidden />Start interview</button>
             <button type="button" className={styles.darkButton} aria-expanded={setupOpen} aria-controls="live-setup-fields" onClick={() => setSetupOpen((open) => !open)}><Settings2 size={15} aria-hidden />Configure</button>
