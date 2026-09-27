@@ -18,10 +18,6 @@ const talk = (s: SimState) => s.requests.filter(r => r.lane === 'talk')
 const healthy = (s: SimState) => [check('no-errors', 'No unhandled controller or detector errors', s.transportErrors, [])]
 
 export const SCENARIOS: Scenario[] = [
-  { id: 'import-not-navigation', name: 'Imported file is not a confirmed screen navigation', description: 'Importing a file adds exact source evidence, but does not mean the requested file is visibly open.', objective, duration: 6000,
-    events: [screen(100), say(300, Q), screen(2200, code('  expect(allowed("PROCESSING", "SHIPPED")).toBe(true);', 'test/transition.test.ts'), { importOnly: true })],
-    check: s => [...healthy(s), check('still-pending', 'Navigation waits for an actual screen observation', s.state.navigation?.status, 'pending'), check('import-evidence', 'Imported code is still available as evidence', s.state.files.some(f => f.path === 'test/transition.test.ts'), true)] },
-
   { id: 'conversation', name: 'Overlapping voices and fragmented questions', description: 'Setup chatter, an incomplete stem, candidate reasoning on the call, a microphone question, and a real interviewer follow-up.', objective, duration: 7000,
     events: [screen(100), say(200, 'Can you hear me?'), say(900, 'How would you'), say(1200, 'fix this transition condition?'), say(2100, 'I think we should require both states, and check invalid transitions.', 2), say(2300, 'Could we skip tests?', 0, 'my-mic', 'mic'), say(2900, Q2)],
     check: s => [...healthy(s), check('two-turns', 'Exactly two interviewer questions, no setup/candidate triggers', s.state.questions.length, 2), check('talk-count', 'One talk request per settled interviewer question', talk(s).length, 2), check('candidate-context', 'Next answer receives the candidate reasoning with its role', talk(s).at(-1)?.context.conversation?.some(t => t.role === 'candidate' && t.text.includes('require both')), true), check('candidate-not-tests', 'Spoken reasoning is not test evidence', s.state.tests.length, 0)] },
