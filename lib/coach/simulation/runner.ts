@@ -95,7 +95,7 @@ export class RealtimeSimulator {
           this.controller.dialogue({ sourceId: `${action.channel}:${row.id}`, at: row.capturedAt, role, text: row.text })
           if (role === 'interviewer') this.controller.speech(row.text)
         }
-      } else if (action.kind === 'screen') this.controller.observe(action.observation, action.importOnly ? 'file-import' : 'screen', action.capturedAt === undefined ? undefined : this.startAt + action.capturedAt)
+      } else if (action.kind === 'screen') this.controller.observe(action.observation, 'screen', action.capturedAt === undefined ? undefined : this.startAt + action.capturedAt)
       else if (action.kind === 'test') this.controller.markTestStart(action.command)
       else if (action.kind === 'pause') { this.engine.stop(); this.controller.pause() }
       else if (action.kind === 'resume') { this.controller.resume(); this.engine.start() }
