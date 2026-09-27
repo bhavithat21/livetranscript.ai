@@ -194,7 +194,7 @@ export function parseContext(raw: unknown): ContextPacket {
   let visibleView: ContextPacket['visibleView'] = null
   if (root.visibleView !== undefined && root.visibleView !== null) {
     const view = object(root.visibleView, ['origin', 'files', 'terminalVisible'])
-    if (!['screen', 'file-import', 'replay'].includes(String(view.origin)) || typeof view.terminalVisible !== 'boolean') throw new Error('Invalid visible view')
+    if (!['screen', 'replay'].includes(String(view.origin)) || typeof view.terminalVisible !== 'boolean') throw new Error('Invalid visible view')
     visibleView = {
       origin: view.origin as NonNullable<ContextPacket['visibleView']>['origin'], terminalVisible: view.terminalVisible,
       files: list(view.files, 12).map(value => {
