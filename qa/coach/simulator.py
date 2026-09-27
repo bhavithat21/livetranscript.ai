@@ -43,11 +43,11 @@ with sync_playwright() as p:
     page.get_by_role('button',name='Next event',exact=True).click()
     page.wait_for_timeout(200)
     assert float(page.get_by_role('progressbar',name='Simulation progress').get_attribute('value'))>float(frozen)
-    page.get_by_role('button',name='Run all 13 scenarios',exact=True).click()
-    page.get_by_role('heading',name='Runtime checks · 13/13 scenarios passed',exact=True).wait_for()
+    page.get_by_role('button',name='Run all 12 scenarios',exact=True).click()
+    page.get_by_role('heading',name='Runtime checks · 12/12 scenarios passed',exact=True).wait_for()
     assert not requests,requests
     assert not errors,errors
-    result['checks']=['All 13 scenarios pass from the actual UI','Realtime play advances virtual events','Pause freezes timeline','Next event steps forward','Seven widths without page overflow','No API calls or browser exceptions']
+    result['checks']=['All 12 scenarios pass from the actual UI','Realtime play advances virtual events','Pause freezes timeline','Next event steps forward','Seven widths without page overflow','No API calls or browser exceptions']
     result['passed']=True
     browser.close()
 (out/'simulator-browser.json').write_text(json.dumps(result,indent=2))
