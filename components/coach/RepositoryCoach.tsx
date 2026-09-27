@@ -7,7 +7,6 @@ import { ScreenObserver, browserFrameSource, httpCapture, type CaptureTransport 
 import { nativeAvailable, nativeDisplays, nativeFrameSource, type NativeDisplay } from '@/lib/coach/native'
 import { fileCoverage, resultCurrent } from '@/lib/coach/state'
 import { nextInspection } from '@/lib/coach/context'
-import { safePath } from '@/lib/coach/validation'
 import type { CoachState, Permission, ResultRecord, DialogueTurn } from '@/lib/coach/types'
 import { LearningPanel } from './LearningPanel'
 import { useLessonPolicy } from '@/lib/coach/learning/LearningContext'
@@ -67,7 +66,7 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
   const [objective, setObjective] = useState(presetObjective || 'Investigate the current task and identify the smallest safe implementation change.')
   const [error, setError] = useState<string | null>(null), [reading, setReading] = useState(false), [exportAllowed, setExportAllowed] = useState(false)
   const [displays, setDisplays] = useState<NativeDisplay[]>([]), [displayId, setDisplayId] = useState(''), [selecting, setSelecting] = useState(false), [loadedReplay, setLoadedReplay] = useState(false)
-  const screenshots = useRef<HTMLInputElement>(null), files = useRef<HTMLInputElement>(null), replayInput = useRef<HTMLInputElement>(null)
+  const screenshots = useRef<HTMLInputElement>(null), replayInput = useRef<HTMLInputElement>(null), preview = useRef<HTMLVideoElement>(null)
   const generation = useRef(0), mounted = useRef(true), previousSpeech = useRef('')
   const activity = useRef(onActivity)
   useEffect(() => { activity.current = onActivity }, [onActivity])
@@ -76,6 +75,14 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
   const dialogueGetter = useRef(getConversation)
   useEffect(() => { dialogueGetter.current = getConversation }, [getConversation])
   const running = state.status === 'running'
+  useEffect(() => {
+    const video = preview.current
+    if (!video) return
+    const stream = screen.getPreviewStream()
+    if (video.srcObject !== stream) video.srcObject = stream
+    if (stream) void video.play().catch(() => {})
+    return () => { if (video.srcObject === stream) video.srcObject = null }
+  }, [screen, capture.sharing, capture.source])
   useEffect(() => { if (!running) controller.configureLessons(lessonPolicy?.state.active ?? []) }, [controller, running, lessonPolicy?.state.active])
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; activity.current?.(false) } }, [])
   useEffect(() => { activity.current?.(running) }, [running])
@@ -130,25 +137,6 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
     } catch (failure) { if (mounted.current) setError(failure instanceof Error ? failure.message : 'Could not read screenshots') }
     finally { if (mounted.current) setReading(false) }
   }
-  async function importFiles(selected: FileList | null) {
-    if (!selected?.length) return
-    const items = Array.from(selected), token = ++generation.current
-    if (files.current) files.current.value = ''
-    if (items.length > 40 || items.reduce((sum, file) => sum + file.size, 0) > 300_000) { setError('Select at most 40 text source files, totalling under 300 KB. Do not include credentials.'); return }
-    screen.watch(false); setReading(true); setError(null)
-    try {
-      for (const file of items) {
-        const path = safePath(file.webkitRelativePath || file.name)
-        if (!/\.(?:[cm]?[jt]sx?|py|java|cs|go|rs|json|md|ya?ml|toml|xml|html|css|sql|txt)$/i.test(path)) throw new Error('Import text source, tests or configuration files only.')
-        const content = await file.text()
-        if (!mounted.current || token !== generation.current || controller.getSnapshot().status !== 'running') return
-        if (content.includes('\0')) throw new Error('Binary files cannot be imported.')
-        const lines = content.replaceAll('\r\n', '\n').split('\n')
-        for (let start = 0; start < lines.length; start += 220) controller.observe({ files: [{ path, language: path.split('.').at(-1) || 'text', startLine: start + 1, lines: lines.slice(start, start + 220), confidence: 1, endOfFile: start + 220 >= lines.length }], visiblePaths: [path], terminal: '', requirements: [] }, 'file-import')
-      }
-    } catch (failure) { if (mounted.current) setError(failure instanceof Error ? failure.message : 'Could not import files') }
-    finally { if (mounted.current) setReading(false) }
-  }
   async function loadReplay(file?: File) {
     if (replayInput.current) replayInput.current.value = ''
     if (!file) return
@@ -170,18 +158,18 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
   const next = state.navigation ?? nextInspection(state), metrics = controller.getMetrics(), counts = state.files.map(fileCoverage), native = nativeAvailable()
   return <section className={styles.root} aria-label="Repository coach" data-testid="repository-coach">
     <header className={styles.header}><h2>Repository coach</h2><span className={styles.tag}>{state.status === 'idle' ? 'Set up' : loadedReplay ? 'Replay' : state.permission === 'practice' ? 'Practice' : 'AI-permitted session'}</span><span className={`${styles.muted} ${styles.spacer}`}>{state.status} · evidence v{state.evidenceVersion}</span></header>
-    {state.status === 'idle' && <div className={styles.setup}><h3>Follow the code. Keep the conversation moving.</h3><p>Share only the IDE you are allowed to show. The coach keeps observed code separate from suggestions, asks for missing evidence, and never edits files or runs commands for you.</p><label className={styles.label} htmlFor="coach-objective">Practice task</label><textarea id="coach-objective" className={styles.input} rows={3} maxLength={2000} value={objective} onChange={event => setObjective(event.target.value)} /><label className={styles.permission}><input type="checkbox" checked={consent} onChange={event => setConsent(event.target.checked)} /><span>I may share this code with the configured AI providers. This is practice or a session that explicitly permits external AI.</span></label><button className={`${styles.button} ${styles.primary}`} disabled={!consent || !objective.trim()} onClick={start}>Start repository practice</button></div>}
+    {state.status === 'idle' && <div className={styles.setup}><h3>Follow the code. Keep the conversation moving.</h3><p>Share only the screen or window you are allowed to show. The coach keeps observed code separate from suggestions, asks for missing evidence, and never edits files or runs commands for you.</p><label className={styles.label} htmlFor="coach-objective">Practice task</label><textarea id="coach-objective" className={styles.input} rows={3} maxLength={2000} value={objective} onChange={event => setObjective(event.target.value)} /><label className={styles.permission}><input type="checkbox" checked={consent} onChange={event => setConsent(event.target.checked)} /><span>I may share this code with the configured AI providers. This is practice or a session that explicitly permits external AI.</span></label><button className={`${styles.button} ${styles.primary}`} disabled={!consent || !objective.trim()} onClick={start}>Start repository practice</button></div>}
     {state.status !== 'idle' && <>
       <div className={styles.controls}>
-        <button className={styles.button} disabled={!running || selecting || reading || capture.reading} onClick={() => void selectScreen()}>{selecting ? 'Selecting…' : capture.sharing ? 'Change shared IDE' : 'Share IDE'}</button>
+        <button className={styles.button} disabled={!running || selecting || reading || capture.reading} onClick={() => void selectScreen()}>{selecting ? 'Selecting…' : capture.sharing ? 'Change shared screen' : 'Share screen'}</button>
         {capture.sharing && <><button className={styles.button} disabled={!running || reading} onClick={() => screen.watch(!capture.watching)}>{capture.watching ? 'Pause screen watch' : 'Watch changes'}</button><button className={styles.button} disabled={!running || capture.reading || reading} onClick={() => void screen.captureNow()}>Capture now</button><button className={styles.button} onClick={() => void screen.stop()}>Stop sharing</button></>}
-        <button className={styles.button} disabled={!running || capture.reading || reading} onClick={() => screenshots.current?.click()}>Add screenshots</button><input hidden ref={screenshots} type="file" multiple accept="image/png,image/jpeg,image/webp" aria-label="Repository screenshots" onChange={event => void uploadScreens(event.target.files)} />
-        <button className={styles.button} disabled={!running || reading || capture.reading} onClick={() => files.current?.click()}>Import source files</button><input hidden ref={files} type="file" multiple aria-label="Repository source files" onChange={event => void importFiles(event.target.files)} />
+        <button className={styles.button} disabled={!running || capture.reading || reading} onClick={() => screenshots.current?.click()}>Add screenshots</button><input hidden ref={screenshots} type="file" multiple accept="image/png,image/jpeg,image/webp" aria-label="Screen screenshots" onChange={event => void uploadScreens(event.target.files)} />
         {running ? <button className={styles.button} onClick={pause}>Pause coach</button> : state.status === 'paused' && <button className={styles.button} disabled={loadedReplay && !state.question} onClick={() => loadedReplay ? controller.analyzeReplay() : controller.resume()}>{loadedReplay ? 'Analyze replay with AI' : 'Resume coach'}</button>}
         {state.status !== 'ended' && <button className={styles.button} onClick={end}>End coach</button>}
       </div>
       {native && <details className={`${styles.details} ${styles.main}`}><summary>Desktop display capture</summary><p>Use a selected display through the native app. This does not grant remote control. Screen-recording permission is required.</p><button className={styles.button} disabled={!running || selecting} onClick={() => { void nativeDisplays().then(items => { setDisplays(items); setDisplayId(items[0]?.id || '') }).catch(() => setError('Native capture requires the updated desktop installer and screen-recording permission.')) }}>Find displays</button>{displays.length > 0 && <label className={styles.label}>Display<select className={styles.input} value={displayId} onChange={event => setDisplayId(event.target.value)}>{displays.map(display => <option key={display.id} value={display.id}>{display.name} · {display.width} × {display.height}</option>)}</select><button className={styles.button} disabled={!running || !displayId || selecting} onClick={() => void selectScreen(true)}>Share selected display</button></label>}</details>}
-      {(capture.sharing || capture.reading || reading) && <p className={styles.notice} role="status">{capture.reading ? 'Reading a changed view…' : reading ? 'Importing selected evidence…' : capture.watching ? 'Watching the selected IDE. Stable changed screenshots are sent to your configured vision provider.' : 'Screen selected; automatic screenshot analysis paused.'}</p>}
+      {capture.sharing && <section className={styles.screenStage} aria-label="Live shared screen"><div className={styles.screenStageHeader}><div><div className={styles.eyebrow}>Live screen</div><strong>{capture.source === 'native' ? 'Desktop display' : 'Shared window or display'}</strong></div><span className={styles.health}>{capture.watching ? 'Watching' : 'Paused'} · {capture.lastSampleAt ? 'live' : 'starting'}</span></div>{capture.source === 'browser' ? <video ref={preview} className={styles.screenPreview} muted playsInline autoPlay /> : <div className={styles.nativePreview}><strong>Native display capture is active.</strong><span>The desktop host samples the selected display locally; semantic keyframes appear below as evidence.</span></div>}<div className={styles.screenTelemetry}><span>{capture.localSamples} local samples</span><span>{capture.captures} semantic frames</span><span>{capture.gateReason ? `gate: ${capture.gateReason}` : 'waiting for first frame'}</span>{capture.changedTiles > 0 && <span>{capture.changedTiles} changed tiles</span>}</div></section>}
+      {(capture.sharing || capture.reading || reading) && <p className={styles.notice} role="status">{capture.reading ? 'Reading a changed view…' : reading ? 'Reading selected screen evidence…' : capture.watching ? 'Watching the selected screen continuously. Only stable semantic keyframes are sent to your configured vision provider.' : 'Screen selected; automatic visual analysis paused.'}</p>}
       {loadedReplay && <section className={styles.main} aria-label="Replay timeline">
         <label className={styles.label} htmlFor="coach-replay-checkpoint">Observation {replay.position} of {replay.total} · {replay.event}</label>
         <input id="coach-replay-checkpoint" aria-label="Replay checkpoint" type="range" min={1} max={Math.max(1, replay.total)} value={replay.position} className={styles.input} onChange={event => { screen.watch(false); controller.seekReplay(Number(event.target.value)) }} />
@@ -217,7 +205,7 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
     </>}
     {(error || capture.error || state.warning) && <p className={`${styles.notice} ${styles.error}`} role="alert">{error || capture.error || state.warning}</p>}
     <LearningPanel controller={controller} state={state} />
-    <footer className={styles.footer}><span>{metrics.modelRequests} model calls · {capture.captures} extracted frames · {capture.localSamples} local samples</span><span>No repository writes or command execution</span></footer>
+    <footer className={styles.footer}><span>{metrics.modelRequests} model calls · {capture.captures} extracted frames · {capture.localSamples} local samples</span><span>Screen/audio evidence only · no IDE, editor, repository or filesystem access</span></footer>
     <details className={`${styles.details} ${styles.main}`}><summary>Mock replay and feedback</summary><p>Replay imports only observations. Loading is offline; Analyze replay explicitly makes model calls. Exports include selected source code and transcript fragments, so inspect them before sharing.</p><label className={styles.permission}><input type="checkbox" checked={exportAllowed} onChange={event => setExportAllowed(event.target.checked)} /><span>I may export this session’s selected code, transcript fragments, model outputs, and reviews.</span></label><div className={styles.feedback}><button className={styles.button} disabled={!exportAllowed || !state.sequence} onClick={() => saveFile('repository-coach-replay.json', controller.exportReplay())}>Export replay + feedback</button><button className={styles.button} disabled={running || reading} onClick={() => replayInput.current?.click()}>Load replay offline</button><input hidden type="file" accept="application/json,.json" ref={replayInput} aria-label="Load repository replay" onChange={event => void loadReplay(event.target.files?.[0])} /></div></details>
   </section>
 }
