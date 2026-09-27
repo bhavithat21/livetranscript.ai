@@ -18,7 +18,7 @@ function packet() {
   const apply = (value: EventPayload) => { state = reduceCoach(state, { ...value, sessionId: 'fixture', at: ++id * 100, id: String(id) } as CoachEvent) }
   apply({ type: 'session.start', permission: 'practice', objective: 'Allow only transition from 1 to 2.' })
   apply({ type: 'question.new', original: 'What should change?', text: 'What should change?' })
-  apply({ type: 'screen.observed', origin: 'file-import', observation: { files: [{ path, language: 'typescript', startLine: 1, lines: ['return a === 1 || b === 2;'], confidence: 1, endOfFile: true }], visiblePaths: [path], terminal: '', requirements: [] } })
+  apply({ type: 'screen.observed', origin: 'screen', observation: { files: [{ path, language: 'typescript', startLine: 1, lines: ['return a === 1 || b === 2;'], confidence: 1, endOfFile: true }], visiblePaths: [path], terminal: '', requirements: [] } })
   return buildContext(state)
 }
 const guidance = () => ({ summary: 'Require both sides.', look: [], patches: [{ path, fileVersion: 1, startLine: 1, before: 'return a === 1 || b === 2;', after: 'return a === 1 && b === 2;', reason: 'Both conditions must hold.' }], findings: [], hypotheses: [], verify: [] })
