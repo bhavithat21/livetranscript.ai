@@ -137,7 +137,7 @@ export function LiveInterview({ blocked, onActivity, onComplete, videoTest = fal
           <h2 id="live-setup-heading">Focus on the conversation.</h2>
           <p>Questions, grounded answers, and the live transcript stay together. Start your audio when everyone is ready.</p>
           <label className={styles.setupPermission}><input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} /><span>I have permission to record this conversation and use AI assistance where permitted.</span></label>
-          <label className={styles.setupPermission}><input type="checkbox" checked={repositoryMode} onChange={(event) => setRepositoryMode(event.target.checked)} /><span>Repository coding interview — guide navigation, track observed edits, and show Say now / Change / Verify. Share the IDE separately after starting.</span></label>
+          <label className={styles.setupPermission}><input type="checkbox" checked={repositoryMode} onChange={(event) => setRepositoryMode(event.target.checked)} /><span>Screen-aware coding session — continuously follow the selected screen, track only what becomes visible, and show Say now / Change / Verify. No IDE, editor, repository, or filesystem access.</span></label>
           <div className={styles.setupActions}>
             <button type="button" className={styles.startButton} disabled={blocked || !consent} onClick={() => void begin()}><Play size={15} aria-hidden />Start interview</button>
             <button type="button" className={styles.darkButton} aria-expanded={setupOpen} aria-controls="live-setup-fields" onClick={() => setSetupOpen((open) => !open)}><Settings2 size={15} aria-hidden />Configure</button>
@@ -155,7 +155,7 @@ export function LiveInterview({ blocked, onActivity, onComplete, videoTest = fal
           <h3>Set up for this session</h3>
           <dl className={styles.setupFacts}>
             <div className={styles.setupFact}><Monitor size={20} aria-hidden /><div><dt>{source === 'both' ? 'Microphone + system audio' : source === 'system' ? 'System audio' : 'Microphone'}</dt><dd>{source === 'both' ? 'Separate channels keep the interviewer’s questions and your responses in context.' : source === 'system' ? 'Capture the call. Your microphone will not be recorded separately.' : 'Capture speech near your microphone. Remote questions may be missing.'}</dd></div></div>
-            <div className={styles.setupFact}><Sparkles size={20} aria-hidden /><div><dt>Live profile v{tuning.state.active.revision}</dt><dd>{repositoryMode ? 'Repository assistance uses the observed task and code evidence. Standard answer-profile calibration is separate.' : 'Your live instructions, answer preferences, and saved background guide each response.'}</dd></div></div>
+            <div className={styles.setupFact}><Sparkles size={20} aria-hidden /><div><dt>Live profile v{tuning.state.active.revision}</dt><dd>{repositoryMode ? 'Screen-aware assistance uses only observed visual/audio evidence. Unseen code and files remain unknown.' : 'Your live instructions, answer preferences, and saved background guide each response.'}</dd></div></div>
             <div className={styles.setupFact}><FileText size={20} aria-hidden /><div><dt>A transcript to come back to</dt><dd>End the session to save its transcript in Feedback. Raw audio is not saved by this workspace.</dd></div></div>
           </dl>
         </aside>
