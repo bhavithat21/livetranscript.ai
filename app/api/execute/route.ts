@@ -39,7 +39,7 @@ const JUDGE0_LANG: Record<string, number> = {
   scala: 112, // Scala 3.4
 }
 
-export function remoteLanguageId(language: string): number | null {
+function remoteLanguageId(language: string): number | null {
   return JUDGE0_LANG[language] ?? null
 }
 

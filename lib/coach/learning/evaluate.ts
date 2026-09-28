@@ -1,6 +1,7 @@
 import { callRepoModel } from '@/lib/repo/agentProviders'
 import { assertRepoModelConfigured, repoModelFor, validRepoModel } from '@/lib/repo/modelPolicy'
 import { coachPrompt } from '../prompts'
+import { coachGeneration } from '../generation'
 import { object, parseGuidance, text } from '../validation'
 import { learningCase } from './cases'
 import { LESSONS, lessonIds, lessonPrompt, policyKey, SUITE, type Comparison, type Diagnostics, type LessonId } from './policy'
@@ -27,7 +28,7 @@ export async function evaluateLessonCase(baseline:LessonId[], candidate:LessonId
   const sample=learningCase(caseId), {model,judge}=evaluationModels(sample.lane)
   const generate=async(ids:LessonId[])=>{
     const start=performance.now()
-    const result=await call({model,signal,maxTokens:sample.lane==='talk'?512:2200,system:coachPrompt(sample.lane)+lessonPrompt(ids),evidence:JSON.stringify(sample.context)})
+    const result=await call({model,signal,...coachGeneration(sample.lane,model),system:coachPrompt(sample.lane)+lessonPrompt(ids),evidence:JSON.stringify(sample.context)})
     let hardPass=true
     try {
       if(sample.lane==='talk') { if(result.text.trim().split(/\s+/).length>110 || /\bI (?:have )?(?:ran|executed|applied)\b/i.test(result.text)) hardPass=false }

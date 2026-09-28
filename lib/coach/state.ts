@@ -124,6 +124,14 @@ export function intentFromSpeech(task: Task, speech: string): Task {
   if (/\b(?:don't|do not|no)\s+(?:change|modify|alter).{0,15}(?:api|signature|interface)\b/i.test(speech)) constraints.push('Keep public APIs and signatures unchanged.')
   if (/\b(?:no external|without (?:new|external)|don't (?:use|add)).{0,20}(?:librar|dependenc)/i.test(speech)) constraints.push('Do not add external dependencies.')
   if (/\b(?:don't worry about|skip|do not run).{0,10}tests\b/i.test(speech)) constraints.push(deferTests)
+  // Preserve the actual scope in durable state when the rolling dialogue moves
+  // on. Do not turn a hypothetical question into a prohibition.
+  for (const sentence of speech.split(/(?<=[.!?])\s+/)) {
+    if (/\?\s*$/.test(sentence)) continue
+    if (/\b(?:nothing (?:we|you) can do|cannot|can't|can not|must not|don't|do not|not allowed to).{0,65}\b(?:speed (?:it|this|that|\w+ work) up|speed up|optimi[sz]e|remove|skip|change|modify)\b|\b(?:assume|must|has to|need(?:s)? to|required to).{0,65}\b(?:take(?:s)?|wait|block|run|remain|preserve|keep)\b/i.test(sentence)) {
+      constraints.push(`Interviewer constraint: ${sentence.trim().slice(0, 900)}`)
+    }
+  }
   if (resumeTests) phase = 'review'
   const next = { ...task, phase, implementation, constraints: [...new Set(constraints)].slice(-30) }
   return JSON.stringify(next) === JSON.stringify(task) ? task : { ...next, version: task.version + 1 }

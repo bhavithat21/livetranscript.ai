@@ -14,6 +14,9 @@ import { detectionTranscript } from '@/lib/interview/detectionTranscript'
 import { downloadInterview } from '@/lib/interview/client'
 import { useInterviewTuning } from '@/lib/interview/TuningContext'
 import type { DialogueTurn } from '@/lib/coach/types'
+import type { CoachController } from '@/lib/coach/controller'
+import type { ScreenObserver } from '@/lib/coach/screen'
+import { roundReview } from '@/lib/coach/roundReview'
 import type { InterviewSession } from '@/lib/interview/session'
 import styles from './Interview.module.css'
 
@@ -31,6 +34,9 @@ export function LiveInterview({ blocked, onActivity, onComplete, videoTest = fal
   const [title, setTitle] = useState(videoTest ? 'Video coding test' : 'Live interview')
   const [consent, setConsent] = useState(false)
   const [repositoryMode, setRepositoryMode] = useState(videoTest)
+  const [saveComparison, setSaveComparison] = useState(false)
+  const coach = useRef<CoachController | null>(null)
+  const coachScreen = useRef<ScreenObserver | null>(null)
   const [active, setActive] = useState(false)
   const [busy, setBusy] = useState(false)
   const [finishing, setFinishing] = useState(false)
@@ -78,6 +84,7 @@ export function LiveInterview({ blocked, onActivity, onComplete, videoTest = fal
     if (activity.current || blocked || !consent) return
     const token = ++lifecycle.current
     activity.current = true; ending.current = false; sessionId.current = crypto.randomUUID(); startTime.current = Date.now()
+    coach.current = null; coachScreen.current = null
     setInterviewerSpeaker(null); setCaptureStartedAt(startTime.current); setElapsed(0); setError(null); setBusy(true); setActive(true); setTranscriptOpen(true); onActivity(true)
     try {
       if (source !== 'mic') await call.start('system', keyterms)
@@ -95,8 +102,10 @@ export function LiveInterview({ blocked, onActivity, onComplete, videoTest = fal
     if (ending.current || !activity.current) return
     lifecycle.current += 1
     ending.current = true; setFinishing(true); setBusy(true)
+    coach.current?.end()
+    const stoppingScreen = coachScreen.current?.stop()
     try {
-      const [callRows, micRows] = await Promise.all([call.stop(), microphone.stop()])
+      const [callRows, micRows] = await Promise.all([call.stop(), microphone.stop(), stoppingScreen])
       const transcript = liveTranscript(
         source === 'mic' ? [] : callRows.filter((row) => row.capturedAt >= startTime.current),
         source === 'system' ? [] : micRows.filter((row) => row.capturedAt >= startTime.current),
@@ -105,11 +114,12 @@ export function LiveInterview({ blocked, onActivity, onComplete, videoTest = fal
       onComplete({
         id: sessionId.current, kind: 'live', title: title.trim() || 'Live interview',
         createdAt: startTime.current, durationSeconds: Math.max(0, Math.round((Date.now() - startTime.current) / 1000)), transcript, turns: [],
-        captureNote: source === 'both'
+        ...(saveComparison && coach.current ? { coachReview: roundReview(coach.current.getSnapshot()) } : {}),
+        captureNote: (source === 'both'
           ? 'Separate call/system audio and candidate microphone channels. Speaker numbers in the call channel do not identify the candidate. Microphone is presumed candidate; nearby voices/echo can be present. Arrival order is approximate, not synchronized word timing. AI/copilot suggestions are not included.'
           : source === 'system'
             ? 'System/call audio only. The candidate microphone was NOT captured separately; candidate answers may be missing. Do not infer candidate identity from speaker numbers. AI/copilot suggestions are not included.'
-            : 'Microphone only, presumed to be the candidate. Interviewer questions may be missing. Nearby voices may also be present. AI/copilot suggestions are not included.',
+            : 'Microphone only, presumed to be the candidate. Interviewer questions may be missing. Nearby voices may also be present. AI/copilot suggestions are not included.') + (saveComparison && coach.current ? ` A separate copilot comparison record was saved with permission; AI output is not human speech. ${interviewerSpeaker === null ? 'No interviewer voice assigned.' : `The user assigned call Speaker ${interviewerSpeaker + 1} as interviewer; other call voices remain inferred, not verified identities.`}` : ''),
       })
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not finish the interview. Export the transcript before leaving.') }
     finally { activity.current = false; ending.current = false; setFinishing(false); setActive(false); setBusy(false); onActivity(false) }
@@ -138,6 +148,7 @@ export function LiveInterview({ blocked, onActivity, onComplete, videoTest = fal
           <p>Questions, grounded answers, and the live transcript stay together. Start your audio when everyone is ready.</p>
           <label className={styles.setupPermission}><input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} /><span>I have permission to record this conversation and use AI assistance where permitted.</span></label>
           <label className={styles.setupPermission}><input type="checkbox" checked={repositoryMode} onChange={(event) => setRepositoryMode(event.target.checked)} /><span>Repository coding interview — continuously follow the selected screen, track only what becomes visible, and show Say now / Change / Verify. No IDE, editor, repository, or filesystem access.</span></label>
+          {repositoryMode && <label className={styles.setupPermission}><input type="checkbox" checked={saveComparison} onChange={event => setSaveComparison(event.target.checked)} /><span>Save AI answers and selected visible code with this session on this device for comparison. Generate review sends these records to the configured AI provider.</span></label>}
           <div className={styles.setupActions}>
             <button type="button" className={styles.startButton} disabled={blocked || !consent} onClick={() => void begin()}><Play size={15} aria-hidden />Start interview</button>
             <button type="button" className={styles.darkButton} aria-expanded={setupOpen} aria-controls="live-setup-fields" onClick={() => setSetupOpen((open) => !open)}><Settings2 size={15} aria-hidden />Configure</button>
@@ -173,10 +184,11 @@ export function LiveInterview({ blocked, onActivity, onComplete, videoTest = fal
         <ReadingControls /><span className={styles.sessionTime}>{formatTime(elapsed)}</span>
         <button type="button" className={styles.endButton} disabled={finishing} onClick={() => void finish()}><Square size={12} aria-hidden />End</button>
       </div>
-      {videoTest && interviewerSpeaker === null && <p className={styles.activityNotice}>Video test: select the interviewer in Speakers after both voices appear. Automatic answers wait for this assignment; voices are not identities.</p>}
+      {videoTest && interviewerSpeaker === null && <p className={styles.activityNotice}>Video test: select the interviewer below after both voices appear. Automatic answers wait for this assignment; voices are not identities.</p>}
+      {videoTest && callSpeakers.length > 0 && <div className={styles.speakerSettings}><label>Interviewer voice<select aria-label="Video interviewer voice" value={interviewerSpeaker ?? 'all'} onChange={event => setInterviewerSpeaker(event.target.value === 'all' ? null : Number(event.target.value))}><option value="all">Select the interviewer to start answers</option>{callSpeakers.map(speaker => <option key={speaker} value={speaker}>Speaker {speaker + 1}</option>)}</select></label><p>The other voice provides conversation context. Open Transcript to check the speaker labels.</p></div>}
       <div className={`${styles.liveGrid} ${repositoryMode || !transcriptOpen ? styles.liveGridNoRail : ''}`}>
         <div className={styles.answerColumn}>
-          {repositoryMode ? <RepositoryCoach permission={videoTest ? 'practice' : 'external-ai-allowed'} getQuestionTranscript={questionText} getConversation={conversation} /> : <LiveAnswerCanvas getTranscript={text} getQuestionTranscript={questionText} />}
+          {repositoryMode ? <RepositoryCoach permission={videoTest ? 'practice' : 'external-ai-allowed'} getQuestionTranscript={questionText} getConversation={conversation} onReady={({ controller, screen }) => { coach.current = controller; coachScreen.current = screen }} /> : <LiveAnswerCanvas getTranscript={text} getQuestionTranscript={questionText} />}
           <div className={styles.captureBar}>
             {source !== 'system' && <span className={styles.channel}><span className={`${styles.channelDot} ${microphone.phase === 'recording' ? styles.channelDotOn : ''}`} /><Mic size={12} aria-hidden />Mic · {microphone.phase === 'recording' ? 'on' : 'waiting'}</span>}
             {source !== 'mic' && <span className={styles.channel}><span className={`${styles.channelDot} ${call.phase === 'recording' ? styles.channelDotOn : ''}`} /><Monitor size={12} aria-hidden />System · {call.phase === 'recording' ? 'on' : 'waiting'}</span>}
@@ -185,7 +197,7 @@ export function LiveInterview({ blocked, onActivity, onComplete, videoTest = fal
         </div>
         {transcriptOpen && <aside id="live-transcript" className={styles.transcriptRail}>
           <div className={styles.railHeader}><h3>Transcript</h3><button type="button" onClick={() => setTranscriptOpen(false)}>Close</button></div>
-          {callSpeakers.length > 0 && <details className={styles.speakerSettings}><summary>Speakers · {callSpeakers.length} detected</summary><label>Answer questions from<select aria-label="Interviewer voice" value={interviewerSpeaker ?? 'all'} onChange={event => setInterviewerSpeaker(event.target.value === 'all' ? null : Number(event.target.value))}><option value="all">All incoming voices</option>{callSpeakers.map(speaker => <option key={speaker} value={speaker}>Speaker {speaker + 1}</option>)}</select></label><p>Voices are separated automatically. Assign the interviewer only when you know who is speaking. Early labels can change.</p></details>}
+          {callSpeakers.length > 0 && <details className={styles.speakerSettings}><summary>Speakers · {callSpeakers.length} detected</summary><label>Answer questions from<select aria-label="Interviewer voice" value={interviewerSpeaker ?? 'all'} onChange={event => setInterviewerSpeaker(event.target.value === 'all' ? null : Number(event.target.value))}><option value="all">{videoTest ? 'Select interviewer' : 'All incoming voices'}</option>{callSpeakers.map(speaker => <option key={speaker} value={speaker}>Speaker {speaker + 1}</option>)}</select></label><p>Voices are separated automatically. Assign the interviewer only when you know who is speaking. Early labels can change.</p></details>}
           <LiveScrollArea className={styles.transcriptList} updateKey={transcriptRows} label="Interviewer and microphone transcript">
             {!turns.length ? <div className={styles.transcriptEmpty}><AudioLines size={23} aria-hidden /><p>{busy ? 'Connect your audio to begin.' : 'Speech will appear here as it is transcribed.'}</p></div> : turns.map(turn => <div key={turn.key} className={styles.transcriptTurn} data-speaker={turn.speaker ?? 'pending'} data-channel={turn.channel}><div className={styles.turnLabel}><strong>{voiceLabel(turn.channel, turn.speaker, interviewerSpeaker)}</strong><span>{formatTime(Math.max(0, Math.floor((turn.capturedAt - captureStartedAt) / 1000)))}</span></div><p>{turn.parts.map((part, index) => <span key={part.id} className={part.isFinal ? undefined : styles.interim}>{index > 0 ? ' ' : ''}{part.text}</span>)}</p></div>)}
           </LiveScrollArea>

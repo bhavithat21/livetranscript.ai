@@ -4,7 +4,8 @@ import { assertRepoModelConfigured, repoProvider } from './modelPolicy'
 
 export type ModelUsage = { inputTokens: number; outputTokens: number }
 type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
-type ModelRequest = { model: string; system: string; evidence: string; signal: AbortSignal; maxTokens?: number; onUsage?: (usage: ModelUsage) => void }
+export type ModelRequest = { model: string; system: string; evidence: string; signal: AbortSignal; maxTokens?: number; onUsage?: (usage: ModelUsage) => void
+  thinking?: 'disabled' | 'adaptive'; effort?: Effort; cacheSystem?: boolean; schema?: Record<string, unknown> }
 type ModelResult = { text: string; model: string; usage?: ModelUsage }
 
 export class RepoModelResponseError extends Error {
@@ -32,6 +33,18 @@ function readUsage(input: number | undefined, output: number | undefined): Model
     ? { inputTokens: input!, outputTokens: output! } : undefined
 }
 
+function claudeOptions(p: ModelRequest, effort?: Effort) {
+  const selectedEffort = p.effort ?? effort
+  return {
+    ...(p.thinking ? { thinking: { type: p.thinking } } : {}),
+    ...((selectedEffort || p.schema) ? { output_config: {
+      ...(selectedEffort ? { effort: selectedEffort } : {}),
+      ...(p.schema ? { format: { type: 'json_schema' as const, schema: p.schema } } : {}),
+    } } : {}),
+    system: p.cacheSystem ? [{ type: 'text' as const, text: p.system, cache_control: { type: 'ephemeral' as const } }] : p.system,
+  }
+}
+
 function requireCompletion(reason: string | null | undefined, provider: 'claude' | 'openai', model: string, usage?: ModelUsage): void {
   if (reason === 'max_tokens' || reason === 'length') throw new RepoModelResponseError('Answer reached its output limit; narrow the question', model, usage)
   if (provider === 'claude' ? reason !== 'end_turn' && reason !== 'stop_sequence' : reason !== 'stop') {
@@ -48,7 +61,7 @@ export async function callRepoModel(p: ModelRequest): Promise<ModelResult> {
   signal.throwIfAborted()
   if (repoProvider(p.model) === 'anthropic') {
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 0, timeout: 28_000 })
-    const result = await client.messages.create({ model: p.model, max_tokens: p.maxTokens ?? settings.maxTokens, ...(settings.effort ? { output_config: { effort: settings.effort } } : {}), system: p.system, messages: [{ role: 'user', content: p.evidence }] }, { signal })
+    const result = await client.messages.create({ model: p.model, max_tokens: p.maxTokens ?? settings.maxTokens, ...claudeOptions(p, settings.effort), messages: [{ role: 'user', content: p.evidence }] }, { signal })
     const usage = readUsage(result.usage?.input_tokens, result.usage?.output_tokens)
     requireCompletion(result.stop_reason, 'claude', result.model, usage)
     const text = result.content.flatMap((part) => part.type === 'text' ? [part.text] : []).join('\n')
@@ -72,7 +85,7 @@ export async function* streamRepoModel(p: ModelRequest): AsyncGenerator<{ text: 
   signal.throwIfAborted()
   if (repoProvider(p.model) === 'anthropic') {
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 0, timeout: 50_000 })
-    const stream = client.messages.stream({ model: p.model, max_tokens: p.maxTokens ?? settings.maxTokens, ...(settings.effort ? { output_config: { effort: settings.effort } } : {}), system: p.system, messages: [{ role: 'user', content: p.evidence }] }, { signal })
+    const stream = client.messages.stream({ model: p.model, max_tokens: p.maxTokens ?? settings.maxTokens, ...claudeOptions(p, settings.effort), messages: [{ role: 'user', content: p.evidence }] }, { signal })
     let model = p.model
     let completed = false
     let stopped = false

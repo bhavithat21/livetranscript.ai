@@ -4,6 +4,16 @@ import { SCREEN_EXTRACTION_PROMPT } from './agentPrompts'
 import { validRepoModel } from './modelPolicy'
 import { parseScreenObservation, type ScreenObservation } from './screenEvidence'
 
+const SCREEN_SCHEMA = {
+  type: 'object', additionalProperties: false, required: ['files', 'visiblePaths', 'terminal', 'requirements'],
+  properties: {
+    files: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['path', 'language', 'startLine', 'lines', 'confidence', 'endOfFile'], properties: {
+      path: { type: 'string' }, language: { type: 'string' }, startLine: { type: ['integer', 'null'] }, lines: { type: 'array', items: { type: 'string' } }, confidence: { type: 'number' }, endOfFile: { type: 'boolean' },
+    } } },
+    visiblePaths: { type: 'array', items: { type: 'string' } }, terminal: { type: 'string' }, requirements: { type: 'array', items: { type: 'string' } },
+  },
+}
+
 export class ScreenExtractionError extends Error {
   constructor(message: string, public status: number, public model?: string, public usage?: ScreenTokenUsage) { super(message) }
 }
@@ -32,7 +42,10 @@ export async function extractScreenEvidence(input: {
   const result = await client.messages.create({
     model: input.model,
     max_tokens: 6000,
-    system: SCREEN_EXTRACTION_PROMPT,
+    // Transcription must not spend a hidden reasoning budget before returning
+    // visible text. Extraction confidence and exact evidence checks still apply.
+    ...(/^claude-sonnet-5(?:-|$)/.test(input.model) ? { thinking: { type: 'disabled' as const }, output_config: { format: { type: 'json_schema' as const, schema: SCREEN_SCHEMA } } } : {}),
+    system: [{ type: 'text', text: SCREEN_EXTRACTION_PROMPT, cache_control: { type: 'ephemeral' } }],
     messages: [{ role: 'user', content: [
       { type: 'image', source: { type: 'base64', media_type: input.image.mediaType, data: input.image.data } },
       { type: 'text', text: 'Transcribe the visible code, paths, requirements and terminal evidence.' },

@@ -4,6 +4,7 @@ import { ArrowUpRight, CheckCheck, Clock3, Download, FileText, FlaskConical, Rad
 import { Markdown } from '@/components/copilot/Markdown'
 import { requestInterview, downloadInterview } from '@/lib/interview/client'
 import { reviewExcerpt, type InterviewSession } from '@/lib/interview/session'
+import { comparisonExcerpt } from '@/lib/coach/roundReview'
 import type { HistoryStore } from '@/lib/interview/history'
 import styles from './Interview.module.css'
 
@@ -48,12 +49,12 @@ export function InterviewFeedback({ sessions, selectedId, onSelect, store }: {
   async function review() {
     if (!session || busy.current) return
     const selected = session
-    const excerpt = reviewExcerpt(selected.transcript)
+    const excerpt = selected.coachReview ? comparisonExcerpt(selected.transcript, selected.coachReview) : reviewExcerpt(selected.transcript)
     const token = ++generation.current
     const abort = new AbortController()
     controller.current = abort; busy.current = true; setReviewingId(selected.id); setError(null)
     try {
-      const feedback = await requestInterview({ action: 'feedback', subject: selected.kind === 'tuning' ? 'copilot' : 'candidate', transcript: excerpt.transcript, captureNote: selected.captureNote, coverage: excerpt.coverage }, abort.signal)
+      const feedback = await requestInterview({ action: 'feedback', subject: selected.coachReview ? 'comparison' : selected.kind === 'tuning' ? 'copilot' : 'candidate', transcript: excerpt.transcript, captureNote: selected.captureNote, coverage: excerpt.coverage }, abort.signal)
       if (generation.current === token) store.review(selected.id, feedback, excerpt.coverage)
     } catch (e) {
       if (!abort.signal.aborted && generation.current === token) setError(e instanceof Error ? e.message : 'Could not generate feedback. Please retry.')

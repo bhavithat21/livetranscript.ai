@@ -7,6 +7,8 @@ export type TranscriptEvent = {
   parts?: TranscriptPart[]
   text: string
   isFinal: boolean
+  /** Provider endpoint, distinct from a stable transcript segment. */
+  endOfTurn?: boolean
   speaker: number | null
   startMs: number
   endMs: number

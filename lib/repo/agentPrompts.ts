@@ -39,6 +39,7 @@ export const SCREEN_EXTRACTION_PROMPT = `Transcribe visible repository evidence 
 {"files":[{"path":"src/file.ts","language":"typescript","startLine":12,"lines":["exact visible source line"],"confidence":0.9,"endOfFile":false}],"visiblePaths":["src/file.ts"],"terminal":"visible command and output only","requirements":["visible problem text only"]}
 Rules:
 - Copy only legible, actually visible source. Preserve indentation, punctuation and blank lines. Remove the editor line-number gutter from source text. Never repair or complete code from memory.
+- Exclude clearly distinguishable editor inlay hints (such as parameter-name labels), CodeLens, autocomplete ghost text, and diagnostic overlays from source. If you cannot tell an overlay from actual source characters, omit that uncertain line and ask for a clearer view through low confidence; do not guess syntax.
 - path must be the visible editor breadcrumb/tab path, reconciled with an unambiguous visible tree. Do not invent a directory for a basename. If no filename is visible, omit that code block.
 - startLine is the first visible numeric line label, otherwise null; NEVER guess a line number. Split noncontiguous blocks (folded/hidden code) into separate files entries at their visible start lines. Wrapped display lines belong to their original source line; if uncertain use null startLine.
 - Stop a block before an illegible/clipped line and resume a separate block only when readable. Do not substitute placeholders into observed code. confidence is 0..1 for transcription accuracy.

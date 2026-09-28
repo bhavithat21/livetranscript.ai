@@ -64,7 +64,7 @@ export function buildContext(state: CoachState, maxCharacters: number = LIMITS.c
   const ranked = rankFiles(state, index)
   const packet: ContextPacket = {
     schema: 1, sessionId: state.sessionId, permission: state.permission, question: { ...state.question }, task: { ...state.task, requirements: [...state.task.requirements], constraints: [...state.task.constraints] },
-    evidenceVersion: state.evidenceVersion, codeVersion: state.codeVersion, contextKey: '', files: [], knownPaths: ranked.nodes.slice(0, 100).map(node => node.path), relations: [],
+    evidenceVersion: state.evidenceVersion, codeVersion: state.codeVersion, contextKey: '', files: [], knownPaths: [...new Set([...(state.lastScreen?.observation.files.map(file => file.path) ?? []), ...ranked.nodes.filter(node => node.file).slice(0, 12).map(node => node.path), ...ranked.nodes.map(node => node.path)])].slice(0, 100), relations: [],
     conversation: dialogueContext(state.conversation ?? []),
     visibleView: state.lastScreen ? {
       origin: state.sources.find(source => source.id === state.lastScreen!.sourceId)?.origin ?? 'screen',
@@ -83,7 +83,7 @@ export function buildContext(state: CoachState, maxCharacters: number = LIMITS.c
     packet.patches = []
     if (!fits()) throw new Error('Task and constraints exceed the context budget. Narrow the session objective.')
   }
-  for (const node of ranked.nodes.slice(0, 12)) {
+  for (const node of ranked.nodes.filter(node => node.file).slice(0, 12)) {
     if (!node.file || packet.files.length >= 6) continue
     const file = node.file
     const fragments = file.fragments.map(part => usefulFragment(part, `${state.question!.text} ${state.task.objective}`))
@@ -101,7 +101,7 @@ export function buildContext(state: CoachState, maxCharacters: number = LIMITS.c
     else item.complete = fileCoverage({ ...file, fragments: item.fragments }).complete
   }
   const refsInPacket = (ref: EvidenceRef) => packet.files.some(file => file.path === ref.path && file.fileVersion === ref.fileVersion && file.fragments.some(part => part.sources.includes(ref.sourceId) && (ref.startLine === null ? part.startLine === null : part.startLine !== null && ref.startLine >= part.startLine && ref.endLine! < part.startLine + part.lines.length)))
-  for (const relation of ranked.relations.filter(edge => edge.evidence.every(refsInPacket))) {
+  for (const relation of ranked.relations.filter(edge => packet.knownPaths.includes(edge.from) && packet.knownPaths.includes(edge.to) && edge.evidence.every(refsInPacket))) {
     packet.relations.push(relation)
     if (!fits()) packet.relations.pop()
   }
@@ -112,14 +112,28 @@ export function buildContext(state: CoachState, maxCharacters: number = LIMITS.c
   if (packet.budget.usedCharacters > maxCharacters) throw new Error('Compiled context exceeded its hard budget')
   return packet
 }
+/** Paths from a visible tree may be folders, not files. Never invent line 1
+ * for a folder or an unclassified extensionless entry; observed files still count. */
+function inspectablePath(path: string, state: CoachState): boolean {
+  if (state.files.some(file => file.path === path)) return true
+  // A tree basename is not a second unread file when one full observed path
+  // unambiguously supplies that name. Do not merge source fragments or resolve
+  // collisions: two packages can legitimately contain the same filename.
+  if (!path.includes('/') && state.knownPaths.filter(other => other.endsWith(`/${path}`)).length === 1 && state.files.some(file => file.path.endsWith(`/${path}`))) return false
+  if (state.knownPaths.some(other => other.startsWith(`${path}/`))) return false
+  const name = path.split('/').at(-1) ?? ''
+  if (/(?:\.\.\.|…)$/.test(name)) return false
+  return /^[^.].*\.[a-z0-9]+$/i.test(name) || /^(?:Dockerfile|Makefile|Justfile|Procfile|Gemfile|Rakefile|gradlew)$/i.test(name)
+}
 export function nextInspection(state: CoachState): Navigation | null {
-  if (state.navigation?.status === 'pending') return state.navigation
+  if (state.navigation && inspectablePath(state.navigation.path, state)) return state.navigation
   const ranked = rankFiles(state)
   const currentPaths = new Set(state.lastScreen?.observation.files.map(file => file.path) ?? [])
-  const linkedMissing = ranked.relations.find(edge => currentPaths.has(edge.from) && !state.files.some(file => file.path === edge.to))
-  const selected = ranked.nodes.find(node => node.path === linkedMissing?.to) ?? ranked.nodes.find(node => node.score > 0 && (!node.file || !fileCoverage(node.file).complete)) ?? ranked.nodes[0]
+  const nodes = ranked.nodes.filter(node => inspectablePath(node.path, state))
+  const linkedMissing = ranked.relations.find(edge => currentPaths.has(edge.from) && inspectablePath(edge.to, state) && !state.files.some(file => file.path === edge.to))
+  const selected = nodes.find(node => node.path === linkedMissing?.to) ?? nodes.find(node => node.score > 0 && (!node.file || !fileCoverage(node.file).complete)) ?? nodes[0]
   if (!selected) return null
-  let startLine: number | null = 1, reason = 'Inspect the observed target before suggesting a change.'
+  let startLine: number | null = null, reason = 'Inspect the observed target before suggesting a change.'
   if (!selected.file) reason = 'Only this path is known. Show its code and line-number gutter.'
   else {
     const coverage = fileCoverage(selected.file)

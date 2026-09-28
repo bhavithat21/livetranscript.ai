@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { callRepoModel, repoGenerationSettings, streamRepoModel } from './agentProviders'
+import { coachGeneration } from '../coach/generation'
 
 const provider = vi.hoisted(() => ({ claudeCreate: vi.fn(), claudeStream: vi.fn(), openaiCreate: vi.fn() }))
 vi.mock('@anthropic-ai/sdk', () => ({ default: class { messages = { create: provider.claudeCreate, stream: provider.claudeStream } } }))
@@ -23,6 +24,15 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs())
 
 describe('provider completion integrity', () => {
+  it('passes coach reasoning, stable schema and prefix caching to the real provider adapter', async () => {
+    provider.claudeCreate.mockResolvedValue({ model: 'claude-sonnet-5', stop_reason: 'end_turn', content: [{ type: 'text', text: '{}' }] })
+    await callRepoModel({ ...request('claude-sonnet-5'), ...coachGeneration('guide', 'claude-sonnet-5') })
+    expect(provider.claudeCreate.mock.calls[0][0]).toMatchObject({ thinking: { type: 'adaptive' }, output_config: { effort: 'medium', format: { type: 'json_schema' } }, max_tokens: 6000, system: [{ cache_control: { type: 'ephemeral' } }] })
+    provider.claudeStream.mockReturnValue(events([{ type: 'message_start', message: { model: 'claude-sonnet-5' } }, { type: 'message_delta', delta: { stop_reason: 'end_turn' } }, { type: 'message_stop' }]))
+    for await (const part of streamRepoModel({ ...request('claude-sonnet-5'), ...coachGeneration('talk', 'claude-sonnet-5') })) expect(part).toBeTruthy()
+    expect(provider.claudeStream.mock.calls[0][0]).toMatchObject({ thinking: { type: 'disabled' }, max_tokens: 640 })
+    expect(provider.claudeStream.mock.calls[0][0].output_config).not.toHaveProperty('format')
+  })
   it('retains billed model and tokens when a specialist hits its output limit', async () => {
     provider.claudeCreate.mockResolvedValue({ model: 'claude-actual', stop_reason: 'max_tokens', content: [], usage: { input_tokens: 100, output_tokens: 2200 } })
     await expect(callRepoModel(request('claude-test'))).rejects.toMatchObject({ model: 'claude-actual', usage: { inputTokens: 100, outputTokens: 2200 } })

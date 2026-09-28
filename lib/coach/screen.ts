@@ -71,11 +71,12 @@ export class ScreenObserver {
     if (!/^data:image\/(?:png|jpeg|webp);base64,/.test(image) || image.length > 6_000_000) { this.update({ error: 'Use a PNG, JPEG or WebP screenshot under 4.4 MB.', watching: false }); return false }
     const now = Date.now()
     this.requests = this.requests.filter(at => now - at < 60_000)
-    if (this.totalRequests >= 180 || this.requests.length >= 20) { this.update({ error: 'Screenshot analysis budget reached. Watch paused; narrow the window and resume when ready.', watching: false }); return false }
+    if (this.totalRequests >= 720 || this.requests.length >= 20) { this.update({ error: this.totalRequests >= 720 ? 'This session reached its 720-frame analysis limit. End it and start a new permitted session to continue.' : 'Screenshot analysis rate limit reached. Watch paused; wait one minute, then resume.', watching: false }); return false }
     const controller = new AbortController(), generation = this.generation
     this.controller = controller; this.requests.push(now); this.totalRequests++
     this.update({ reading: true, error: null })
-    const timeout = setTimeout(() => controller.abort(), 18_000)
+    // The provider's 35s extraction deadline expires before this client budget.
+    const timeout = setTimeout(() => controller.abort(), 38_000)
     try {
       const observation = parseObservation(await this.transport(image, controller.signal))
       if (controller.signal.aborted || generation !== this.generation) return false

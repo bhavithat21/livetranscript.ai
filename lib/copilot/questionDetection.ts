@@ -1,6 +1,6 @@
 // An interrogative/behavioral cue at the START of the (filler-stripped) clause.
 const CUE_RE =
-  /^(what|why|how|when|where|who|which|whose|whom|can you|could you|would you|will you|do you|did you|have you|are you|is there|tell me|walk me|describe|explain|give me an example|share|design|implement|write|reverse|find|solve|compare|difference between|what's|whats|how'd|how're|can we|could we|would it|is it|please|debug|fix|optimize|refactor|test)\b/i
+  /^(what|why|how|when|where|who|which|whose|whom|can you|could you|would you|will you|do you|did you|have you|are you|is there|is the|are the|does the|can the|will the|should the|tell me|walk me|describe|explain|give me an example|share|design|implement|write|reverse|find|solve|compare|difference between|what's|whats|how'd|how're|can we|could we|would it|is it|please|debug|fix|optimize|refactor|test)\b/i
 
 // Leading discourse filler real speakers (and ASR) prepend before the real ask:
 // "So tell me…", "Okay, walk me…", "And how would you…", "Great. So, can you…".
@@ -18,7 +18,21 @@ const FILLER_RE =
 const SPEAKER_RE = /^\s*(?:Speaker\s+(?:\d+|[A-Z])|Call(?:\s*\/\s*speaker\s+\d+)?|Interviewer(?:\s*\/\s*call)?):\s*/i
 
 function stripLabels(sentence: string): string {
-  return sentence.replace(SPEAKER_RE, '').replace(FILLER_RE, '').trim()
+  let clean = sentence.replace(SPEAKER_RE, '').replace(FILLER_RE, '').trim()
+  // A spoken restart must not carry an abandoned stem into the model request.
+  const restart = [...clean.matchAll(/\b(?:i mean|let me rephrase|let me start again|i would ask you)\s*[,;:]?\s*/gi)].at(-1)
+  if (restart) {
+    const repaired = clean.slice(restart.index! + restart[0].length).replace(FILLER_RE, '').trim()
+    if (CUE_RE.test(repaired)) clean = repaired
+  }
+  // ASR may keep a conversational preface and the actual request in one clause.
+  // Only explicit request phrases can cut a preface; quoted/reported speech is
+  // excluded below rather than scanning arbitrary question words in narration.
+  if (!/\b(?:he|she|they|the (?:prompt|question)) (?:said|asked|says|asks)\b|["“]/i.test(clean)) {
+    const request = /\b(?:i(?:'d| would) like (?:you to|to see how you)|i want you to|your task is to)\b/i.exec(clean)
+    if (request) clean = clean.slice(request.index)
+  }
+  return clean
 }
 
 // A sentence is question-shaped if it ends with '?' OR, after stripping a speaker
@@ -31,8 +45,12 @@ export function looksLikeQuestion(sentence: string): boolean {
   // Session logistics and quoted self-talk do not need a technical answer.
   if (/^(?:how does (?:that|this) sound|does (?:that|this) (?:sound|make sense)|are you (?:ready|there)|can you (?:hear me|see (?:me|my screen|the screen))|is (?:my|the) (?:audio|screen)|what(?:'s| is) your name)\b/i.test(clean)) return false
   if (/^(?:i(?:'m| am| was)? (?:wondering|thinking|asking)|the (?:question|prompt) (?:says|asks)|he (?:asked|said)|she (?:asked|said))\b/i.test(clean)) return false
+  if (!clean || incompleteQuestion(clean)) return false
+  // Agreement checks after statements are context, not a fresh technical ask.
+  if (/\b(?:right|okay|ok|correct|isn't it|isn't that right)[,\s]*\?$/i.test(clean) && !CUE_RE.test(clean)) return false
+  if (/^(?:right|okay|ok|correct)[?!.\s]*$/i.test(clean)) return false
   if (/\?\s*$/.test(bare)) return true
-  return CUE_RE.test(clean) || /^(?:i(?:'d| would) like you to|i want you to|your task is to)\b/i.test(clean)
+  return CUE_RE.test(clean) || /^(?:i(?:'d| would) like you to|i want you to|i(?:'d| would) like to see how you|your task is to)\b/i.test(clean)
 }
 
 // Pull the most recent question-shaped sentence out of the transcript tail, with
@@ -88,8 +106,12 @@ export function normalizeQuestion(q: string): string {
   return q.toLowerCase().replace(/[.!?,;:\s]+/g, '').trim()
 }
 export function incompleteQuestion(q: string): boolean {
+  // ASR can finalize a noun phrase with a period before its predicate arrives.
+  // Preserve valid short questions ("Is it synchronous?") while holding stems.
+  if (/^(?:is|are|does|do|can|will|should) (?:it|this|that|the|these|those)(?: (?:the|a|an|AI))?[.!?,\s]*$/i.test(q)) return true
+  if (/\b(?:can|could|would|should|will) (?:we|you|it|they)[.!?,\s]*$/i.test(q)) return true
   if (/^(?:(?:can|could|would|will|do|did|have|are|should) (?:you|we)|how(?: would| could| should)? (?:you|we)|what (?:is|are|about)|tell me|walk me through|please|i(?:'d| would) like you to)[.!?,\s]*$/i.test(q)) return true
-  return /\b(?:the|a|an|of|to|with|and|or|if|because|which|from|for|would|could|should|your|how|when|where|design|implement|write|explain|describe)[.!?,\s]*$/i.test(q)
+  return /\b(?:the|a|an|of|to|with|and|or|if|because|which|from|for|can|will|would|could|should|your|how|when|where|design|implement|write|explain|describe)[.!?,\s]*$/i.test(q)
 }
 export type QuestionCandidate = { question: string; origin: number; key: string; complete: boolean }
 /** Count occurrences of each normalized question, not preceding sentence count:

@@ -13,6 +13,7 @@ export type Segment = {
   speaker: number | null
   text: string
   isFinal: boolean
+  endOfTurn?: boolean
   sender?: string
   name?: string
   startMs?: number
@@ -36,12 +37,13 @@ export function mergeSegments(prev: Segment[], e: TranscriptEvent): Segment[] {
     const replacement: Segment[] = parts.map((part, index) => ({
       id: existing[index]?.id ?? id + added++, utteranceId: e.utteranceId,
       text: part.text, speaker: part.speaker, isFinal: e.isFinal,
+      ...(e.endOfTurn !== undefined ? { endOfTurn: index === parts.length - 1 && e.endOfTurn } : {}),
       startMs: part.startMs, endMs: part.endMs,
       ...(e.confidence !== undefined ? { confidence: e.confidence } : {}),
     }))
     if (existing.length === replacement.length && existing.every((segment, index) => {
       const next = replacement[index]
-      return segment.text === next.text && segment.speaker === next.speaker && segment.isFinal === next.isFinal
+      return segment.text === next.text && segment.speaker === next.speaker && segment.isFinal === next.isFinal && segment.endOfTurn === next.endOfTurn
         && segment.startMs === next.startMs && segment.endMs === next.endMs && segment.confidence === next.confidence
     })) return prev
     if (!indexes.length) return [...prev, ...replacement]
@@ -50,14 +52,14 @@ export function mergeSegments(prev: Segment[], e: TranscriptEvent): Segment[] {
   }
   const last = prev[prev.length - 1]
   if (last && !last.isFinal) {
-    if (last.text === e.text && last.isFinal === e.isFinal && last.speaker === e.speaker) return prev
+    if (last.text === e.text && last.isFinal === e.isFinal && last.speaker === e.speaker && last.endOfTurn === e.endOfTurn) return prev
     return [
       ...prev.slice(0, -1),
-      { id: last.id, speaker: e.speaker, text: e.text, isFinal: e.isFinal, startMs: last.startMs ?? e.startMs, endMs: e.endMs },
+      { id: last.id, speaker: e.speaker, text: e.text, isFinal: e.isFinal, startMs: last.startMs ?? e.startMs, endMs: e.endMs, ...(e.endOfTurn !== undefined ? { endOfTurn: e.endOfTurn } : {}) },
     ]
   }
   const nextId = prev.reduce((max, s) => Math.max(max, s.id), 0) + 1
-  return [...prev, { id: nextId, speaker: e.speaker, text: e.text, isFinal: e.isFinal, startMs: e.startMs, endMs: e.endMs }]
+  return [...prev, { id: nextId, speaker: e.speaker, text: e.text, isFinal: e.isFinal, startMs: e.startMs, endMs: e.endMs, ...(e.endOfTurn !== undefined ? { endOfTurn: e.endOfTurn } : {}) }]
 }
 
 // Coerce untrusted input (the client-sent segments blob) into clean Segment[]
@@ -77,6 +79,7 @@ export function sanitizeSegments(input: unknown): Segment[] {
       speaker: typeof r.speaker === 'number' ? r.speaker : null,
       text: r.text.slice(0, MAX_SEG_TEXT),
       isFinal: r.isFinal === true,
+      ...(typeof r.endOfTurn === 'boolean' ? { endOfTurn: r.endOfTurn } : {}),
       ...(typeof r.utteranceId === 'string' ? { utteranceId: r.utteranceId.slice(0, 160) } : {}),
       ...(typeof r.confidence === 'number' && Number.isFinite(r.confidence) && r.confidence >= 0 && r.confidence <= 1 ? { confidence: r.confidence } : {}),
       ...(typeof r.sender === 'string' ? { sender: r.sender.slice(0, 200) } : {}),

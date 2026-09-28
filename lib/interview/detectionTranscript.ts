@@ -24,6 +24,10 @@ export function detectionTranscript(call: CapturedSegment[], candidate: Captured
     else if (row.text.trim()) group.push(row.text.trim())
     previous = row
   }
-  flush()
+  // Deepgram is_final means stable segment text, not completed speech. Avoid
+  // using its terminal punctuation as the detector's 300 ms completion hint.
+  // Unknown/legacy providers retain the existing bounded stabilization fallback.
+  if (previous?.endOfTurn === false && group.length) group[group.length - 1] = group.at(-1)!.replace(/[.!?]+$/, '')
+  flush(previous?.endOfTurn === true)
   return turns.join('\n')
 }
