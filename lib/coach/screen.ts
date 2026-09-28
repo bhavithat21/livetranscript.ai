@@ -126,7 +126,11 @@ export class ScreenObserver {
 }
 export async function browserFrameSource(onEnded: () => void): Promise<FrameSource> {
   if (!navigator.mediaDevices?.getDisplayMedia) throw new Error('Browser screen sharing is unavailable; use the desktop app or upload a screenshot.')
-  const stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 30, max: 30 } }, audio: false })
+  const options: DisplayMediaStreamOptions & { selfBrowserSurface: 'exclude'; surfaceSwitching: 'include' } = {
+    video: { displaySurface: 'browser', frameRate: { ideal: 30, max: 30 } }, audio: false,
+    selfBrowserSurface: 'exclude', surfaceSwitching: 'include',
+  }
+  const stream = await navigator.mediaDevices.getDisplayMedia(options)
   const video = document.createElement('video'); video.muted = true; video.srcObject = stream
   let stopped = false
   const stop = () => { if (!stopped) { stopped = true; stream.getTracks().forEach(track => track.stop()); video.pause(); video.srcObject = null } }

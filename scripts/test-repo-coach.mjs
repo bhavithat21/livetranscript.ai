@@ -12,7 +12,7 @@ const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const out = mkdtempSync(join(tmpdir(), 'repo-coach-contracts-'))
 const tsc = require.resolve('typescript/bin/tsc')
 execFileSync(process.execPath, [tsc, '--target', 'es2022', '--module', 'commonjs', '--strict', '--skipLibCheck', '--lib', 'es2023,dom', '--outDir', out, '--rootDir', join(root, 'lib'), ...['types', 'validation', 'state', 'context', 'keyframes', 'controller', 'screen'].map(name => join(root, `lib/coach/${name}.ts`))], { stdio: 'inherit' })
-const { emptyCoach, reduceCoach, fileCoverage, lineMap, navigationSeen, parseTestOutput, parseReplayEvent } = require(join(out, 'coach', 'state.js'))
+const { emptyCoach, reduceCoach, fileCoverage, lineMap, navigationSeen, parseTestOutput, parseReplayEvent, resultCurrent } = require(join(out, 'coach', 'state.js'))
 const { buildContext, nextInspection, parseContext, EvidenceIndex, rankFiles } = require(join(out, 'coach', 'context.js'))
 const { parseGuidance, safePath } = require(join(out, 'coach', 'validation.js'))
 const { KeyframeGate } = require(join(out, 'coach', 'keyframes.js'))
@@ -236,13 +236,17 @@ test('a delayed screenshot cannot overwrite a more recent edit', () => {
   assert.equal(lineMap(s.files[0]).get(1).text, 'new current code')
   assert.equal(s.codeVersion, version); assert.match(s.warning, /older screenshot/)
 })
-test('newly observed requirements invalidate spoken guidance as well as code guidance', () => {
+test('newly observed requirements prevent speech from being presented as current', () => {
   let s = base(); const packet = buildContext(s), requestId = id()
   s = apply(s, { type: 'result.start', lane: 'talk', requestId, questionId: s.question.id, evidenceVersion: s.evidenceVersion, contextKey: packet.contextKey })
   const version = s.task.version
   s = see(s, [], { requirements: ['The cancelled state is terminal and must remain unchanged.'] })
   assert.equal(s.task.version, version + 1)
+  assert.equal(resultCurrent(s.results.find(row => row.id === requestId), s), false)
+  s = apply(s, { type: 'result.delta', requestId, text: 'An earlier-view explanation.', model: 'fixture' })
+  s = apply(s, { type: 'result.complete', requestId, model: 'fixture', guidance: null })
   assert.equal(s.results.find(row => row.id === requestId).status, 'stale')
+  assert.equal(resultCurrent(s.results.find(row => row.id === requestId), s), false)
 })
 test('current view ranges are explicit and validated, not inferred from the context order', () => {
   const s = see(base(), [file(['return 1;'], 12, { endOfFile: false })])

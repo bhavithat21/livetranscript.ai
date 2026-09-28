@@ -149,8 +149,20 @@ export function resultCurrent(result: CoachState['results'][number], state: Coac
   return result.questionId === state.question?.id && result.codeVersion === state.codeVersion && result.taskVersion === state.task.version
     && (result.lane === 'talk' || (result.terminalVersion ?? 0) === (state.terminalVersion ?? 0))
 }
+function instructionKey(task: Task): string {
+  return JSON.stringify([task.objective, task.constraints, task.phase, task.implementation])
+}
+export function sameSpokenTask(result: CoachState['results'][number], state: CoachState): boolean {
+  return result.questionId === state.question?.id && (result.instructionKey === undefined
+    ? result.taskVersion === state.task.version : result.instructionKey === instructionKey(state.task))
+}
+export function resultCanFinish(result: CoachState['results'][number], state: CoachState): boolean {
+  // A spoken response can finish against its labelled earlier screen snapshot.
+  // New questions/instructions still cancel it; exact code guidance stays strict.
+  return result.lane === 'talk' ? sameSpokenTask(result, state) : resultCurrent(result, state)
+}
 function invalidate(state: CoachState): CoachState {
-  return { ...state, results: state.results.map(result => !resultCurrent(result, state) && result.status !== 'failed' && result.status !== 'cancelled' ? { ...result, status: 'stale' } : result) }
+  return { ...state, results: state.results.map(result => !resultCurrent(result, state) && !(result.status === 'running' && resultCanFinish(result, state)) && result.status !== 'failed' && result.status !== 'cancelled' ? { ...result, status: 'stale' } : result) }
 }
 export function reduceCoach(previous: CoachState, event: CoachEvent): CoachState {
   if (event.sessionId !== previous.sessionId) throw new Error('Cross-session event rejected')
@@ -228,18 +240,18 @@ export function reduceCoach(previous: CoachState, event: CoachEvent): CoachState
     case 'result.start':
       if (state.status !== 'running' || event.questionId !== state.question?.id || event.evidenceVersion !== state.evidenceVersion) return previous
       if (state.results.some(item => item.id === event.requestId)) return previous
-      return { ...state, results: [...state.results, { id: text(event.requestId, 100, true), lane: event.lane, questionId: event.questionId, evidenceVersion: event.evidenceVersion, contextKey: event.contextKey, codeVersion: state.codeVersion, taskVersion: state.task.version, terminalVersion: state.terminalVersion ?? 0, status: 'running' as const, text: '', guidance: null, model: '', startedAt: event.at, firstUsefulMs: null, totalMs: null, error: null }].slice(-80) }
+      return { ...state, results: [...state.results, { id: text(event.requestId, 100, true), lane: event.lane, questionId: event.questionId, evidenceVersion: event.evidenceVersion, contextKey: event.contextKey, codeVersion: state.codeVersion, taskVersion: state.task.version, terminalVersion: state.terminalVersion ?? 0, instructionKey: instructionKey(state.task), status: 'running' as const, text: '', guidance: null, model: '', startedAt: event.at, firstUsefulMs: null, totalMs: null, error: null }].slice(-80) }
     case 'result.delta':
       return { ...state, results: state.results.map(result => {
-        if (result.id !== event.requestId || result.status !== 'running' || result.questionId !== state.question?.id || !resultCurrent(result, state) || state.status !== 'running') return result
+        if (result.id !== event.requestId || result.status !== 'running' || !resultCanFinish(result, state) || state.status !== 'running') return result
         const value = result.text + text(event.text, 8000)
         if (value.length > LIMITS.output) throw new Error('Answer exceeds its output budget')
         return { ...result, text: value, model: text(event.model, 180), firstUsefulMs: result.firstUsefulMs ?? (value.trim().length > 0 ? Math.max(0, event.at - result.startedAt) : null) }
       }) }
     case 'result.complete': {
       const result = state.results.find(item => item.id === event.requestId)
-      if (!result || result.status !== 'running' || result.questionId !== state.question?.id || !resultCurrent(result, state) || state.status !== 'running') return previous
-      state.results = state.results.map(item => item === result ? { ...item, status: 'complete', guidance: event.guidance, model: text(event.model, 180), totalMs: Math.max(0, event.at - item.startedAt) } : item)
+      if (!result || result.status !== 'running' || !resultCanFinish(result, state) || state.status !== 'running') return previous
+      state.results = state.results.map(item => item === result ? { ...item, status: resultCurrent(item, state) ? 'complete' : 'stale', guidance: event.guidance, model: text(event.model, 180), totalMs: Math.max(0, event.at - item.startedAt) } : item)
       if (event.guidance && result.lane !== 'talk') {
         const first = event.guidance.look[0]
         state.navigation = first ? { ...first, status: 'pending', requestedAfter: state.sequence } : null

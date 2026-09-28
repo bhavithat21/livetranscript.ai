@@ -39,6 +39,7 @@ export type ResultRecord = {
   id: string; lane: Lane; questionId: string; evidenceVersion: number; codeVersion: number; taskVersion: number; contextKey: string
   status: 'running' | 'complete' | 'failed' | 'cancelled' | 'stale'
   terminalVersion?: number
+  instructionKey?: string
   text: string; guidance: Guidance | null; model: string; startedAt: number
   firstUsefulMs: number | null; totalMs: number | null; error: string | null
 }

@@ -85,7 +85,8 @@ export function useMicStream() {
           }
           const display = await navigator.mediaDevices.getDisplayMedia({
             audio: true,
-            video: true,
+            video: { displaySurface: 'browser' },
+            selfBrowserSurface: 'exclude',
             systemAudio: 'include',
             surfaceSwitching: 'include',
             monitorTypeSurfaces: 'exclude',

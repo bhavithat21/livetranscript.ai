@@ -1,7 +1,7 @@
 import { abortable, systemClock, type Clock } from './clock'
 import type { CoachState, CoachEvent, ContextPacket, EventPayload, Guidance, Lane, Observation, Origin, Permission, DialogueTurn, ScreenFreshness } from './types'
 import { buildContext, EvidenceIndex } from './context'
-import { emptyCoach, normalizeQuestion, parseReplayEvent, reduceCoach, resultCurrent } from './state'
+import { emptyCoach, normalizeQuestion, parseReplayEvent, reduceCoach, resultCanFinish } from './state'
 import { lessonIds, type LessonId } from './learning/policy'
 import { LIMITS, list, object, parseGuidance, redactSecrets, text } from './validation'
 import { CoachRequestError, coachErrorCode } from './errors'
@@ -124,7 +124,7 @@ export class CoachController {
   private cancelStale() {
     for (const [lane, flight] of this.flights) {
       const record = this.state.results.find(item => item.id === flight.requestId)
-      if (!record || !resultCurrent(record, this.state)) { flight.controller.abort(); this.flights.delete(lane) }
+      if (!record || !resultCanFinish(record, this.state)) { flight.controller.abort(); this.flights.delete(lane) }
     }
   }
   private cancelAll() {

@@ -45,7 +45,7 @@ it('corrects a question, refreshes with newly observed code, and disables action
   fireEvent.click(screen.getByRole('button', { name: 'Refresh answer' }))
   await waitFor(() => expect(files).toEqual([0, 0, 1]))
   await waitFor(() => expect(controller.getSnapshot().results.findLast(item => item.lane === 'talk')?.status).toBe('complete'))
-  act(() => controller.observe({ files: [{ path: 'Service.java', language: 'java', startLine: 1, lines: ['class Service { int count; }'], confidence: 1, endOfFile: true }], visiblePaths: ['Service.java'], terminal: '', requirements: [] }))
+  act(() => controller.observe({ files: [{ path: 'Service.java', language: 'java', startLine: 1, lines: ['class Service { int count; }'], confidence: 1, endOfFile: true }], visiblePaths: ['Service.java'], terminal: '', requirements: ['Report generation takes ten seconds.'] }))
   expect(currentAnswer.getByText('Earlier screen view')).toBeTruthy()
   expect(currentAnswer.getByText('Answer to: How should we handle concurrency?')).toBeTruthy()
   expect(questions).toHaveLength(3)

@@ -8,7 +8,7 @@ import { speakingCue } from '@/lib/coach/speakingCue'
 import { CoachController, httpCoachTransport, type CoachTransport } from '@/lib/coach/controller'
 import { ScreenObserver, browserFrameSource, httpCapture, type CaptureTransport } from '@/lib/coach/screen'
 import { nativeAvailable, nativeDisplays, nativeFrameSource, type NativeDisplay } from '@/lib/coach/native'
-import { fileCoverage, resultCurrent } from '@/lib/coach/state'
+import { fileCoverage, resultCurrent, sameSpokenTask } from '@/lib/coach/state'
 import { nextInspection } from '@/lib/coach/context'
 import type { CoachState, Permission, ResultRecord, DialogueTurn } from '@/lib/coach/types'
 import { Markdown } from '@/components/copilot/Markdown'
@@ -176,8 +176,8 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
     } catch (failure) { if (mounted.current) setError(failure instanceof Error ? failure.message : 'Could not load replay') }
   }
   function start() { if (consent && objective.trim()) { controller.start('practice', objective.trim()); controller.question(objective.trim()) } }
-  const talk = state.results.findLast(item => item.lane === 'talk' && resultCurrent(item, state))
-    ?? state.results.findLast(item => item.lane === 'talk' && item.questionId === state.question?.id && item.taskVersion === state.task.version && item.totalMs !== null && item.text && item.status === 'stale')
+  const talk = state.results.findLast(item => item.lane === 'talk' && (resultCurrent(item, state) || (item.status === 'running' && sameSpokenTask(item, state))))
+    ?? state.results.findLast(item => item.lane === 'talk' && sameSpokenTask(item, state) && item.totalMs !== null && item.text && item.status === 'stale')
   const guide = state.results.findLast(item => item.lane !== 'talk' && item.status === 'complete' && resultCurrent(item, state))
   const guiding = state.results.some(item => item.lane !== 'talk' && item.status === 'running' && resultCurrent(item, state))
   const failed = state.results.findLast((item, index, results) => ['failed', 'cancelled'].includes(item.status) && resultCurrent(item, state) && !results.slice(index + 1).some(newer => newer.lane === item.lane && resultCurrent(newer, state)))

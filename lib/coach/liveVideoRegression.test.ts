@@ -6,6 +6,7 @@ import { VirtualClock } from './simulation/clock'
 import { taskRequirements } from '../repo/evidenceText'
 import { coachGeneration } from './generation'
 import type { Observation } from './types'
+import { resultCurrent, sameSpokenTask } from './state'
 
 const screen = (line = 'return report;', confidence = 0.92, terminal = ''): Observation => ({
   files: [{ path: 'Service.java', language: 'java', startLine: 8, lines: [line], confidence, endOfFile: false }],
@@ -33,10 +34,12 @@ describe('failures observed during the real YouTube run', () => {
     expect(questionCandidates('He asked, the first question I have is how would you fix this.')).toEqual([])
     expect(questionCandidates('What we need is an asynchronous response.')).toEqual([])
     expect(questionCandidates('How would you implement this with')).toEqual([])
+    expect(questionCandidates('What are some ways that we can still.')).toEqual([])
+    expect(questionCandidates('What are some ways that we can still prevent the timeout?').at(-1)?.question).toContain('prevent the timeout')
   })
   it('keeps the full task and removes video promotion and clipped duplicate readings', () => {
     const full = "You're given the following gRPC service that generates a report."
-    expect(taskRequirements(['Ace your interviews with our interview prep course: https://example.test', 'In this video, we unpack the process ...more', full, full.slice(0, 46), '> Preserve the expensive work', 'Preserve the expensive work']))
+    expect(taskRequirements(['Ace your interviews with our interview prep course: https://example.test', 'In this video, we unpack the process ...more', '50K views 9 months ago #ai #aitools', full, full.slice(0, 46), '> Preserve the expensive work', 'Preserve the expensive work']))
       .toEqual([full, 'Preserve the expensive work'])
   })
   it('does not count shell prompts as tests or rerun speech on OCR changes', async () => {
@@ -94,5 +97,36 @@ describe('failures observed during the real YouTube run', () => {
   it('bounds the first guide while keeping deeper reasoning for edit review', () => {
     expect(coachGeneration('guide', 'claude-sonnet-5')).toMatchObject({ thinking: 'disabled', maxTokens: 2400, effort: 'low' })
     expect(coachGeneration('review', 'claude-sonnet-5')).toMatchObject({ thinking: 'adaptive', effort: 'medium' })
+  })
+  it('finishes speech through screen changes as an earlier-view answer, but cancels new instructions', async () => {
+    let finish: (() => void) | undefined
+    const requests: Parameters<CoachTransport>[2][] = []
+    const transport: CoachTransport = async (lane, _packet, options) => {
+      if (lane !== 'talk') return { model: 'fixture', guidance: null }
+      requests.push(options)
+      options.delta('Acknowledge the request first. ', 'fixture')
+      await new Promise<void>(resolve => { finish = resolve })
+      options.delta('Then run the report in a worker.', 'fixture')
+      return { model: 'fixture', guidance: null }
+    }
+    const coach = new CoachController(transport)
+    coach.start('practice', 'Investigate the timeout'); coach.observe(screen()); coach.question('How would you fix the timeout?')
+    coach.observe({ ...screen('return changed;'), requirements: ['Report generation takes ten seconds.'] })
+    expect(requests[0].signal.aborted).toBe(false)
+    expect(coach.getSnapshot().results[0].status).toBe('running')
+    finish!()
+    await vi.waitFor(() => expect(coach.getSnapshot().results[0].status).toBe('stale'))
+    const result = coach.getSnapshot().results[0]
+    expect(result.text).toContain('Then run the report')
+    expect(result.totalMs).not.toBeNull()
+    expect(resultCurrent(result, coach.getSnapshot())).toBe(false)
+    expect(sameSpokenTask(result, coach.getSnapshot())).toBe(true)
+    expect(requests).toHaveLength(1)
+    coach.question('What about retries?')
+    expect(sameSpokenTask(result, coach.getSnapshot())).toBe(false)
+    coach.task('Investigate the timeout', ['No API changes'])
+    expect(requests[1].signal.aborted).toBe(true)
+    expect(sameSpokenTask(result, coach.getSnapshot())).toBe(false)
+    coach.dispose()
   })
 })

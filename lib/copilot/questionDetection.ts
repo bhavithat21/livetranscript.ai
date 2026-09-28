@@ -118,6 +118,7 @@ export function incompleteQuestion(q: string): boolean {
   // Preserve valid short questions ("Is it synchronous?") while holding stems.
   if (/^(?:is|are|does|do|can|will|should) (?:it|this|that|the|these|those)(?: (?:the|a|an|AI))?[.!?,\s]*$/i.test(q)) return true
   if (/\b(?:can|could|would|should|will) (?:we|you|it|they)[.!?,\s]*$/i.test(q)) return true
+  if (/\b(?:we|you|it|they) (?:can|could|would|should|will)(?: (?:still|also|then|just|maybe|possibly))*[.!?,\s]*$/i.test(q)) return true
   if (/^(?:(?:can|could|would|will|do|did|have|are|should) (?:you|we)|how(?: would| could| should)? (?:you|we)|what (?:is|are|about)|tell me|walk me through|please|i(?:'d| would) like you to)[.!?,\s]*$/i.test(q)) return true
   return /\b(?:the|a|an|of|to|with|and|or|if|because|which|from|for|can|will|would|could|should|your|how|when|where|design|implement|write|explain|describe)[.!?,\s]*$/i.test(q)
 }
