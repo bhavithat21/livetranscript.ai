@@ -1,6 +1,6 @@
 import type { TranscriptEvent, TranscriptPart } from './types'
 
-export type ResultMessage = { type?: string; channel?: { alternatives?: Array<{ transcript?: unknown; words?: unknown; confidence?: unknown }> }; start?: unknown; duration?: unknown; is_final?: unknown; transcript?: unknown; words?: unknown; end_of_turn?: unknown; speaker_label?: unknown; turn_order?: unknown }
+export type ResultMessage = { type?: string; channel?: { alternatives?: Array<{ transcript?: unknown; words?: unknown; confidence?: unknown }> }; start?: unknown; duration?: unknown; is_final?: unknown; speech_final?: unknown; transcript?: unknown; words?: unknown; end_of_turn?: unknown; speaker_label?: unknown; turn_order?: unknown }
 
 export type Word = { word?: string; text?: string; punctuated_word?: string; start?: number; end?: number; speaker?: number | string; word_is_final?: boolean; confidence?: number }
 const number = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0
@@ -38,6 +38,7 @@ export function deepgramResult(data: ResultMessage, stream: string): TranscriptE
   const end = number(last?.end) ? last.end : start + (number(data.duration) ? data.duration : 0)
   return {
     text: alt.transcript, isFinal: data.is_final === true,
+    ...(typeof data.speech_final === 'boolean' ? { endOfTurn: data.speech_final } : {}),
     speaker: labels.size === 1 ? label(first?.speaker) : null,
     startMs: Math.round(start * 1000), endMs: Math.round(end * 1000),
     ...(number(data.start) ? { utteranceId: `${stream}:${data.start}` } : {}),
@@ -52,6 +53,7 @@ export function assemblyResult(data: ResultMessage, stream: string, label: (valu
   const labels = new Set(words.map(wordLabel))
   return {
     text: data.transcript, isFinal: data.end_of_turn === true,
+    ...(typeof data.end_of_turn === 'boolean' ? { endOfTurn: data.end_of_turn } : {}),
     speaker: words.length ? (labels.size === 1 ? wordLabel(words[0]) : null) : label(data.speaker_label),
     startMs: number(words[0]?.start) ? words[0].start! : 0,
     endMs: number(words.at(-1)?.end) ? words.at(-1)!.end! : 0,

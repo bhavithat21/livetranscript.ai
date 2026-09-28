@@ -1,4 +1,4 @@
-import { version } from '@/package.json'
+import packageInfo from '@/package.json'
 
 export const dynamic = 'force-dynamic'
 
@@ -8,7 +8,7 @@ export async function GET() {
   return Response.json({
     status: 'ok',
     service: 'livetranscript',
-    version,
+    version: packageInfo.version,
     commit: process.env.VERCEL_GIT_COMMIT_SHA || null,
     features: ['repository-screenshots', 'repository-specialist-agents', 'remote-assistance', 'app-appearance', 'standalone-ai-copilot', 'answer-preferences', 'interview-workspace', 'practice-coach'],
   }, { headers: { 'Cache-Control': 'no-store' } })

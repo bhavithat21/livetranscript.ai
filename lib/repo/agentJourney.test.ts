@@ -37,7 +37,8 @@ afterEach(() => vi.unstubAllEnvs())
 describe('repository product API journey', () => {
   it.each([false, true])('carries two captured files into independent specialists and synthesis (reviewer unavailable: %s)', async (reviewerUnavailable) => {
     let screenIndex = 0
-    provider.create.mockImplementation(async ({ system }: { system: string }) => {
+    provider.create.mockImplementation(async ({ system: input }: { system: string | Array<{ text: string }> }) => {
+      const system = typeof input === 'string' ? input : input.map(block => block.text).join('\n')
       if (system.startsWith('Transcribe visible repository evidence')) {
         return { model: 'claude-vision-actual', stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify(observations[screenIndex++]) }] }
       }

@@ -1,3 +1,4 @@
+import { taskRequirements, terminalEvidence } from './evidenceText'
 /** A screenshot is partial, untrusted evidence. Missing text is never reconstructed. */
 export interface ScreenObservation {
   files: Array<{
@@ -114,8 +115,8 @@ export function parseScreenObservation(input: unknown): ScreenObservation {
     // credential paths without rejecting the whole capture; validate every path
     // before filtering so traversal/malformed model output is still rejected.
     visiblePaths: [...new Set(array(root.visiblePaths, 300, 'Visible paths').map(path).filter((value) => !SECRET_PATH.test(value)))],
-    terminal: text(root.terminal, 12_000, 'Terminal'),
-    requirements: [...new Set(array(root.requirements, 30, 'Requirements').map((value) => text(value, 1_000, 'Requirement').trim()).filter(Boolean))],
+    terminal: terminalEvidence(text(root.terminal, 12_000, 'Terminal')),
+    requirements: taskRequirements(array(root.requirements, 30, 'Requirements').map((value) => text(value, 1_000, 'Requirement'))),
   }
   const size = result.files.reduce((total, file) => total + file.lines.join('\n').length + file.path.length, 0)
     + result.visiblePaths.join('\n').length + result.terminal.length + result.requirements.join('\n').length

@@ -7,28 +7,33 @@ export class KeyframeGate {
   private accepted: FrameSignal | null = null
   private candidate: FrameSignal | null = null
   private candidateAt = 0
+  private dirtyAt: number | null = null
   private lastCapture = -Infinity
   private busy = false
-  constructor(readonly settleMs = 400, readonly minIntervalMs = 1500) {}
-  reset() { this.accepted = null; this.candidate = null; this.candidateAt = 0; this.lastCapture = -Infinity; this.busy = false }
+  constructor(readonly settleMs = 400, readonly minIntervalMs = 1500, readonly maxWaitMs = 4000) {}
+  reset() { this.accepted = null; this.candidate = null; this.candidateAt = 0; this.dirtyAt = null; this.lastCapture = -Infinity; this.busy = false }
   sample(signal: FrameSignal, now: number): GateDecision {
     if (!Number.isFinite(now) || !Number.isInteger(signal.width) || !Number.isInteger(signal.height) || signal.width < 1 || signal.height < 1 || signal.width > 640 || signal.height > 640 || !signal.fingerprint || signal.width * signal.height !== signal.pixels.length) throw new Error('Invalid local frame signal')
     if (this.busy) return { capture: false, reason: 'busy', changedTiles: 0 }
-    if (this.accepted?.fingerprint === signal.fingerprint) { this.candidate = null; return { capture: false, reason: 'unchanged', changedTiles: 0 } }
+    if (this.accepted?.fingerprint === signal.fingerprint) { this.candidate = null; this.dirtyAt = null; return { capture: false, reason: 'unchanged', changedTiles: 0 } }
     const changedTiles = this.accepted ? changedTileCount(this.accepted, signal) : 1
-    if (!changedTiles) return { capture: false, reason: 'unchanged', changedTiles }
+    if (!changedTiles) { this.candidate = null; this.dirtyAt = null; return { capture: false, reason: 'unchanged', changedTiles } }
+    this.dirtyAt ??= now
     // A blinking caret must not reset the initial/changed-frame settle clock
     // forever. Allow at most two tiny changing tiles between local samples while
     // still detecting small persistent code edits against the accepted frame.
     // Returning exactly to the accepted frame above clears cursor-only changes.
     if (!this.candidate || changedTileCount(this.candidate, signal) > 2) this.candidateAt = now
     this.candidate = signal
-    if (now - this.candidateAt < this.settleMs) return { capture: false, reason: 'settling', changedTiles }
+    // A face, animated cursor or live terminal must not starve readable code.
+    // Prefer a stable image, but bound the wait for a changed screen. Extraction
+    // still validates legibility and one-flight/cadence budgets still apply.
+    if (now - this.candidateAt < this.settleMs && now - this.dirtyAt < this.maxWaitMs) return { capture: false, reason: 'settling', changedTiles }
     if (now - this.lastCapture < this.minIntervalMs) return { capture: false, reason: 'throttled', changedTiles }
     this.busy = true; this.lastCapture = now
     return { capture: true, reason: this.accepted ? 'changed' : 'initial', changedTiles }
   }
-  finish(signal: FrameSignal, accepted: boolean) { if (accepted) this.accepted = signal; this.busy = false; this.candidate = null }
+  finish(signal: FrameSignal, accepted: boolean) { if (accepted) this.accepted = signal; this.busy = false; this.candidate = null; this.dirtyAt = null }
 }
 export function changedTileCount(a: FrameSignal, b: FrameSignal): number {
   if (a.width !== b.width || a.height !== b.height) return 1

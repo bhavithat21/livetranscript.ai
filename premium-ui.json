@@ -16,7 +16,8 @@
     "components/settings",
     "components/nav",
     "components/session",
-    "app/(app)/dashboard"
+    "app/(app)/dashboard",
+    "components/coach"
   ],
   "requiredCapabilities": [
     "Form",

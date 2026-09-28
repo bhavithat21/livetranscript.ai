@@ -1,9 +1,10 @@
 import { abortable, systemClock, type Clock } from './clock'
-import type { CoachState, CoachEvent, ContextPacket, EventPayload, Guidance, Lane, Observation, Origin, Permission, DialogueTurn } from './types'
+import type { CoachState, CoachEvent, ContextPacket, EventPayload, Guidance, Lane, Observation, Origin, Permission, DialogueTurn, ScreenFreshness } from './types'
 import { buildContext, EvidenceIndex } from './context'
-import { emptyCoach, normalizeQuestion, parseReplayEvent, reduceCoach, resultCurrent } from './state'
+import { emptyCoach, normalizeQuestion, parseReplayEvent, reduceCoach, resultCanFinish } from './state'
 import { lessonIds, type LessonId } from './learning/policy'
 import { LIMITS, list, object, parseGuidance, redactSecrets, text } from './validation'
+import { CoachRequestError, coachErrorCode } from './errors'
 
 export type ReplayReference = { id: string; lane: string; model: string; text: string; summary: string; note: string; verdict: string }
 export type CoachTransport = (lane: Lane, packet: ContextPacket, options: { signal: AbortSignal; lessons?: LessonId[]; delta: (text: string, model: string) => void }) => Promise<{ model: string; guidance: Guidance | null }>
@@ -79,11 +80,21 @@ export class CoachController {
     // Do not interrupt for every candidate utterance. The next question or
     // changed code receives the latest role-tagged conversation.
   }
-  question(original: string) {
+  screenStatus(freshness: ScreenFreshness) {
+    if (this.disposed || !['running', 'paused'].includes(this.state.status)) return
+    if (this.state.screenFreshness?.status === freshness.status && this.state.screenFreshness.capturedAt === freshness.capturedAt) return
+    // Capture health annotates subsequent requests; it never bills a new call.
+    this.emit({ type: 'screen.status', freshness })
+  }
+  question(original: string, finalizedInterviewerText = '') {
     if (this.state.status !== 'running' || this.disposed) return
     const previous = this.state.question?.id
+    const taskVersion = this.state.task.version
+    // Commit constraints before starting either model lane. This avoids a fast
+    // answer racing the UI's periodic speech observer and billing a stale call.
+    if (finalizedInterviewerText.trim()) this.emit({ type: 'speech.final', speaker: 'interviewer', text: finalizedInterviewerText.slice(-4000) })
     this.emit({ type: 'question.new', original: original.slice(0, 4000), text: normalizeQuestion(original) })
-    if (this.state.question?.id === previous) return
+    if (this.state.question?.id === previous && this.state.task.version === taskVersion) return
     this.cancelAll()
     if (!this.replay) { void this.run('talk'); this.scheduleGuide() }
   }
@@ -93,14 +104,17 @@ export class CoachController {
     this.emit({ type: 'screen.observed', observation, origin, ...(capturedAt === undefined ? {} : { capturedAt }) })
     if (this.state.evidenceVersion !== previous) {
       this.cancelStale()
-      // Newly read files do not interrupt talk. Actual revisions/constraints do.
-      if (!this.replay && !this.state.results.some(result => result.lane === 'talk' && resultCurrent(result, this.state) && ['running', 'complete'].includes(result.status))) void this.run('talk')
+      // Screen motion can produce repeated OCR conflicts. Do not bill another
+      // spoken answer to the same question on each frame. New questions and
+      // spoken constraints still dispatch immediately; Refresh is explicit.
+      // The UI keeps the completed earlier answer labelled with its old view.
       this.scheduleGuide()
     }
   }
   private scheduleGuide() {
-    if (this.timer) this.clock.clearTimeout(this.timer)
     if (this.replay || this.disposed || this.state.status !== 'running' || !this.state.question) return
+    // Coalesce observations without indefinitely postponing analysis.
+    if (this.timer) return
     this.timer = this.clock.setTimeout(() => {
       this.timer = null
       if (this.state.patches.length && this.state.patchReviews.some(review => ['differs', 'matches-proposal', 'reverted'].includes(review.status))) void this.run('review')
@@ -110,7 +124,7 @@ export class CoachController {
   private cancelStale() {
     for (const [lane, flight] of this.flights) {
       const record = this.state.results.find(item => item.id === flight.requestId)
-      if (!record || !resultCurrent(record, this.state)) { flight.controller.abort(); this.flights.delete(lane) }
+      if (!record || !resultCanFinish(record, this.state)) { flight.controller.abort(); this.flights.delete(lane) }
     }
   }
   private cancelAll() {
@@ -131,8 +145,8 @@ export class CoachController {
     if (this.attempted.has(key)) return
     const now = this.now()
     this.requestTimes = this.requestTimes.filter(time => now - time < 60_000)
-    if (this.calls >= 120 || this.requestTimes.length >= 12) {
-      this.publish({ ...this.state, warning: 'Automatic model budget reached. Pause, narrow the task, or wait for the per-minute budget to recover.' }); return
+    if (this.calls >= 360 || this.requestTimes.length >= 12) {
+      this.publish({ ...this.state, warning: this.calls >= 360 ? 'This session reached its 360-response limit. Start a new permitted session to continue.' : 'Automatic model rate limit reached. Wait one minute, then retry the current question.' }); return
     }
     this.attempted.add(key); this.calls++; this.requestTimes.push(now)
     const requestId = this.id(), controller = new AbortController()
@@ -147,9 +161,9 @@ export class CoachController {
       if (this.disposed) return
       const guidance = result.guidance ? parseGuidance({ ...result.guidance, patches: result.guidance.patches.map(({ path, fileVersion, startLine, before, after, reason }) => ({ path, fileVersion, startLine, before, after, reason })) }, packet) : null
       this.emit({ type: 'result.complete', requestId, model: result.model, guidance }, false)
-    } catch {
+    } catch (error) {
       if (!this.disposed) this.emit({ type: 'result.fail', requestId, cancelled: controller.signal.aborted,
-        error: controller.signal.aborted ? 'Stopped or timed out. Retry explicitly when ready.' : 'The model request failed or returned unsupported evidence. Retry explicitly; no automatic retries are billed.' }, false)
+        error: controller.signal.aborted ? 'Stopped or timed out. Retry explicitly when ready.' : error instanceof CoachRequestError ? error.message : 'The model request failed or returned unsupported evidence. Retry explicitly; no automatic retries are billed.' }, false)
     } finally {
       this.clock.clearTimeout(timeout)
       if (this.flights.get(lane)?.requestId === requestId) this.flights.delete(lane)
@@ -229,7 +243,7 @@ export class CoachController {
 }
 export const httpCoachTransport: CoachTransport = async (lane, context, options) => {
   const response = await fetch('/api/copilot/coach', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lane, context, lessons: options.lessons ?? [] }), signal: options.signal })
-  if (!response.ok || !response.body) throw new Error(`Coach unavailable (${response.status})`)
+  if (!response.ok || !response.body) throw new CoachRequestError(response.status === 429 ? 'rate' : [401, 403, 503].includes(response.status) ? 'configuration' : 'provider')
   const reader = response.body.getReader(), decoder = new TextDecoder()
   let buffer = '', received = 0, done = false, model = '', guidance: Guidance | null = null
   try {
@@ -243,7 +257,7 @@ export const httpCoachTransport: CoachTransport = async (lane, context, options)
       for (const line of lines) {
         if (!line.trim()) continue
         const event = object(JSON.parse(line))
-        if (event.type === 'error') throw new Error('Model request failed')
+        if (event.type === 'error') throw new CoachRequestError(coachErrorCode(event.code))
         if (event.type === 'delta') options.delta(text(event.text, 8000), text(event.model, 180, true))
         else if (event.type === 'done') { model = text(event.model, 180, true); guidance = event.guidance === null ? null : event.guidance as Guidance; done = true }
         else if (event.type !== 'started') throw new Error('Unsupported stream event')

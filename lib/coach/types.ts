@@ -26,6 +26,7 @@ export type TestEvidence = {
   passed: number | null; failed: number | null; sourceId: string | null; output: string; outputBefore: string
 }
 export type DialogueTurn = { sourceId: string; at: number; role: 'interviewer' | 'candidate' | 'unknown'; text: string }
+export type ScreenFreshness = { status: 'unavailable' | 'current' | 'pending' | 'paused' | 'error'; capturedAt: number | null }
 export type Question = { id: string; original: string; text: string; at: number }
 export type Guidance = {
   summary: string
@@ -37,6 +38,8 @@ export type Guidance = {
 export type ResultRecord = {
   id: string; lane: Lane; questionId: string; evidenceVersion: number; codeVersion: number; taskVersion: number; contextKey: string
   status: 'running' | 'complete' | 'failed' | 'cancelled' | 'stale'
+  terminalVersion?: number
+  instructionKey?: string
   text: string; guidance: Guidance | null; model: string; startedAt: number
   firstUsefulMs: number | null; totalMs: number | null; error: string | null
 }
@@ -44,9 +47,11 @@ export type Feedback = { id: string; resultId: string; verdict: 'pass' | 'needs-
 export type Task = { objective: string; requirements: string[]; constraints: string[]; phase: Phase; implementation: 'hold' | 'allowed'; version: number }
 export type CoachState = {
   schema: 1; sessionId: string; permission: Permission | null; status: 'idle' | 'running' | 'paused' | 'ended'
-  task: Task; evidenceVersion: number; codeVersion: number; sequence: number
+  task: Task; evidenceVersion: number; codeVersion: number; sequence: number; terminalVersion?: number
   files: ObservedFile[]; knownPaths: string[]; sources: Source[]; lastScreen: { sourceId: string; observation: Observation } | null
   conversation?: DialogueTurn[]
+  discussion?: DialogueTurn[]
+  screenFreshness?: ScreenFreshness
   question: Question | null; questions: Question[]; navigation: Navigation | null
   patches: Patch[]; patchReviews: PatchReview[]; tests: TestEvidence[]
   results: ResultRecord[]; feedback: Feedback[]; seenEvents: string[]; warning: string | null
@@ -57,6 +62,7 @@ export type EventPayload =
   | { type: 'task.update'; objective: string; constraints: string[] }
   | { type: 'speech.final'; speaker: 'interviewer' | 'candidate'; text: string }
   | { type: 'dialogue.update'; turn: DialogueTurn }
+  | { type: 'screen.status'; freshness: ScreenFreshness }
   | { type: 'question.new'; original: string; text: string }
   | { type: 'screen.observed'; origin: Origin; observation: Observation; capturedAt?: number }
   | { type: 'test.start'; command: string }
@@ -70,6 +76,8 @@ export type ContextPacket = {
   schema: 1; sessionId: string; permission: Permission; question: Question; task: Task
   evidenceVersion: number; codeVersion: number; contextKey: string
   conversation?: DialogueTurn[]
+  discussion?: DialogueTurn[]
+  screenFreshness?: ScreenFreshness
   files: Array<{ path: string; language: string; fileVersion: number; complete: boolean; fragments: Fragment[] }>
   knownPaths: string[]; relations: Array<{ from: string; to: string; kind: 'lexical-reference'; evidence: EvidenceRef[] }>
   visibleView: { origin: Origin; files: Array<{ path: string; startLine: number | null; endLine: number | null }>; terminalVisible: boolean } | null

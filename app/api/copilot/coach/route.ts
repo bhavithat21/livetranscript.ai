@@ -2,7 +2,9 @@ import { currentUserId } from '@/lib/auth'
 import { rateLimit } from '@/lib/rateLimit'
 import { recordUsage } from '@/lib/usage'
 import { readRepoJson, RepoRequestError } from '@/lib/repo/agentHttp'
-import { callRepoModel, streamRepoModel, type ModelUsage } from '@/lib/repo/agentProviders'
+import { callRepoModel, streamRepoModel, RepoModelResponseError, type ModelUsage } from '@/lib/repo/agentProviders'
+import { coachGeneration } from '@/lib/coach/generation'
+import { COACH_ERRORS, type CoachErrorCode } from '@/lib/coach/errors'
 import { assertRepoModelConfigured, repoModelFor, validRepoModel } from '@/lib/repo/modelPolicy'
 import { parseContext } from '@/lib/coach/context'
 import { object, parseGuidance } from '@/lib/coach/validation'
@@ -41,9 +43,10 @@ export async function POST(req: Request) {
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const emit = (value: Record<string, unknown>) => { if (!closed && !signal.aborted) controller.enqueue(encoder.encode(`${JSON.stringify(value)}\n`)) }
+      let stage: 'provider' | 'format' | 'evidence' = 'provider'
       try {
         emit({ type: 'started', lane, evidenceVersion: context.evidenceVersion })
-        const request = { model, system: coachPrompt(lane) + lessonPrompt(lessons), evidence: JSON.stringify(context), signal, maxTokens: lane === 'talk' ? 512 : lane === 'review' ? 2200 : 3400 }
+        const request = { model, system: coachPrompt(lane) + lessonPrompt(lessons), evidence: JSON.stringify(context), signal, ...coachGeneration(lane, model) }
         if (lane === 'talk') {
           let returned = model, visible = '', firstTextMs: number | null = null
           for await (const part of streamRepoModel({ ...request, onUsage: value => { usage = value } })) {
@@ -57,12 +60,20 @@ export async function POST(req: Request) {
         } else {
           const result = await callRepoModel(request)
           usage = result.usage
-          const guidance = parseGuidance(JSON.parse(result.text.trim()), context)
+          stage = 'format'
+          const raw: unknown = JSON.parse(result.text.trim())
+          stage = 'evidence'
+          const guidance = parseGuidance(raw, context)
           emit({ type: 'done', model: result.model, guidance, elapsedMs: Math.round(performance.now() - started) })
         }
         recordUsage('repo-coach', userId, { lane, model, inputTokens: usage?.inputTokens, outputTokens: usage?.outputTokens, elapsedMs: Math.round(performance.now() - started) })
-      } catch {
-        if (!closed && !req.signal.aborted) controller.enqueue(encoder.encode(`${JSON.stringify({ type: 'error', error: 'Assistance stopped, timed out or returned unsupported evidence. Retry explicitly.' })}\n`))
+      } catch (error) {
+        const status = error && typeof error === 'object' && 'status' in error ? Number(error.status) : 0
+        const code: CoachErrorCode = signal.aborted ? 'timeout' : error instanceof RepoModelResponseError && /output limit/.test(error.message) ? 'budget' : status === 429 ? 'rate' : [400, 401, 403, 404].includes(status) ? 'configuration' : stage
+        // Safe operational evidence: never log prompts, transcripts, images,
+        // source text, keys, user identifiers or raw provider error messages.
+        console.warn('coach_request_failed', { lane, model, code, elapsedMs: Math.round(performance.now() - started) })
+        if (!closed && !req.signal.aborted) controller.enqueue(encoder.encode(`${JSON.stringify({ type: 'error', code, error: COACH_ERRORS[code] })}\n`))
       } finally { if (!closed) { closed = true; controller.close() } }
     },
     cancel() { closed = true; cancellation.abort() },

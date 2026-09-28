@@ -11,7 +11,7 @@ import type { CoachEvent, EventPayload } from '@/lib/coach/types'
 vi.mock('@/lib/auth', () => ({ currentUserId: vi.fn() }))
 vi.mock('@/lib/rateLimit', () => ({ rateLimit: vi.fn() }))
 vi.mock('@/lib/usage', () => ({ recordUsage: vi.fn() }))
-vi.mock('@/lib/repo/agentProviders', () => ({ callRepoModel: vi.fn(), streamRepoModel: vi.fn() }))
+vi.mock('@/lib/repo/agentProviders', async importOriginal => ({ ...await importOriginal<typeof import('@/lib/repo/agentProviders')>(), callRepoModel: vi.fn(), streamRepoModel: vi.fn() }))
 const path = 'src/Service.ts'
 function packet() {
   let state = emptyCoach('fixture'), id = 0
@@ -64,7 +64,7 @@ describe('repository coach transport contracts (fixture providers, not live infe
     const result = await events(response)
     expect(result.find(event => event.type === 'delta')).toMatchObject({ text: 'Require both conditions.', model: 'claude-returned-fixture' })
     expect(result.at(-1)).toMatchObject({ type: 'done', guidance: null })
-    expect(streamRepoModel).toHaveBeenCalledWith(expect.objectContaining({ maxTokens: 512, signal: expect.any(AbortSignal), system: expect.stringContaining('untrusted DATA') }))
+    expect(streamRepoModel).toHaveBeenCalledWith(expect.objectContaining({ maxTokens: 640, signal: expect.any(AbortSignal), system: expect.stringContaining('untrusted DATA') }))
   })
   it('returns only patches with exact current preimages and attached source references', async () => {
     const output = await events(await POST(request({ lane: 'guide', context: packet() })))
@@ -76,7 +76,7 @@ describe('repository coach transport contracts (fixture providers, not live infe
     const bad = guidance(); bad.patches[0].before = 'invented code'
     vi.mocked(callRepoModel).mockResolvedValue({ text: JSON.stringify(bad), model: 'claude-fixture' })
     const output = await events(await POST(request({ lane: 'guide', context: packet() })))
-    expect(output.at(-1).type).toBe('error'); expect(output.some(event => event.type === 'done')).toBe(false)
+    expect(output.at(-1)).toMatchObject({ type: 'error', code: 'evidence' }); expect(output.some(event => event.type === 'done')).toBe(false)
     vi.mocked(callRepoModel).mockRejectedValue(new Error('secret-model-message'))
     const second = await events(await POST(request({ lane: 'guide', context: packet() })))
     expect(JSON.stringify(second)).not.toContain('secret-model-message')

@@ -12,9 +12,18 @@ const source = (correct = false, name = path): Observation => ({
   visiblePaths: [path, 'src/controllers/OrderController.ts', 'tests/TrackingService.test.ts'], terminal: '', requirements: ['Only PROCESSING orders may become SHIPPED. Keep public API unchanged.'],
 })
 let controller: CoachController
+let stallNextTalk = false
+let failPending: (() => void) | null = null
 const calls: string[] = []
 const transport: CoachTransport = async (lane, context, { delta, signal }) => {
   calls.push(lane)
+  if (lane === 'talk' && stallNextTalk) {
+    stallNextTalk = false
+    await new Promise<void>((_resolve, reject) => {
+      failPending = () => reject(new Error('Fixture provider unavailable'))
+      signal.addEventListener('abort', () => reject(new Error('Fixture cancelled')), { once: true })
+    })
+  }
   await new Promise<void>((resolve, reject) => { const timer = setTimeout(resolve, 60); signal.addEventListener('abort', () => { clearTimeout(timer); reject(new Error('Fixture cancelled')) }, { once: true }) })
   if (lane === 'talk') {
     delta('The transition must require both the current state and the requested next state. I would inspect the service condition, then verify that cancelled orders remain rejected.', 'fixture-talk-NOT-a-model')
@@ -36,4 +45,4 @@ function ready(resources: { controller: CoachController }) {
   controller.observe(source()); controller.question('Why is the shipment status test failing, and which change should we make?')
   window.__coachQA = { snapshot: () => controller.getSnapshot(), calls: () => [...calls], observe: (correct, name) => controller.observe(source(correct, name)), question: question => controller.question(question), output: output => controller.observe({ files: [], visiblePaths: [], requirements: [], terminal: output }), exportReplay: () => controller.exportReplay() }
 }
-createRoot(document.getElementById('root')!).render(<main className="qa-shell"><p className="qa-banner">Isolated browser QA · synthetic code and response fixtures · no provider calls</p><RepositoryCoach transport={transport} onReady={ready} /></main>)
+createRoot(document.getElementById('root')!).render(<main className="qa-shell"><p className="qa-banner">Isolated browser QA · synthetic code and response fixtures · no provider calls</p><div><button onClick={() => { stallNextTalk = true; controller.question('How would you handle a failed transition?') }}>Simulate waiting</button><button onClick={() => { failPending?.(); failPending = null }}>Simulate failure</button></div><RepositoryCoach transport={transport} onReady={ready} /></main>)

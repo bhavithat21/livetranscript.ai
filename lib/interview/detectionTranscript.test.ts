@@ -3,6 +3,11 @@ import { detectionTranscript } from './detectionTranscript'
 import { latestQuestionGroup } from '@/lib/copilot/useProactive'
 const row = (text: string, capturedAt: number, isFinal = true) => ({ id: capturedAt, text, capturedAt, isFinal, speaker: null })
 describe('live question turn boundaries', () => {
+  it('does not mistake a stable ASR segment for a completed utterance', () => {
+    const stable = { ...row('How would you handle retries?', 1), endOfTurn: false }
+    expect(detectionTranscript([stable], [])).toBe('How would you handle retries')
+    expect(detectionTranscript([{ ...stable, endOfTurn: true }], [])).toBe('How would you handle retries?')
+  })
   it('keeps multipart interviewer questions together', () => {
     expect(latestQuestionGroup(detectionTranscript([row('How would you scale this?', 1), row('What are the tradeoffs?', 1000)], []))).toBe('How would you scale this? What are the tradeoffs?')
   })
