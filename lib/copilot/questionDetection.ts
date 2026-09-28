@@ -124,7 +124,11 @@ export function questionCandidates(transcript: string): QuestionCandidate[] {
   let group: string[] = [], origin = 0
   for (let index = 0; index < sentences.length; index++) {
     const sentence = sentences[index]
-    if (!looksLikeQuestion(sentence) || sentence.length < 8) { group = []; continue }
+    // A requested outcome often follows the question as an imperative, e.g.
+    // "Can you start a worker? Return something while the report runs."
+    // Keep it in this ask, but do not promote standalone candidate statements.
+    const continuation = group.length > 0 && /^(?:(?:and|but|also|then|so)\s+)?(?:return|respond|send|make sure|keep|without|while|instead|so that|it (?:must|should|needs to)|we (?:need|want))\b/i.test(sentence)
+    if ((!looksLikeQuestion(sentence) && !continuation) || sentence.length < 8) { group = []; continue }
     if (!group.length) origin = index
     group.push(stripLabels(sentence) || sentence)
     const question = group.slice(-5).join(' ')

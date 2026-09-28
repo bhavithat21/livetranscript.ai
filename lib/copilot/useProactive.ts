@@ -1,10 +1,10 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
-import { ProactiveEngine } from './proactiveEngine'
+import { ProactiveEngine, type QuestionInput } from './proactiveEngine'
 export { latestQuestion, latestQuestionGroup } from './questionDetection'
 
 /** The same scheduler runs in Live, Mock, and the deterministic simulator. */
-export function useProactive(enabled: boolean, getTranscript: () => string,
+export function useProactive(enabled: boolean, getTranscript: () => QuestionInput,
   onQuestion: (q: string) => void | Promise<void>, options: { latestWins?: boolean } = {}) {
   const [lastAsked, setLastAsked] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)

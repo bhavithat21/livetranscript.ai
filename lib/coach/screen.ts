@@ -1,19 +1,24 @@
 import { KeyframeGate, type FrameSignal } from './keyframes'
 import { hashText, parseObservation } from './validation'
 import type { Observation } from './types'
+import { ScreenReadError, screenErrorCode, SCREEN_ERRORS } from './screenErrors'
 
 export type ScreenStatus = { sharing: boolean; watching: boolean; reading: boolean; captures: number; localSamples: number; error: string | null; source: 'browser' | 'native' | null; lastSampleAt: number | null; lastCaptureAt: number | null; gateReason: 'initial' | 'changed' | 'unchanged' | 'settling' | 'throttled' | 'busy' | null; changedTiles: number }
 export type FrameSource = { signal: () => Promise<FrameSignal | null>; image: () => Promise<string | null>; stop: () => void | Promise<void>; preview?: MediaStream }
 export type CaptureTransport = (image: string, signal: AbortSignal) => Promise<Observation>
 export const httpCapture: CaptureTransport = async (image, signal) => {
   const response = await fetch('/api/copilot/repo-screen', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image }), signal })
-  if (!response.ok) throw new Error('Screenshot extraction failed')
+  if (!response.ok) {
+    const body = await response.json().catch(() => null)
+    throw new ScreenReadError(response.status === 401 ? 'unauthorized' : screenErrorCode(body?.code))
+  }
   const raw = await response.text()
   if (raw.length > 400_000) throw new Error('Screenshot response exceeded its budget')
   return parseObservation(JSON.parse(raw).observation)
 }
 export class ScreenObserver {
   private source: FrameSource | null = null
+  private resumeSource: FrameSource | null = null
   private controller: AbortController | null = null
   private generation = 0
   private timer: ReturnType<typeof setTimeout> | null = null
@@ -35,6 +40,7 @@ export class ScreenObserver {
     this.update({ sharing: true, watching: false, source: type, error: null, lastSampleAt: null, lastCaptureAt: null, gateReason: null, changedTiles: 0 })
   }
   watch(enabled: boolean) {
+    this.resumeSource = null
     if (this.timer) clearTimeout(this.timer)
     this.timer = null
     if (!enabled) { this.generation++; this.controller?.abort(); this.controller = null; this.gate.reset(); this.update({ watching: false, reading: false }); return }
@@ -66,6 +72,16 @@ export class ScreenObserver {
     }
     void tick()
   }
+  pause() {
+    const resumeSource = this.status.watching && !this.status.error ? this.source : null
+    this.watch(false)
+    this.resumeSource = resumeSource
+  }
+  resume() {
+    const source = this.resumeSource
+    this.resumeSource = null
+    if (source && this.source === source && !this.status.error) this.watch(true)
+  }
   async capture(image: string, capturedAt = Date.now()): Promise<boolean> {
     if (this.controller) return false
     if (!/^data:image\/(?:png|jpeg|webp);base64,/.test(image) || image.length > 6_000_000) { this.update({ error: 'Use a PNG, JPEG or WebP screenshot under 4.4 MB.', watching: false }); return false }
@@ -83,8 +99,8 @@ export class ScreenObserver {
       this.onObservation(observation, capturedAt)
       this.update({ captures: this.status.captures + 1, lastCaptureAt: capturedAt })
       return true
-    } catch {
-      if (generation === this.generation) this.update({ watching: false, error: 'Screenshot could not be safely read. Watch is paused. Recapture explicitly; no automatic retry is made.' })
+    } catch (error) {
+      if (generation === this.generation) this.update({ watching: false, error: `${error instanceof ScreenReadError ? error.message : controller.signal.aborted ? SCREEN_ERRORS.timeout : SCREEN_ERRORS.format} Watch is paused; no automatic retry is made.` })
       return false
     } finally {
       clearTimeout(timeout)
@@ -98,6 +114,7 @@ export class ScreenObserver {
     return this.capture(image, capturedAt)
   }
   async stop() {
+    this.resumeSource = null
     this.generation++
     if (this.timer) clearTimeout(this.timer)
     this.timer = null; this.controller?.abort(); this.controller = null

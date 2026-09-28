@@ -7,6 +7,7 @@ import { coachGeneration } from '../../lib/coach/generation'
 import { coachPrompt } from '../../lib/coach/prompts'
 import { learningCase } from '../../lib/coach/learning/cases'
 import { parseGuidance } from '../../lib/coach/validation'
+import { ROUND_CASES, roundCase } from './roundCases'
 
 // Explicit opt-in: uses real providers and incurs charges. Authored, non-private
 // cases only. Results never change production routing or promote a model.
@@ -17,9 +18,10 @@ it.skipIf(process.env.COACH_BENCHMARK !== '1')('records paired latency and revie
   for (const model of new Set([talkModel, guideModel, fastModel, 'claude-sonnet-5'])) assertRepoModelConfigured(model)
   type Row = { caseId: string; repetition: number; variant: string; requestedModel: string; returnedModel: string; inputHash: string; firstTextMs: number | null; totalMs: number; answer: string; structuralPass: boolean; error: string | null; settings: object; rubric: string }
   const rows: Row[] = []
-  const cases = ['deadline', 'candidate-claim', 'minimal-change', 'hold', 'stale-test', 'unseen-file']
+  const cases = ['deadline', 'candidate-claim', 'minimal-change', 'hold', 'stale-test', 'unseen-file', ...ROUND_CASES]
   for (let repetition = 0; repetition < 3; repetition++) for (const caseId of cases) {
-    const sample = learningCase(caseId), system = coachPrompt(sample.lane), evidence = JSON.stringify(sample.context)
+    const sample = (ROUND_CASES as readonly string[]).includes(caseId) ? roundCase(caseId) : learningCase(caseId)
+    const system = coachPrompt(sample.lane), evidence = JSON.stringify(sample.context)
     const inputHash = createHash('sha256').update(system + '\n' + evidence).digest('hex')
     const variants = sample.lane === 'talk' ? [
       { name: 'prior-generation-settings', model: 'claude-sonnet-5', settings: { maxTokens: 512 } },
@@ -48,5 +50,5 @@ it.skipIf(process.env.COACH_BENCHMARK !== '1')('records paired latency and revie
   }
   await mkdir('evals/coach/results', { recursive: true })
   await writeFile(`evals/coach/results/${Date.now()}.json`, JSON.stringify({ format: 'coach-provider-comparison-v1', generatedAt: new Date().toISOString(), providerInference: true, source: 'Authored cases, not a transcription of the YouTube video', scope: 'Generation settings comparison with the same current prompt, not a full old/new deployment comparison', timing: 'Request-to-first-text/complete; no microphone, ASR, detection or rendering measurement', quality: 'Structural checks only. Correctness and naturalness require blinded human review against each rubric. No automatic winner or promotion.', rows }, null, 2))
-  expect(rows.length).toBe(30)
-}, 900_000)
+  expect(rows.length).toBe(66)
+}, 1_500_000)

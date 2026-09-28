@@ -1,6 +1,7 @@
 import type { CoachState, ContextPacket, ObservedFile, Fragment, EvidenceRef, Navigation, Task, TestEvidence, Patch, PatchReview } from './types'
 import { dialogueContext, parseDialogueTurn } from './dialogue'
 import { fileCoverage } from './state'
+import { observedPathAlias } from './pathAliases'
 import { hashText, integer, LIMITS, list, object, parseObservation, permission, safePath, text } from './validation'
 
 const STOP = new Set(['the', 'this', 'that', 'with', 'what', 'which', 'would', 'could', 'should', 'from', 'have', 'file', 'about', 'into', 'your', 'please'])
@@ -66,6 +67,8 @@ export function buildContext(state: CoachState, maxCharacters: number = LIMITS.c
     schema: 1, sessionId: state.sessionId, permission: state.permission, question: { ...state.question }, task: { ...state.task, requirements: [...state.task.requirements], constraints: [...state.task.constraints] },
     evidenceVersion: state.evidenceVersion, codeVersion: state.codeVersion, contextKey: '', files: [], knownPaths: [...new Set([...(state.lastScreen?.observation.files.map(file => file.path) ?? []), ...ranked.nodes.filter(node => node.file).slice(0, 12).map(node => node.path), ...ranked.nodes.map(node => node.path)])].slice(0, 100), relations: [],
     conversation: dialogueContext(state.conversation ?? []),
+    discussion: state.discussion ?? [],
+    ...(state.screenFreshness ? { screenFreshness: state.screenFreshness } : {}),
     visibleView: state.lastScreen ? {
       origin: state.sources.find(source => source.id === state.lastScreen!.sourceId)?.origin ?? 'screen',
       files: state.lastScreen.observation.files.map(file => ({ path: file.path, startLine: file.startLine, endLine: file.startLine === null ? null : file.startLine + file.lines.length - 1 })),
@@ -81,10 +84,13 @@ export function buildContext(state: CoachState, maxCharacters: number = LIMITS.c
     packet.conversation = packet.conversation?.slice(-3)
     packet.tests = packet.tests.slice(-1)
     packet.patches = []
+    // Preserve the latest spoken decision before paths and old conversation.
+    packet.knownPaths = packet.knownPaths.slice(0, 12)
+    while (!fits() && (packet.discussion?.length ?? 0) > 2) packet.discussion = [packet.discussion![0], ...packet.discussion!.slice(2)]
     if (!fits()) throw new Error('Task and constraints exceed the context budget. Narrow the session objective.')
   }
   for (const node of ranked.nodes.filter(node => node.file).slice(0, 12)) {
-    if (!node.file || packet.files.length >= 6) continue
+    if (!node.file || !packet.knownPaths.includes(node.path) || packet.files.length >= 6) continue
     const file = node.file
     const fragments = file.fragments.map(part => usefulFragment(part, `${state.question!.text} ${state.task.objective}`))
       .sort((a, b) => {
@@ -116,6 +122,7 @@ export function buildContext(state: CoachState, maxCharacters: number = LIMITS.c
  * for a folder or an unclassified extensionless entry; observed files still count. */
 function inspectablePath(path: string, state: CoachState): boolean {
   if (state.files.some(file => file.path === path)) return true
+  if (observedPathAlias(path, state.files.map(file => file.path), state.knownPaths)) return false
   // A tree basename is not a second unread file when one full observed path
   // unambiguously supplies that name. Do not merge source fragments or resolve
   // collisions: two packages can legitimately contain the same filename.
@@ -148,7 +155,7 @@ export function nextInspection(state: CoachState): Navigation | null {
   return { path: selected.path, startLine, endLine: startLine, symbol: '', reason, status: 'pending', requestedAfter: state.sequence }
 }
 export function parseContext(raw: unknown): ContextPacket {
-  const root = object(raw, ['schema', 'sessionId', 'permission', 'question', 'task', 'evidenceVersion', 'codeVersion', 'contextKey', 'files', 'knownPaths', 'relations', 'tests', 'patches', 'patchReviews', 'visibleView', 'conversation', 'budget'])
+  const root = object(raw, ['schema', 'sessionId', 'permission', 'question', 'task', 'evidenceVersion', 'codeVersion', 'contextKey', 'files', 'knownPaths', 'relations', 'tests', 'patches', 'patchReviews', 'visibleView', 'conversation', 'discussion', 'screenFreshness', 'budget'])
   if (root.schema !== 1 || JSON.stringify(root).length > LIMITS.context + 100) throw new Error('Invalid context envelope or size')
   const task = object(root.task, ['objective', 'requirements', 'constraints', 'phase', 'implementation', 'version'])
   if (!['understand', 'explore', 'plan', 'implement', 'debug', 'review'].includes(String(task.phase)) || !['hold', 'allowed'].includes(String(task.implementation))) throw new Error('Invalid task state')
@@ -222,8 +229,15 @@ export function parseContext(raw: unknown): ContextPacket {
     }
   }
   const conversation = root.conversation === undefined ? [] : list(root.conversation, 8).map(parseDialogueTurn)
+  const discussion = root.discussion === undefined ? [] : list(root.discussion, 8).map(parseDialogueTurn)
+  let screenFreshness: ContextPacket['screenFreshness']
+  if (root.screenFreshness !== undefined) {
+    const value = object(root.screenFreshness, ['status', 'capturedAt'])
+    if (!['unavailable', 'current', 'pending', 'paused', 'error'].includes(String(value.status))) throw new Error('Invalid screen status')
+    screenFreshness = { status: value.status as NonNullable<ContextPacket['screenFreshness']>['status'], capturedAt: value.capturedAt === null ? null : integer(value.capturedAt) }
+  }
   const budget = object(root.budget, ['maxCharacters', 'usedCharacters', 'omittedPaths'])
   return { schema: 1, sessionId: text(root.sessionId, 100, true), permission: permission(root.permission), question: { id: text(question.id, 100, true), original: text(question.original, 4000, true), text: text(question.text, 2000, true), at: integer(question.at) }, task: parsedTask,
-    evidenceVersion: integer(root.evidenceVersion), codeVersion: integer(root.codeVersion), contextKey: text(root.contextKey, 100, true), files, knownPaths, relations, visibleView, conversation, tests, patches, patchReviews,
+    evidenceVersion: integer(root.evidenceVersion), codeVersion: integer(root.codeVersion), contextKey: text(root.contextKey, 100, true), files, knownPaths, relations, visibleView, conversation, discussion, ...(screenFreshness ? { screenFreshness } : {}), tests, patches, patchReviews,
     budget: { maxCharacters: integer(budget.maxCharacters, 4000, LIMITS.context), usedCharacters: integer(budget.usedCharacters, 0, LIMITS.context), omittedPaths: list(budget.omittedPaths, 20).map(safePath) } }
 }

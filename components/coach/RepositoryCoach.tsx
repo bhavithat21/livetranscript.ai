@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useProactive } from '@/lib/copilot/useProactive'
+import { questionInputText, type QuestionInput } from '@/lib/copilot/proactiveEngine'
+import { questionCandidates } from '@/lib/copilot/questionDetection'
+import { speakingCue } from '@/lib/coach/speakingCue'
 import { CoachController, httpCoachTransport, type CoachTransport } from '@/lib/coach/controller'
 import { ScreenObserver, browserFrameSource, httpCapture, type CaptureTransport } from '@/lib/coach/screen'
 import { nativeAvailable, nativeDisplays, nativeFrameSource, type NativeDisplay } from '@/lib/coach/native'
@@ -16,7 +19,7 @@ import styles from './RepositoryCoach.module.css'
 const EMPTY_TRANSCRIPT = () => ''
 type Resources = { controller: CoachController; screen: ScreenObserver }
 export type RepositoryCoachProps = {
-  getQuestionTranscript?: () => string
+  getQuestionTranscript?: () => QuestionInput
   getConversation?: () => DialogueTurn[]
   permission?: Permission
   objective?: string
@@ -84,6 +87,9 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
   const dialogueGetter = useRef(getConversation)
   useEffect(() => { dialogueGetter.current = getConversation }, [getConversation])
   const running = state.status === 'running'
+  useEffect(() => {
+    controller.screenStatus({ status: capture.error ? 'error' : !capture.sharing ? 'unavailable' : !capture.watching ? 'paused' : capture.reading || capture.gateReason !== 'unchanged' || !capture.lastCaptureAt ? 'pending' : 'current', capturedAt: capture.lastCaptureAt })
+  }, [controller, capture.error, capture.sharing, capture.watching, capture.reading, capture.gateReason, capture.lastCaptureAt])
   const previewStream = screen.getPreviewStream()
   useEffect(() => {
     const video = preview.current
@@ -100,7 +106,7 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
   const ask = useCallback((question: string) => {
     // Snapshot dialogue before dispatch; the periodic observer may be one tick behind.
     for (const turn of dialogueGetter.current?.() ?? []) controller.dialogue(turn)
-    const finalText = getter.current()
+    const finalText = questionInputText(getter.current())
     const previous = previousSpeech.current; previousSpeech.current = finalText
     const added = finalText.startsWith(previous) ? finalText.slice(previous.length) : finalText.slice(-4000)
     controller.question(question, added)
@@ -111,10 +117,16 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
     if (!running) return
     const timer = setInterval(() => {
       for (const turn of dialogueGetter.current?.() ?? []) controller.dialogue(turn)
-      const finalText = getter.current()
+      const input = getter.current()
+      if (typeof input !== 'string' && input.endOfTurn === false) return
+      const finalText = questionInputText(input)
       if (finalText && finalText !== previousSpeech.current) {
-        const previous = previousSpeech.current; previousSpeech.current = finalText
+        const previous = previousSpeech.current
         const added = finalText.startsWith(previous) ? finalText.slice(previous.length) : finalText.slice(-1000)
+        // A new ask owns its constraints atomically in ask(). Do not restart
+        // the old answer during the detector's short stabilization interval.
+        if (questionCandidates(added).length) return
+        previousSpeech.current = finalText
         if (added.trim()) controller.speech(added, 'interviewer')
       }
     }, 400)
@@ -132,7 +144,8 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
     } catch (failure) { if (mounted.current && token === generation.current) setError(failure instanceof Error ? failure.message : 'Screen sharing is unavailable.') }
     finally { if (mounted.current && token === generation.current) setSelecting(false) }
   }
-  function pause() { generation.current++; setSelecting(false); controller.pause(); screen.watch(false) }
+  function pause() { generation.current++; setSelecting(false); controller.pause(); screen.pause() }
+  function resume() { controller.resume(); screen.resume() }
   function end() { generation.current++; setSelecting(false); void screen.stop(); controller.end() }
   async function uploadScreens(selected: FileList | null) {
     if (!selected?.length) return
@@ -177,7 +190,7 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
         <button className={styles.button} disabled={!running || selecting || reading || capture.reading} onClick={() => void selectScreen()}>{selecting ? 'Selecting…' : capture.sharing ? 'Change shared screen' : 'Share screen'}</button>
         {capture.sharing && <><button className={styles.button} disabled={!running || reading} onClick={() => screen.watch(!capture.watching)}>{capture.watching ? 'Pause screen watch' : 'Watch changes'}</button><button className={styles.button} disabled={!running || capture.reading || reading} onClick={() => void screen.captureNow()}>Capture now</button><button className={styles.button} onClick={() => void screen.stop()}>Stop sharing</button></>}
         <button className={styles.button} disabled={!running || capture.reading || reading} onClick={() => screenshots.current?.click()}>Add screenshots</button><input hidden ref={screenshots} type="file" multiple accept="image/png,image/jpeg,image/webp" aria-label="Repository screenshots" onChange={event => void uploadScreens(event.target.files)} />
-        {running ? <button className={styles.button} onClick={pause}>Pause coach</button> : state.status === 'paused' && <button className={styles.button} disabled={loadedReplay && !state.question} onClick={() => loadedReplay ? controller.analyzeReplay() : controller.resume()}>{loadedReplay ? 'Analyze replay with AI' : 'Resume coach'}</button>}
+        {running ? <button className={styles.button} onClick={pause}>Pause coach</button> : state.status === 'paused' && <button className={styles.button} disabled={loadedReplay && !state.question} onClick={() => loadedReplay ? controller.analyzeReplay() : resume()}>{loadedReplay ? 'Analyze replay with AI' : 'Resume coach'}</button>}
         {state.status !== 'ended' && <button className={styles.button} onClick={end}>End coach</button>}
       </div>
       {native && <details className={`${styles.details} ${styles.main}`}><summary>Desktop display capture</summary><p>Use a selected display through the native app. This does not grant remote control. Screen-recording permission is required.</p><button className={styles.button} disabled={!running || selecting} onClick={() => { void nativeDisplays().then(items => { setDisplays(items); setDisplayId(items[0]?.id || '') }).catch(() => setError('Native capture requires the updated desktop installer and screen-recording permission.')) }}>Find displays</button>{displays.length > 0 && <label className={styles.label}>Display<select className={styles.input} value={displayId} onChange={event => setDisplayId(event.target.value)}>{displays.map(display => <option key={display.id} value={display.id}>{display.name} · {display.width} × {display.height}</option>)}</select><button className={styles.button} disabled={!running || !displayId || selecting} onClick={() => void selectScreen(true)}>Share selected display</button></label>}</details>}
@@ -196,12 +209,12 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
           <div className={styles.eyebrow}>Current question</div><h3 className={styles.question}>{state.question?.text || 'Listening for the interviewer’s next question…'}</h3>
           <button className={styles.button} disabled={!running} aria-expanded={editingQuestion} onClick={() => { setQuestionDraft(state.question?.text ?? ''); setEditingQuestion(value => !value) }}>Correct question</button>
           {editingQuestion && <form noValidate className={styles.questionEditor} onSubmit={event => { event.preventDefault(); if (questionDraft.trim()) { ask(questionDraft.trim()); setEditingQuestion(false) } }}><label className={styles.label} htmlFor="coach-question">What did the interviewer ask?</label><textarea id="coach-question" className={`${styles.input} resize-none`} rows={3} maxLength={2000} value={questionDraft} onChange={event => setQuestionDraft(event.target.value)} /><div className={styles.feedback}><button className={`${styles.button} ${styles.primary}`} disabled={!running || !questionDraft.trim()}>Answer this question</button><button type="button" className={styles.button} onClick={() => setEditingQuestion(false)}>Cancel</button></div></form>}
-          <section className={`${styles.card} ${styles.answerCard}`} aria-label="Say now" aria-busy={talk?.status === 'running'}><div className={styles.eyebrow}>Say now <span className={styles.spacer}>{talk?.status === 'running' ? 'Composing' : talk?.status === 'complete' ? 'Ready' : talk?.status === 'failed' || talk?.status === 'cancelled' ? 'Incomplete' : ''}</span></div><div className={styles.talk}><Markdown>{talk?.text || (talk?.status === 'running' ? 'Preparing a direct answer to this question…' : 'Speech guidance will appear automatically when there is a question. Show the task and relevant code to ground it.')}</Markdown></div>{talk && <><div className={styles.status}>{talk.model || 'Configured conversation model'}{talk.firstUsefulMs !== null ? ` · first text ${(talk.firstUsefulMs / 1000).toFixed(1)}s` : ''}{talk.totalMs !== null ? ` · complete ${(talk.totalMs / 1000).toFixed(1)}s` : ''}</div>{talk.evidenceVersion < state.evidenceVersion && <p className={styles.status}>New screen evidence is available. Refresh to include it in this answer.</p>}<div className={styles.feedback}><button className={styles.button} disabled={!running || talk.status === 'running'} onClick={() => void controller.run('talk', true)}>Refresh answer</button></div><details className={styles.details}><summary>Timing and response review</summary><p>Timing starts when this answer request begins. It excludes audio transcription and question detection.</p><ReviewButtons controller={controller} state={state} result={talk} /></details></>}</section>
+          <section className={`${styles.card} ${styles.answerCard}`} aria-label="Say now" aria-busy={talk?.status === 'running'}><div className={styles.eyebrow}>Say now <span className={styles.spacer}>{talk?.status === 'running' ? 'Composing' : talk?.status === 'complete' ? 'Ready' : talk?.status === 'failed' || talk?.status === 'cancelled' ? 'Incomplete' : ''}</span></div><div className={styles.talk}><Markdown>{talk?.text || (state.question ? speakingCue(state.question.text) : 'Listening for the interviewer. You can also use Correct question to ask for help with the current task.')}</Markdown></div>{state.question && !talk?.text && <p className={styles.status}>Starting cue · a thinking approach, not a verified answer. {talk?.status === 'running' ? 'Your specific answer is being prepared.' : 'Use Refresh answer to request a specific response.'}</p>}{state.screenFreshness && state.screenFreshness.status !== 'current' && <p className={styles.status}>Code evidence: {state.screenFreshness.status === 'pending' ? 'reading the latest view; recent edits are not verified yet' : state.screenFreshness.status === 'error' ? 'last read failed; spoken guidance can continue' : state.screenFreshness.status === 'paused' ? 'watch paused; recent edits are not verified' : 'no live screen selected'}.</p>}{talk && <><div className={styles.status}>{talk.model || 'Configured conversation model'}{talk.firstUsefulMs !== null ? ` · first text ${(talk.firstUsefulMs / 1000).toFixed(1)}s` : ''}{talk.totalMs !== null ? ` · ${talk.status === 'complete' ? 'complete' : 'elapsed'} ${(talk.totalMs / 1000).toFixed(1)}s` : ''}</div>{talk.evidenceVersion < state.evidenceVersion && <p className={styles.status}>New screen evidence is available. Refresh to include it in this answer.</p>}<div className={styles.feedback}><button className={styles.button} disabled={!running || talk.status === 'running'} onClick={() => void controller.run('talk', true)}>Refresh answer</button></div><details className={styles.details}><summary>Timing and response review</summary><p>Timing starts when this answer request begins. It excludes audio transcription and question detection.</p><ReviewButtons controller={controller} state={state} result={talk} /></details></>}{state.question && !talk && <button className={styles.button} disabled={!running} onClick={() => void controller.run('talk', true)}>Refresh answer</button>}</section>
           <p className={styles.status} role="status">{guiding ? 'Checking the visible code for a grounded change…' : guide?.guidance?.patches.length ? 'Code suggestions are ready below.' : state.files.length ? 'No grounded code suggestion yet. Exact visible code is required before an edit can be proposed.' : 'Share the relevant code to get a precise change.'}</p>
           {state.task.implementation === 'hold' && <p className={styles.notice}>Implementation on hold: explain and gather evidence before proposing edits.</p>}
           {guide?.guidance && <>
             <div className={styles.next}><Markdown>{guide.guidance.summary}</Markdown></div>
-            {guide.guidance.patches.map(patch => <section className={styles.card} key={patch.id} aria-label={`Proposed change in ${patch.path}`}><div className={styles.eyebrow}>Change · suggestion only</div><h3 className={styles.path}>{patch.path} · line {patch.startLine} · source v{patch.fileVersion}</h3><p className={styles.next}>{patch.reason}</p><div className={styles.grid2}><div><p className={styles.codeLabel}>Observed before</p><pre className={styles.code}>{patch.before}</pre></div><div><p className={styles.codeLabel}>Suggested after</p><pre className={styles.code}>{patch.after}</pre><CopyCode key={`${patch.id}:${patch.fileVersion}`} text={patch.after} /></div></div><p className={styles.status}>References: {patch.evidence.map(ref => `${ref.sourceId}, lines ${ref.startLine}–${ref.endLine}`).join('; ')}. No edit has been applied.</p></section>)}
+            {guide.guidance.patches.map(patch => <section className={styles.card} key={patch.id} aria-label={`Proposed change in ${patch.path}`}><div className={styles.eyebrow}>Change · suggestion only</div><h3 className={styles.path}>{patch.path} · line {patch.startLine} · source v{patch.fileVersion}</h3><p className={styles.next}>{patch.reason}</p><div className={styles.grid2}><div><p className={styles.codeLabel}>Observed before</p><pre className={styles.code}>{patch.before}</pre></div><div><p className={styles.codeLabel}>Suggested after</p><pre className={styles.code}>{patch.after}</pre><CopyCode key={`${patch.id}:${patch.fileVersion}`} text={patch.after} /></div></div><p className={styles.status}>References: {patch.evidence.map(ref => `${ref.sourceId}, lines ${ref.startLine}–${ref.endLine}`).join('; ')}. No edit has been applied. Confirm the before text still matches your editor before using this suggestion.</p></section>)}
             {guide.guidance.findings.length > 0 && <section className={styles.card} aria-label="Code review"><div className={styles.eyebrow}>Check</div><ul className={styles.list}>{guide.guidance.findings.map((finding, index) => <li key={index}><strong>{finding.severity} · {finding.category}</strong>{finding.text}<div className={styles.status}>{finding.evidence.map(ref => `${ref.path}:${ref.startLine ?? '?'} (${ref.sourceId})`).join(' · ')}</div></li>)}</ul></section>}
             {guide.guidance.verify.length > 0 && <section className={styles.card} aria-label="Verification suggestions"><div className={styles.eyebrow}>Verify · run yourself</div>{guide.guidance.verify.map((test, index) => <div key={index}><pre className={styles.code}>{test.command}</pre><p className={styles.muted}>{test.scope} · {test.reason}</p><button className={styles.button} disabled={!running} onClick={() => controller.markTestStart(test.command)}>Mark test start</button><p className={styles.status}>Marks when you start the command. Does not execute it. Share fresh terminal output afterward.</p></div>)}</section>}
             <details className={styles.details}><summary>Review this investigation</summary><ReviewButtons result={guide} controller={controller} state={state} /></details>
@@ -215,6 +228,7 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
           <div className={styles.eyebrow}>Evidence, not assumptions</div><p className={styles.muted}>{state.files.length} files read · {state.knownPaths.length} paths seen<br />{counts.filter(item => item.complete).length} observed through EOF · code v{state.codeVersion}</p>
           <ul className={styles.list}>{state.files.map((file, index) => <li key={file.path}><strong className={styles.path}>{file.path}</strong>{counts[index].complete ? 'Observed through EOF' : 'Partial'} · v{file.version} · {counts[index].observed} observed lines{file.retired.length > 0 && <div className={styles.warning}>Prior anchors retired after a changed view.</div>}</li>)}</ul>
           <details className={styles.details}><summary>Task and constraints</summary><p>{state.task.objective}</p><ul className={styles.list}>{[...state.task.requirements, ...state.task.constraints].map((constraint, index) => <li key={index}>{constraint}</li>)}</ul><p>Phase: {state.task.phase}. Extraction confidence scores are not calibrated probabilities.</p></details>
+          {(state.discussion?.length ?? 0) > 0 && <details className={styles.details}><summary>Conversation checkpoints</summary><p className={styles.muted}>Earlier goals and proposals carried into follow-up answers. Spoken claims do not verify code or tests.</p><ul className={styles.list}>{state.discussion?.map(turn => <li key={turn.sourceId}><strong>{turn.role === 'interviewer' ? 'Interviewer direction / discussion' : 'Candidate proposal'}</strong>{turn.text}</li>)}</ul></details>}
           <details className={styles.details}><summary>Round progress · {state.questions.length} questions</summary><p className={styles.muted}>Understand the request → inspect relevant code → plan the change → compare the edit → verify. Current phase: {state.task.phase}. An answer or proposal does not complete a step.</p><ol className={styles.list}>{state.questions.map(question => {
             const answer = state.results.findLast(result => result.questionId === question.id && result.lane === 'talk')
             const analysis = state.results.findLast(result => result.questionId === question.id && result.lane !== 'talk' && result.guidance)

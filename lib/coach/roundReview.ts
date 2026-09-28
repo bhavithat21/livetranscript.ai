@@ -16,7 +16,7 @@ export function roundReview(state: CoachState): string {
   const source = JSON.stringify({
     type: 'copilot-comparison-record', coverage: 'Captured excerpt only. At most 80 questions and 80 responses retained. Not a full-round completion claim.',
     latency: 'Request-to-first-text and completion only; excludes audio recognition and detection.',
-    records, currentConstraints: state.task.constraints, currentPatchReviews: state.patchReviews,
+    records, currentConstraints: state.task.constraints, discussion: state.discussion ?? [], screenFreshness: state.screenFreshness ?? null, currentPatchReviews: state.patchReviews,
     observedTests: state.tests.map(({ command, status, codeVersion, passed, failed, sourceId }) => ({ command, status, codeVersion, passed, failed, sourceId })),
     humanAnnotations: state.feedback,
   }, (_key, value) => typeof value === 'string' ? redactSecrets(value) : value, 2)

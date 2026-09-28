@@ -10,7 +10,7 @@ import { LiveAnswerCanvas } from './LiveAnswerCanvas'
 import { RepositoryCoach } from '@/components/coach/RepositoryCoach'
 import { useKeytermPrefs } from '@/lib/transcription/useKeytermPrefs'
 import { liveTranscript, useInterviewRecorder } from '@/lib/interview/useInterviewRecorder'
-import { detectionTranscript } from '@/lib/interview/detectionTranscript'
+import { detectionInput } from '@/lib/interview/detectionTranscript'
 import { downloadInterview } from '@/lib/interview/client'
 import { useInterviewTuning } from '@/lib/interview/TuningContext'
 import type { DialogueTurn } from '@/lib/coach/types'
@@ -60,11 +60,12 @@ export function LiveInterview({ blocked, onActivity, onComplete, videoTest = fal
 
   // Detection consumes only finalized interviewer-channel text. The richer
   // labeled dual-channel transcript remains the answer's grounding context.
-  const questionText = useCallback(() => videoTest && interviewerSpeaker === null ? '' : detectionTranscript(
+  const questionInput = useCallback(() => videoTest && interviewerSpeaker === null ? { text: '' } : detectionInput(
     (source === 'mic' ? getMicSegments() : getCallSegments()).filter((row) => row.capturedAt >= startTime.current),
     source === 'both' ? getMicSegments().filter((row) => row.capturedAt >= startTime.current) : [],
     interviewerSpeaker,
   ), [getCallSegments, getMicSegments, source, interviewerSpeaker, videoTest])
+  const questionText = useCallback(() => questionInput().text, [questionInput])
 
   const conversation = useCallback((): DialogueTurn[] => {
     const incoming = (source === 'mic' ? getMicSegments() : getCallSegments()).filter(row => row.isFinal && row.capturedAt >= startTime.current)
@@ -188,7 +189,7 @@ export function LiveInterview({ blocked, onActivity, onComplete, videoTest = fal
       {videoTest && callSpeakers.length > 0 && <div className={styles.speakerSettings}><label>Interviewer voice<select aria-label="Video interviewer voice" value={interviewerSpeaker ?? 'all'} onChange={event => setInterviewerSpeaker(event.target.value === 'all' ? null : Number(event.target.value))}><option value="all">Select the interviewer to start answers</option>{callSpeakers.map(speaker => <option key={speaker} value={speaker}>Speaker {speaker + 1}</option>)}</select></label><p>The other voice provides conversation context. Open Transcript to check the speaker labels.</p></div>}
       <div className={`${styles.liveGrid} ${repositoryMode || !transcriptOpen ? styles.liveGridNoRail : ''}`}>
         <div className={styles.answerColumn}>
-          {repositoryMode ? <RepositoryCoach permission={videoTest ? 'practice' : 'external-ai-allowed'} getQuestionTranscript={questionText} getConversation={conversation} onReady={({ controller, screen }) => { coach.current = controller; coachScreen.current = screen }} /> : <LiveAnswerCanvas getTranscript={text} getQuestionTranscript={questionText} />}
+          {repositoryMode ? <RepositoryCoach permission={videoTest ? 'practice' : 'external-ai-allowed'} getQuestionTranscript={questionInput} getConversation={conversation} onReady={({ controller, screen }) => { coach.current = controller; coachScreen.current = screen }} /> : <LiveAnswerCanvas getTranscript={text} getQuestionTranscript={questionText} />}
           <div className={styles.captureBar}>
             {source !== 'system' && <span className={styles.channel}><span className={`${styles.channelDot} ${microphone.phase === 'recording' ? styles.channelDotOn : ''}`} /><Mic size={12} aria-hidden />Mic · {microphone.phase === 'recording' ? 'on' : 'waiting'}</span>}
             {source !== 'mic' && <span className={styles.channel}><span className={`${styles.channelDot} ${call.phase === 'recording' ? styles.channelDotOn : ''}`} /><Monitor size={12} aria-hidden />System · {call.phase === 'recording' ? 'on' : 'waiting'}</span>}

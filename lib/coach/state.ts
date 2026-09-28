@@ -1,6 +1,6 @@
-import type { CoachState, CoachEvent, ObservedFile, Fragment, Observation, FileObservation, Navigation, PatchReview, Source, Task, EventPayload } from './types'
+import type { CoachState, CoachEvent, ObservedFile, Fragment, Observation, FileObservation, Navigation, PatchReview, Source, Task, EventPayload, ScreenFreshness } from './types'
 import { hashText, LIMITS, parseObservation, text, list, integer, permission, object } from './validation'
-import { parseDialogueTurn, updateDialogue } from './dialogue'
+import { parseDialogueTurn, updateDialogue, updateDiscussion } from './dialogue'
 import { parseTestOutput } from './testOutput'
 export { parseTestOutput } from './testOutput'
 
@@ -130,6 +130,8 @@ export function intentFromSpeech(task: Task, speech: string): Task {
     if (/\?\s*$/.test(sentence)) continue
     if (/\b(?:nothing (?:we|you) can do|cannot|can't|can not|must not|don't|do not|not allowed to).{0,65}\b(?:speed (?:it|this|that|\w+ work) up|speed up|optimi[sz]e|remove|skip|change|modify)\b|\b(?:assume|must|has to|need(?:s)? to|required to).{0,65}\b(?:take(?:s)?|wait|block|run|remain|preserve|keep)\b/i.test(sentence)) {
       constraints.push(`Interviewer constraint: ${sentence.trim().slice(0, 900)}`)
+    } else if (/\b(?:we|you|it|the (?:client|server|service|response|system))\s+(?:need(?:s)? to|must|have to|has to|should)\b|\b(?:i|we) want (?:you|it|the (?:client|server|response))\b|^(?:(?:okay|now|please|and|so)[, ]+)*(?:return|respond|persist|enqueue|preserve|keep)\b/i.test(sentence)) {
+      constraints.push(`Interviewer direction: ${sentence.trim().slice(0, 900)}`)
     }
   }
   if (resumeTests) phase = 'review'
@@ -165,8 +167,11 @@ export function reduceCoach(previous: CoachState, event: CoachEvent): CoachState
       return invalidate({ ...state, navigation: null, patches: [], patchReviews: [] })
     case 'dialogue.update': {
       const conversation = updateDialogue(state.conversation ?? [], event.turn)
-      return conversation === previous.conversation ? previous : { ...state, conversation }
+      const discussion = updateDiscussion(state.discussion ?? [], event.turn)
+      return conversation === previous.conversation && discussion === previous.discussion ? previous : { ...state, conversation, discussion }
     }
+    case 'screen.status':
+      return { ...state, screenFreshness: event.freshness }
     case 'speech.final': {
       if (event.speaker !== 'interviewer') return state
       const task = intentFromSpeech(state.task, text(event.text, 4000))
@@ -258,6 +263,11 @@ export function parseReplayEvent(raw: unknown): CoachEvent {
     case 'task.update': payload = { type: item.type, objective: text(item.objective, 4000, true), constraints: list(item.constraints, 30).map(value => text(value, 1000, true)) }; break
     case 'speech.final': if (!['interviewer', 'candidate'].includes(String(item.speaker))) throw new Error('Invalid replay speaker'); payload = { type: item.type, speaker: item.speaker as 'interviewer' | 'candidate', text: text(item.text, 4000) }; break
     case 'dialogue.update': payload = { type: item.type, turn: parseDialogueTurn(item.turn) }; break
+    case 'screen.status': {
+      const freshness = object(item.freshness, ['status', 'capturedAt'])
+      if (!['unavailable', 'current', 'pending', 'paused', 'error'].includes(String(freshness.status))) throw new Error('Invalid screen status')
+      payload = { type: item.type, freshness: { status: freshness.status as ScreenFreshness['status'], capturedAt: freshness.capturedAt === null ? null : integer(freshness.capturedAt) } }; break
+    }
     case 'question.new': payload = { type: item.type, original: text(item.original, 4000, true), text: text(item.text, 2000, true) }; break
     case 'screen.observed': payload = { type: item.type, origin: 'replay', observation: parseObservation(item.observation), ...(item.capturedAt === undefined ? {} : { capturedAt: integer(item.capturedAt, 0, base.at) }) }; break
     case 'test.start': payload = { type: item.type, command: text(item.command, 500, true) }; break

@@ -1,5 +1,5 @@
 import { abortable, systemClock, type Clock } from './clock'
-import type { CoachState, CoachEvent, ContextPacket, EventPayload, Guidance, Lane, Observation, Origin, Permission, DialogueTurn } from './types'
+import type { CoachState, CoachEvent, ContextPacket, EventPayload, Guidance, Lane, Observation, Origin, Permission, DialogueTurn, ScreenFreshness } from './types'
 import { buildContext, EvidenceIndex } from './context'
 import { emptyCoach, normalizeQuestion, parseReplayEvent, reduceCoach, resultCurrent } from './state'
 import { lessonIds, type LessonId } from './learning/policy'
@@ -79,6 +79,12 @@ export class CoachController {
     this.emit({ type: 'dialogue.update', turn })
     // Do not interrupt for every candidate utterance. The next question or
     // changed code receives the latest role-tagged conversation.
+  }
+  screenStatus(freshness: ScreenFreshness) {
+    if (this.disposed || !['running', 'paused'].includes(this.state.status)) return
+    if (this.state.screenFreshness?.status === freshness.status && this.state.screenFreshness.capturedAt === freshness.capturedAt) return
+    // Capture health annotates subsequent requests; it never bills a new call.
+    this.emit({ type: 'screen.status', freshness })
   }
   question(original: string, finalizedInterviewerText = '') {
     if (this.state.status !== 'running' || this.disposed) return

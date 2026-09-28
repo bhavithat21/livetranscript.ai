@@ -3,7 +3,24 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { RepositoryCoach } from './RepositoryCoach'
 import type { CoachController, CoachTransport } from '@/lib/coach/controller'
 vi.mock('./LearningPanel', () => ({ LearningPanel: () => null }))
-afterEach(cleanup)
+afterEach(() => { cleanup(); vi.useRealTimers() })
+
+it('does not bill the old question while the next question and its constraints settle', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
+  let transcript = ''
+  const packets: import('@/lib/coach/types').ContextPacket[] = []
+  const transport: CoachTransport = async (_lane, packet) => { packets.push(packet); return new Promise(() => {}) }
+  await act(async () => {
+    render(<RepositoryCoach transport={transport} getQuestionTranscript={() => ({ text: transcript, endOfTurn: true })} onReady={({ controller }) => { controller.start('practice', 'Review'); controller.question('How does the original code work?') }} />)
+  })
+  transcript = 'Do not change the API. How should we handle retries?'
+  await act(async () => { await vi.advanceTimersByTimeAsync(400) })
+  expect(packets).toHaveLength(1)
+  await act(async () => { await vi.advanceTimersByTimeAsync(300) })
+  expect(packets).toHaveLength(2)
+  expect(packets[1].question.text).toBe('How should we handle retries?')
+  expect(packets[1].task.constraints.join(' ')).toContain('public APIs')
+})
 
 it('corrects a question, refreshes with newly observed code, and disables actions while paused', async () => {
   let controller!: CoachController
@@ -41,6 +58,25 @@ it('keeps a failed partial answer visibly incomplete and offers explicit recover
   expect(screen.getByRole('alert').textContent).toContain('model request failed')
   expect(screen.getByRole('button', { name: 'Retry talk' })).toBeTruthy()
   expect(screen.queryByText('Ready')).toBeNull()
+})
+
+it('keeps a labelled starting cue through a failed request, then replaces it with the streamed answer', async () => {
+  let attempts = 0
+  let fail!: (error: Error) => void
+  const transport: CoachTransport = async (_lane, _packet, { delta }) => {
+    if (++attempts === 1) return new Promise((_resolve, reject) => { fail = reject })
+    delta('After acknowledgment, record the failure on the job and expose it through the status request.', 'test-model')
+    return { model: 'test-model', guidance: null }
+  }
+  render(<RepositoryCoach transport={transport} onReady={({ controller }) => { controller.start('practice', 'Discuss background jobs'); controller.question('What goes in the catch block?') }} />)
+  const answer = within(await screen.findByRole('region', { name: 'Say now' }))
+  expect(answer.getByText(/I’d trace where the failure happens/)).toBeTruthy()
+  expect(answer.getByText(/Starting cue · a thinking approach, not a verified answer/)).toBeTruthy()
+  await act(async () => fail(new Error('Disconnected')))
+  expect(answer.getByText(/I’d trace where the failure happens/)).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: 'Retry talk' }))
+  await answer.findByText(/After acknowledgment, record the failure/)
+  expect(answer.queryByText(/Starting cue/)).toBeNull()
 })
 
 it('clears the old failure when the current question successfully retries', async () => {

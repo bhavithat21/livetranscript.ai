@@ -1,6 +1,28 @@
 # Continuous coach: production failures, implementation, and release gate
 
-Status: implemented locally on `codex/coach-answer-experience`, based on production `43a7bf3`. Not deployed. This is consented candidate-facing practice assistance with screen/audio evidence only.
+Status: implemented on `codex/coach-answer-experience` in draft PR #24, based on production `43a7bf3`. Preview-only release; production remains unchanged. This is consented candidate-facing practice assistance with screen/audio evidence only.
+
+## Follow-up: live round continuity fixes
+
+The subsequent production run yielded 14 complete sampled answers, with median request-to-first-text 1.03s and completion 3.33s. These are the old production implementation, exclude ASR/detection, and exclude failed or superseded requests. They are not a revised-model performance claim. The full retained report is in the parent workspace's `round-evaluation/live-answer-validation-2026-09-27.md`.
+
+Changes prompted by that run:
+
+- Retain bounded, attributed spoken goals/proposals beyond the recent conversation window. Keep the opening goal and latest revisions; candidate proposals remain hypotheses and never become code, tests, or implementation permission. The retention heuristic is bounded, not a complete semantic memory of the round.
+- Version explicit interviewer outcome corrections even when they are statements, cancelling the obsolete answer. Do not bill another request for the same directive or capture-health update.
+- Carry speech endpoints and interim activity through the real Live-to-coach path. A completed endpoint uses the 300ms stabilization interval (300–600ms including polling); unfinished speech waits through ongoing updates, with a 2.5s silence fallback for a missing endpoint. These are scheduling limits, not measured end-to-end latency. Attach imperative outcome clauses to their question.
+- Keep a local, clearly labelled thinking cue visible while the model is pending or unavailable. It is not a generated answer or diagnosis. Replace it on first streamed text, keep failed partial answers visibly incomplete, and label failure timing as elapsed rather than complete.
+- Give the model capture freshness and failure state. Older fragments do not justify claims that a just-edited callback is absent or unchanged. Proposals still need exact observed preimages; users must compare the before text with the current editor.
+- Prefer an already observed qualified file over its unique tree-display-root variant for navigation. Never merge source fragments or mark the alternate path as read; collisions remain unresolved.
+- Resume the same previously watched screen when the coach resumes. Preserve manual watch pauses, capture-error pauses, stopped sources, and replaced sources.
+- Return safe screen error categories and log request identity, category, model and duration without source, transcript, image, user identity, keys, or raw provider errors.
+- Expand real-provider evaluation to include acknowledged-job failures, future-versus-deadline behavior, stale callback evidence, and ambiguous plan references. Rubrics stay outside generation inputs. No production model switch was made without measured evidence.
+
+Technical correction: the prompt now explicitly separates returning from a gRPC handler, completing the response stream, and a background job's lifecycle. An acknowledged job reports later failure through job state/status, never by writing to the already completed observer. Starting a future alone does not solve the original deadline. References: [gRPC deadlines](https://grpc.io/docs/guides/deadlines/), [StreamObserver lifecycle](https://grpc.github.io/grpc-java/javadoc/io/grpc/stub/StreamObserver.html), [Deepgram endpoints](https://developers.deepgram.com/docs/understand-endpointing-interim-results).
+
+Follow-up verification: the full suite passed 922 tests in 125 files; the final dispatch-handoff regression then passed with all 19 continuity/UI tests (923 distinct tests verified). All 83 coach contracts passed. Type checking, ESLint, strict UI audit (zero findings), and the Webpack production build passed. The existing keyv/got dynamic-dependency warning remains. Chrome fixture verification covers pending → failed → recovered answer, keyboard question correction, and 390px layout with no overflow or captured warning/error logs. It uses synthetic transport results and proves no AI quality or live provider latency.
+
+Screenshots: [starting cue after failure](assets/continuity-starting-cue.png), [390px answer layout](assets/continuity-mobile.png).
 
 ## What was wrong
 
@@ -48,7 +70,7 @@ Screenshots: [desktop](assets/coach-desktop.png), [390px mobile](assets/coach-mo
 
 ## Reproducible provider gate
 
-With the existing approved provider credential configured in the test environment, run `COACH_BENCHMARK=1 pnpm eval:coach`. This explicitly incurs real provider calls. It generates 30 records across six authored scenarios and three repetitions, alternating order for immediate-answer variants. It compares prior generation settings, current settings, and pinned Haiku 4.5 on identical current prompts; deeper code cases validate the current path. It is not a full old/new deployment comparison or the YouTube transcript.
+With the existing approved provider credential configured in the test environment, run `COACH_BENCHMARK=1 pnpm eval:coach`. This explicitly incurs real provider calls. It generates 66 records across ten authored scenarios and three repetitions, alternating order for immediate-answer variants. It compares prior generation settings, current settings, and pinned Haiku 4.5 on identical current prompts; deeper code cases validate the current path. It is not a full old/new deployment comparison or the YouTube transcript.
 
 Results record returned model identity, input hash, exact generation settings, first-text/completion times, structural checks, output and rubric. Rubrics are withheld from the generator. Review correctness, constraints, source grounding, naturalness and useful next step blind to model labels before selecting a winner; structural checks cannot score these. No automatic routing changes or deployment occur.
 

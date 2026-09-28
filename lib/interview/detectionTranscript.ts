@@ -1,4 +1,13 @@
 import type { CapturedSegment } from './useInterviewRecorder'
+import type { QuestionInput } from '../copilot/proactiveEngine'
+
+export function detectionInput(call: CapturedSegment[], candidate: CapturedSegment[], interviewer: number | null = null): Exclude<QuestionInput, string> {
+  const latest = [...call.map(row => ({ ...row, candidate: interviewer !== null && row.speaker !== interviewer })), ...candidate.map(row => ({ ...row, candidate: true }))]
+    .sort((a, b) => a.capturedAt - b.capturedAt || (a.startMs ?? 0) - (b.startMs ?? 0)).at(-1)
+  return { text: detectionTranscript(call, candidate, interviewer),
+    ...(latest ? { endOfTurn: latest.candidate ? true : !latest.isFinal ? false : latest.endOfTurn,
+      activityKey: `${latest.id}:${latest.text}` } : {}) }
+}
 
 /** Do not fabricate sentence-final punctuation for ASR fragments. Join source
  * chunks within a voice turn; delimit actual speaker/channel changes and pauses.
@@ -21,7 +30,7 @@ export function detectionTranscript(call: CapturedSegment[], candidate: Captured
     const boundary = previous && (previous.candidate !== row.candidate || previous.speaker !== row.speaker || row.capturedAt - previous.capturedAt > 15000)
     if (boundary) { flush(true); turns.push('Turn boundary.') }
     if (row.candidate) { flush(); if (!previous?.candidate) turns.push('Candidate response.') }
-    else if (row.text.trim()) group.push(row.text.trim())
+    else if (row.text.trim()) group.push(row.endOfTurn === false ? row.text.trim().replace(/[.!?]+$/, '') : row.text.trim())
     previous = row
   }
   // Deepgram is_final means stable segment text, not completed speech. Avoid
