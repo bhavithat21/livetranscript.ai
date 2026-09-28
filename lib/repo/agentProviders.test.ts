@@ -27,7 +27,7 @@ describe('provider completion integrity', () => {
   it('passes coach reasoning, stable schema and prefix caching to the real provider adapter', async () => {
     provider.claudeCreate.mockResolvedValue({ model: 'claude-sonnet-5', stop_reason: 'end_turn', content: [{ type: 'text', text: '{}' }] })
     await callRepoModel({ ...request('claude-sonnet-5'), ...coachGeneration('guide', 'claude-sonnet-5') })
-    expect(provider.claudeCreate.mock.calls[0][0]).toMatchObject({ thinking: { type: 'adaptive' }, output_config: { effort: 'medium', format: { type: 'json_schema' } }, max_tokens: 6000, system: [{ cache_control: { type: 'ephemeral' } }] })
+    expect(provider.claudeCreate.mock.calls[0][0]).toMatchObject({ thinking: { type: 'disabled' }, output_config: { effort: 'low', format: { type: 'json_schema' } }, max_tokens: 2400, system: [{ cache_control: { type: 'ephemeral' } }] })
     provider.claudeStream.mockReturnValue(events([{ type: 'message_start', message: { model: 'claude-sonnet-5' } }, { type: 'message_delta', delta: { stop_reason: 'end_turn' } }, { type: 'message_stop' }]))
     for await (const part of streamRepoModel({ ...request('claude-sonnet-5'), ...coachGeneration('talk', 'claude-sonnet-5') })) expect(part).toBeTruthy()
     expect(provider.claudeStream.mock.calls[0][0]).toMatchObject({ thinking: { type: 'disabled' }, max_tokens: 640 })

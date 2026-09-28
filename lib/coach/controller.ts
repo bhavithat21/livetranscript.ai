@@ -104,8 +104,10 @@ export class CoachController {
     this.emit({ type: 'screen.observed', observation, origin, ...(capturedAt === undefined ? {} : { capturedAt }) })
     if (this.state.evidenceVersion !== previous) {
       this.cancelStale()
-      // Newly read files do not interrupt talk. Actual revisions/constraints do.
-      if (!this.replay && !this.state.results.some(result => result.lane === 'talk' && resultCurrent(result, this.state) && ['running', 'complete'].includes(result.status))) void this.run('talk')
+      // Screen motion can produce repeated OCR conflicts. Do not bill another
+      // spoken answer to the same question on each frame. New questions and
+      // spoken constraints still dispatch immediately; Refresh is explicit.
+      // The UI keeps the completed earlier answer labelled with its old view.
       this.scheduleGuide()
     }
   }

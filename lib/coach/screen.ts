@@ -66,7 +66,7 @@ export class ScreenObserver {
           })
         }
       } catch {
-        if (generation === this.generation) { this.update({ watching: false, reading: false, error: 'Screen capture stopped. Check permissions or select the IDE again.' }); return }
+        if (generation === this.generation) { this.update({ watching: false, reading: false, error: 'Screen capture stopped. Check permissions or select the screen again.' }); return }
       }
       if (generation === this.generation && this.status.watching) this.timer = setTimeout(() => void tick(), 250)
     }
@@ -110,7 +110,7 @@ export class ScreenObserver {
   async captureNow() {
     const generation = this.generation, capturedAt = Date.now(), image = await this.source?.image()
     if (generation !== this.generation) return false
-    if (!image) { this.update({ error: 'Select the IDE or upload a screenshot first.' }); return false }
+    if (!image) { this.update({ error: 'Select the screen or upload a screenshot first.' }); return false }
     return this.capture(image, capturedAt)
   }
   async stop() {

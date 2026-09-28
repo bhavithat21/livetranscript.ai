@@ -22,9 +22,9 @@ export function coachGeneration(lane: Lane, model: string): Pick<ModelRequest, '
   const sonnet5 = /^claude-sonnet-5(?:-|$)/.test(model)
   const structured = /^claude-(?:sonnet-(?:5|4-6|4-5)|haiku-4-5|opus-(?:5|4-8|4-7|4-6))/.test(model)
   return {
-    maxTokens: lane === 'talk' ? 640 : sonnet5 ? 6000 : 3400,
+    maxTokens: lane === 'talk' ? 640 : lane === 'guide' ? 2400 : sonnet5 ? 6000 : 3400,
     ...(model.startsWith('claude-') ? { cacheSystem: true } : {}),
-    ...(sonnet5 ? { thinking: lane === 'talk' ? 'disabled' : 'adaptive', effort: lane === 'talk' ? 'low' : 'medium' } : {}),
+    ...(sonnet5 ? { thinking: lane === 'review' ? 'adaptive' : 'disabled', effort: lane === 'review' ? 'medium' : 'low' } : {}),
     ...(lane !== 'talk' && structured ? { schema: GUIDANCE_SCHEMA } : {}),
   }
 }

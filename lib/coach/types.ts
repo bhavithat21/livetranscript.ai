@@ -38,6 +38,7 @@ export type Guidance = {
 export type ResultRecord = {
   id: string; lane: Lane; questionId: string; evidenceVersion: number; codeVersion: number; taskVersion: number; contextKey: string
   status: 'running' | 'complete' | 'failed' | 'cancelled' | 'stale'
+  terminalVersion?: number
   text: string; guidance: Guidance | null; model: string; startedAt: number
   firstUsefulMs: number | null; totalMs: number | null; error: string | null
 }
@@ -45,7 +46,7 @@ export type Feedback = { id: string; resultId: string; verdict: 'pass' | 'needs-
 export type Task = { objective: string; requirements: string[]; constraints: string[]; phase: Phase; implementation: 'hold' | 'allowed'; version: number }
 export type CoachState = {
   schema: 1; sessionId: string; permission: Permission | null; status: 'idle' | 'running' | 'paused' | 'ended'
-  task: Task; evidenceVersion: number; codeVersion: number; sequence: number
+  task: Task; evidenceVersion: number; codeVersion: number; sequence: number; terminalVersion?: number
   files: ObservedFile[]; knownPaths: string[]; sources: Source[]; lastScreen: { sourceId: string; observation: Observation } | null
   conversation?: DialogueTurn[]
   discussion?: DialogueTurn[]

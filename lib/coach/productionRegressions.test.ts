@@ -70,7 +70,7 @@ describe('production video failures', () => {
   })
   it('keeps model limits and reasoning separate for immediate speech and code analysis', () => {
     expect(coachGeneration('talk', 'claude-sonnet-5')).toMatchObject({ thinking: 'disabled', maxTokens: 640 })
-    expect(coachGeneration('guide', 'claude-sonnet-5')).toMatchObject({ thinking: 'adaptive', effort: 'medium', schema: GUIDANCE_SCHEMA })
+    expect(coachGeneration('guide', 'claude-sonnet-5')).toMatchObject({ thinking: 'disabled', effort: 'low', schema: GUIDANCE_SCHEMA })
     expect(coachGeneration('talk', 'claude-haiku-4-5')).not.toHaveProperty('effort')
     expect(coachGeneration('guide', 'custom-model')).not.toHaveProperty('schema')
   })

@@ -1,3 +1,4 @@
+import { taskRequirements } from '../repo/evidenceText'
 import type { CoachState, CoachEvent, ObservedFile, Fragment, Observation, FileObservation, Navigation, PatchReview, Source, Task, EventPayload, ScreenFreshness } from './types'
 import { hashText, LIMITS, parseObservation, text, list, integer, permission, object } from './validation'
 import { parseDialogueTurn, updateDialogue, updateDiscussion } from './dialogue'
@@ -60,9 +61,9 @@ function mergeFile(previous: ObservedFile | undefined, observed: FileObservation
   // Chunk boundaries and provenance do not change code semantics. Overlapping
   // re-captures must not repeatedly invalidate caches or bill new investigations.
   file.contentKey = hashText(JSON.stringify({
-    anchored: [...lineMap(file)].sort(([a], [b]) => a - b).map(([line, value]) => [line, value.text, value.confidence]),
+    anchored: [...lineMap(file)].sort(([a], [b]) => a - b).map(([line, value]) => [line, value.text, value.confidence >= 0.9]),
     eof: fileCoverage(file).last,
-    unanchored: [...new Set(fragments.filter(part => part.startLine === null).map(part => JSON.stringify([part.lines, part.confidence, part.endOfFile])))].sort(),
+    unanchored: [...new Set(fragments.filter(part => part.startLine === null).map(part => JSON.stringify([part.lines, part.confidence >= 0.9, part.endOfFile])))].sort(),
   }))
   return { file, edited, changed: file.contentKey !== old.contentKey }
 }
@@ -143,7 +144,10 @@ export function normalizeQuestion(value: string): string {
   return value.trim().replace(/^(?:(?:interviewer|speaker\s*\d+|call)\s*:\s*)+/i, '').replace(/^(?:(?:um|uh|okay|so)[, ]+)+/i, '').replace(/\s+/g, ' ').slice(0, 2000)
 }
 export function resultCurrent(result: CoachState['results'][number], state: CoachState): boolean {
-  return result.questionId === state.question?.id && (result.lane === 'talk' ? result.codeVersion === state.codeVersion && result.taskVersion === state.task.version : result.evidenceVersion === state.evidenceVersion)
+  // Adding a file/tree path or scrolling does not invalidate already supplied
+  // evidence. Real edits, changed instructions and terminal output still do.
+  return result.questionId === state.question?.id && result.codeVersion === state.codeVersion && result.taskVersion === state.task.version
+    && (result.lane === 'talk' || (result.terminalVersion ?? 0) === (state.terminalVersion ?? 0))
 }
 function invalidate(state: CoachState): CoachState {
   return { ...state, results: state.results.map(result => !resultCurrent(result, state) && result.status !== 'failed' && result.status !== 'cancelled' ? { ...result, status: 'stale' } : result) }
@@ -199,7 +203,7 @@ export function reduceCoach(previous: CoachState, event: CoachEvent): CoachState
       if (knownPaths.length > LIMITS.paths || files.size > LIMITS.files) throw new Error('Repository observation capacity reached. Start a narrower session.')
       const nextFiles = [...files.values()]
       if (nextFiles.reduce((sum, file) => sum + JSON.stringify(file).length, 0) > LIMITS.sourceText) throw new Error('Repository text budget reached. Start a narrower session.')
-      const requirements = [...new Set([...state.task.requirements, ...observation.requirements])].slice(-50)
+      const requirements = taskRequirements([...state.task.requirements, ...observation.requirements]).slice(-50)
       const requirementsChanged = requirements.join('\n') !== state.task.requirements.join('\n')
       const viewKey = (view: Observation | undefined) => JSON.stringify(view?.files.map(file => [file.path, file.startLine, file.lines.length]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))) ?? [])
       changed ||= knownPaths.length !== state.knownPaths.length || requirementsChanged || viewKey(observation) !== viewKey(state.lastScreen?.observation)
@@ -207,7 +211,7 @@ export function reduceCoach(previous: CoachState, event: CoachEvent): CoachState
       const oldTerminal = state.lastScreen?.observation.terminal || state.tests.at(-1)?.output || ''
       const terminalChanged = !!observation.terminal && observation.terminal !== oldTerminal
       changed ||= terminalChanged
-      state = { ...state, files: nextFiles, knownPaths, sources: [...state.sources, source].slice(-LIMITS.events), lastScreen: { sourceId: source.id, observation }, evidenceVersion: state.evidenceVersion + Number(changed), codeVersion: state.codeVersion + Number(edited), task: { ...state.task, requirements, version: state.task.version + Number(requirementsChanged) } }
+      state = { ...state, files: nextFiles, knownPaths, sources: [...state.sources, source].slice(-LIMITS.events), lastScreen: { sourceId: source.id, observation }, evidenceVersion: state.evidenceVersion + Number(changed), codeVersion: state.codeVersion + Number(edited), terminalVersion: (state.terminalVersion ?? 0) + Number(terminalChanged), task: { ...state.task, requirements, version: state.task.version + Number(requirementsChanged) } }
       if (state.navigation && navigationSeen(state.navigation, observation)) state.navigation = { ...state.navigation, status: 'seen' }
       state.patchReviews = reviewEdits(state)
       if (edited) state.tests = state.tests.map(run => run.codeVersion !== null && run.codeVersion !== state.codeVersion ? { ...run, status: 'stale' } : run)
@@ -215,7 +219,7 @@ export function reduceCoach(previous: CoachState, event: CoachEvent): CoachState
         const parsed = parseTestOutput(observation.terminal)
         const active = [...state.tests].reverse().find(run => run.codeVersion === state.codeVersion && run.startedAfter !== null && run.startedAfter < state.sequence && run.startedAt !== null && source.at >= run.startedAt && ['awaiting-output', 'running', 'incomplete'].includes(run.status) && observation.terminal !== run.outputBefore)
         if (active) state.tests = state.tests.map(run => run.id === active.id ? { ...run, ...parsed, sourceId: source.id, output: observation.terminal } : run)
-        else state.tests = [...state.tests, { id: event.id, codeVersion: null, startedAfter: null, startedAt: null, command: '', ...parsed, sourceId: source.id, output: observation.terminal, outputBefore: '' }].slice(-20)
+        else if (parsed.status !== 'incomplete' || /(?:^|\n)\s*(?:.*[$%>]\s*)?(?:(?:npm|pnpm|yarn) (?:run )?test|pytest|vitest|jest|cargo test|go test|dotnet test|mvn test|gradlew? test)\b/.test(observation.terminal)) state.tests = [...state.tests, { id: event.id, codeVersion: null, startedAfter: null, startedAt: null, command: '', ...parsed, sourceId: source.id, output: observation.terminal, outputBefore: '' }].slice(-20)
       }
       return changed ? invalidate(state) : state
     }
@@ -224,7 +228,7 @@ export function reduceCoach(previous: CoachState, event: CoachEvent): CoachState
     case 'result.start':
       if (state.status !== 'running' || event.questionId !== state.question?.id || event.evidenceVersion !== state.evidenceVersion) return previous
       if (state.results.some(item => item.id === event.requestId)) return previous
-      return { ...state, results: [...state.results, { id: text(event.requestId, 100, true), lane: event.lane, questionId: event.questionId, evidenceVersion: event.evidenceVersion, contextKey: event.contextKey, codeVersion: state.codeVersion, taskVersion: state.task.version, status: 'running' as const, text: '', guidance: null, model: '', startedAt: event.at, firstUsefulMs: null, totalMs: null, error: null }].slice(-80) }
+      return { ...state, results: [...state.results, { id: text(event.requestId, 100, true), lane: event.lane, questionId: event.questionId, evidenceVersion: event.evidenceVersion, contextKey: event.contextKey, codeVersion: state.codeVersion, taskVersion: state.task.version, terminalVersion: state.terminalVersion ?? 0, status: 'running' as const, text: '', guidance: null, model: '', startedAt: event.at, firstUsefulMs: null, totalMs: null, error: null }].slice(-80) }
     case 'result.delta':
       return { ...state, results: state.results.map(result => {
         if (result.id !== event.requestId || result.status !== 'running' || result.questionId !== state.question?.id || !resultCurrent(result, state) || state.status !== 'running') return result

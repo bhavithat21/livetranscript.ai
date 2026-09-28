@@ -18,7 +18,7 @@ const FILLER_RE =
 const SPEAKER_RE = /^\s*(?:Speaker\s+(?:\d+|[A-Z])|Call(?:\s*\/\s*speaker\s+\d+)?|Interviewer(?:\s*\/\s*call)?):\s*/i
 
 function stripLabels(sentence: string): string {
-  let clean = sentence.replace(SPEAKER_RE, '').replace(FILLER_RE, '').trim()
+  let clean = sentence.replaceAll('’', "'").replace(SPEAKER_RE, '').replace(FILLER_RE, '').trim()
   // A spoken restart must not carry an abandoned stem into the model request.
   const restart = [...clean.matchAll(/\b(?:i mean|let me rephrase|let me start again|i would ask you)\s*[,;:]?\s*/gi)].at(-1)
   if (restart) {
@@ -31,6 +31,13 @@ function stripLabels(sentence: string): string {
   if (!/\b(?:he|she|they|the (?:prompt|question)) (?:said|asked|says|asks)\b|["“]/i.test(clean)) {
     const request = /\b(?:i(?:'d| would) like (?:you to|to see how you)|i want you to|your task is to)\b/i.exec(clean)
     if (request) clean = clean.slice(request.index)
+    // Explicit question introductions are common in unpunctuated live ASR.
+    // Keep this restricted to the speaker's own ask, not arbitrary narration.
+    const introduction = /\b(?:the (?:(?:first|next|last|main|other) )?question (?:i|we) (?:have|want to ask) is|(?:i|we) (?:want to know|wanna know|want to ask|wanna ask)|(?:i|we) wanna like[, ]*)\s*[:,-]?\s*(?=(?:what|why|how|when|where|which|can|could|would|do|does|is|are)\b)/i.exec(clean)
+    if (introduction) clean = clean.slice(introduction.index + introduction[0].length)
+    // A closing conversational handoff can be cut off by the next speaker. It
+    // must not make the preceding complete implementation request disappear.
+    clean = clean.replace(/,?\s+and[, ]+(?:yeah[, ]+)?we can (?:then )?(?:go from|take it from)(?: there)?[.!?]*$/i, '').trim()
   }
   return clean
 }
@@ -45,6 +52,7 @@ export function looksLikeQuestion(sentence: string): boolean {
   // Session logistics and quoted self-talk do not need a technical answer.
   if (/^(?:how does (?:that|this) sound|does (?:that|this) (?:sound|make sense)|are you (?:ready|there)|can you (?:hear me|see (?:me|my screen|the screen))|is (?:my|the) (?:audio|screen)|what(?:'s| is) your name)\b/i.test(clean)) return false
   if (/^(?:i(?:'m| am| was)? (?:wondering|thinking|asking)|the (?:question|prompt) (?:says|asks)|he (?:asked|said)|she (?:asked|said))\b/i.test(clean)) return false
+  if (/^(?:what (?:we|i|you|they) (?:do )?(?:care about|need|want|mean|said|did)|how (?:we|i|you|they) (?:did|built|solved|handled))\b.*\b(?:is|was)\b/i.test(clean)) return false
   if (!clean || incompleteQuestion(clean)) return false
   // Agreement checks after statements are context, not a fresh technical ask.
   if (/\b(?:right|okay|ok|correct|isn't it|isn't that right)[,\s]*\?$/i.test(clean) && !CUE_RE.test(clean)) return false

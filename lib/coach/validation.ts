@@ -1,3 +1,4 @@
+import { taskRequirements, terminalEvidence } from '../repo/evidenceText'
 import type { Observation, FileObservation, EvidenceRef, ContextPacket, Guidance, Patch, Finding, Navigation, Permission } from './types'
 
 export const LIMITS = { files: 100, paths: 500, fragments: 28, sourceText: 600_000, events: 1200, replayBytes: 4_000_000, context: 24_000, output: 60_000 } as const
@@ -47,7 +48,7 @@ export function parseObservation(raw: unknown): Observation {
     files.push({ path, language, startLine, lines, confidence: probability(item.confidence), endOfFile: item.endOfFile })
   }
   const visiblePaths = list(root.visiblePaths, 300).map(value => text(value, 320, true).replaceAll('\\', '/')).filter(path => !SECRET_PATH.test(path)).map(safePath)
-  const result = { files, visiblePaths: [...new Set(visiblePaths)], terminal: redactSecrets(text(root.terminal, 12_000)), requirements: list(root.requirements, 30).map(value => redactSecrets(text(value, 1000, true))) }
+  const result = { files, visiblePaths: [...new Set(visiblePaths)], terminal: terminalEvidence(redactSecrets(text(root.terminal, 12_000))), requirements: taskRequirements(list(root.requirements, 30).map(value => redactSecrets(text(value, 1000, true)))) }
   if (JSON.stringify(result).length > 110_000) throw new Error('Observation exceeds its budget')
   return result
 }
