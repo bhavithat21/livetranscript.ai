@@ -87,7 +87,7 @@ export function observedText(context: ContextPacket, path: string, start: number
   return { value: output.join('\n'), evidence: compact }
 }
 export function parseGuidance(raw: unknown, context: ContextPacket): Guidance {
-  const root = object(raw, ['summary', 'look', 'patches', 'findings', 'verify', 'hypotheses'])
+  const root = object(raw, ['summary', 'nextAction', 'draft', 'look', 'patches', 'findings', 'verify', 'hypotheses'])
   const look = list(root.look, 3).map(value => {
     const item = object(value, ['path', 'startLine', 'endLine', 'symbol', 'reason'])
     const path = safePath(item.path)
@@ -131,5 +131,13 @@ export function parseGuidance(raw: unknown, context: ContextPacket): Guidance {
     const item = object(value, ['explanation', 'evidence'])
     return { explanation: text(item.explanation, 1000, true), evidence: refs(item.evidence, context) }
   })
-  return { summary: text(root.summary, 2000, true), look, patches, findings, verify, hypotheses }
+  const nextAction = root.nextAction === undefined ? undefined : text(root.nextAction, 1200, true)
+  let draft: Guidance['draft']
+  if (root.draft === null) draft = null
+  else if (root.draft !== undefined) {
+    const item = object(root.draft, ['language', 'code', 'explanation'])
+    if (context.task.implementation === 'hold') throw new Error('Implementation is on hold; no draft may be proposed yet')
+    draft = { language: text(item.language, 80, true), code: text(item.code, 12000, true), explanation: text(item.explanation, 1500, true) }
+  }
+  return { summary: text(root.summary, 2000, true), ...(nextAction === undefined ? {} : { nextAction }), ...(draft === undefined ? {} : { draft }), look, patches, findings, verify, hypotheses }
 }

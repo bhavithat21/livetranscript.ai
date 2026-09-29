@@ -15,12 +15,15 @@ No external control, hidden access, capture bypass, filesystem access or shell e
 const SCHEMA = `Return ONE valid JSON object, no markdown fences, with exactly these keys:
 {
   "summary": "short current conclusion; say what is unknown",
+  "nextAction": "one concrete step for the candidate to take now",
+  "draft": null,
   "look": [{"path": "exact knownPaths entry", "startLine": null, "endLine": null, "symbol": "observed symbol or empty string", "reason": "what observing this would establish"}],
   "patches": [{"path": "observed file", "fileVersion": 1, "startLine": 1, "before": "EXACT current visible source including whitespace", "after": "proposed replacement", "reason": "specific rationale"}],
   "findings": [{"severity": "blocking|review|optional", "category": "correctness|scope|security|tests|readability", "text": "precise grounded finding", "evidence": [{"sourceId": "from fragment.sources", "path": "observed file", "fileVersion": 1, "startLine": 1, "endLine": 2}]}],
   "verify": [{"command": "one non-destructive local test/build command", "scope": "what it covers", "reason": "why this test is relevant"}],
   "hypotheses": [{"explanation": "explicitly tentative reasoning", "evidence": [{"sourceId": "from fragment.sources", "path": "observed file", "fileVersion": 1, "startLine": 1, "endLine": 2}]}]
 }
+For a self-contained coding question, draft may instead be {"language":"requested coding language or pseudocode","code":"complete proposed solution","explanation":"assumptions and rationale"}. Use the selected coding language in candidate preferences. If no language is specified or visible, use clearly labeled pseudocode. A draft is new proposed code, never an observed file, an applied edit, or a tested result. It needs no file path. If requirements are insufficient, draft is null and nextAction asks one specific clarification. For an existing repository change use evidence-validated patches instead; never use draft to reconstruct unseen source. implementation=hold requires draft=null and patches=[]. Non-coding questions may have draft=null; still provide a useful nextAction.
 All arrays may be empty. At most 3 look targets, 4 patches, 8 findings, 4 verification commands and 4 hypotheses.
 References must identify exact supplied fragments. A reference may use null startLine/endLine only for an unanchored fragment, which cannot support an exact patch.
 A patch's before text MUST match high-confidence, anchored current evidence at startLine. No speculative preimages, guessed line numbers, overlapping patches, or newly invented files.

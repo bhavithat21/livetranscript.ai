@@ -129,7 +129,6 @@ export class CoachController {
   async run(lane: Lane, explicitRetry = false) {
     if (this.disposed || this.state.status !== 'running' || !this.state.question || !this.state.permission) return
     if (this.flights.has(lane)) return
-    if (lane !== 'talk' && !this.state.knownPaths.length) return
     let packet: ContextPacket
     try { packet = buildContext(this.state, lane === 'talk' ? 10_000 : LIMITS.context, this.index) }
     catch (error) { this.publish({ ...this.state, warning: error instanceof Error ? error.message : 'Context unavailable' }); return }

@@ -67,7 +67,7 @@ window.fetch = async (input, init) => {
     ]
     else {
       const file = context.files.find(file => file.path === path)
-      const guidance = parseGuidance({ summary: 'Require both sides of the observed transition contract.', look: [{ path: 'tests/TrackingService.test.ts', startLine: null, endLine: null, symbol: '', reason: 'Inspect rejected-state assertions.' }], patches: file ? [{ path, fileVersion: file.fileVersion, startLine: 2, before, after, reason: 'Both origin and destination must match.' }] : [], findings: [], hypotheses: [], verify: [] }, context)
+      const guidance = parseGuidance({ summary: 'Require both sides of the observed transition contract.', nextAction: 'Compare the two input values.', draft: file ? null : { language: 'Java', code: 'int max(int a, int b) { return Math.max(a, b); }', explanation: 'Proposed standalone solution.' }, look: context.knownPaths.includes('tests/TrackingService.test.ts') ? [{ path: 'tests/TrackingService.test.ts', startLine: null, endLine: null, symbol: '', reason: 'Inspect rejected-state assertions.' }] : [], patches: file ? [{ path, fileVersion: file.fileVersion, startLine: 2, before, after, reason: 'Both origin and destination must match.' }] : [], findings: [], hypotheses: [], verify: [] }, context)
       messages = [{ type: 'done', guidance, model: 'fixture-guide-NOT-a-model' }]
     }
     return new Response(messages.map(message => JSON.stringify(message)).join('\n') + '\n', { headers: { 'Content-Type': 'application/x-ndjson' } })

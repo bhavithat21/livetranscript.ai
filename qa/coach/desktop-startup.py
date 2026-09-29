@@ -42,6 +42,13 @@ with sync_playwright() as p:
     page.get_by_label('Coding language',exact=True).select_option('Java')
     page.get_by_role('button',name='Save brief',exact=True).click()
     page.get_by_text('Interview brief',exact=True).click()
+    # All three outputs work for a standalone question before any file is seen.
+    page.get_by_text('More options',exact=True).click()
+    page.get_by_label('Overlay interview question').fill('Write a Java max function for two integers')
+    page.get_by_label('Overlay interview question').press('Enter')
+    page.get_by_role('region',name='What to do next',exact=True).get_by_text('Compare the two input values.',exact=True).wait_for()
+    page.get_by_role('region',name='What to write',exact=True).get_by_text('int max(int a, int b) { return Math.max(a, b); }',exact=True).wait_for()
+    page.get_by_text('More options',exact=True).click()
     page.get_by_label('Overlay display').select_option('2')
     page.get_by_role('button',name='Enable screen sharing',exact=True).click()
     page.get_by_role('button',name='Enable screen sharing',exact=True).wait_for()

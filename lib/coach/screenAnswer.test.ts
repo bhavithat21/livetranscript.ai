@@ -11,7 +11,7 @@ function setup() {
   controller.start('practice', 'Help with the visible task')
   return { controller, transport }
 }
-afterEach(() => { for (const controller of controllers.splice(0)) controller.dispose() })
+afterEach(() => { for (const controller of controllers.splice(0)) controller.dispose(); vi.useRealTimers() })
 describe('automatic answers from visible tasks', () => {
   it('answers a screen problem without waiting for audio or a manual Answer click', () => {
     const { controller, transport } = setup()
@@ -37,4 +37,13 @@ describe('automatic answers from visible tasks', () => {
     controller.observeScreen({ ...empty, requirements: ['Implement two sum'] })
     expect(controller.getSnapshot().question?.id).toBe(id)
   })
+})
+
+it('requests writing guidance for a coding question without repository paths', async () => {
+  vi.useFakeTimers()
+  const { controller, transport } = setup()
+  controller.question('Write a Java function that returns the larger of two integers.')
+  await vi.advanceTimersByTimeAsync(651)
+  expect(transport.mock.calls.map(call => call[0])).toEqual(['talk', 'guide'])
+  expect(transport.mock.calls[1][1].knownPaths).toEqual([])
 })

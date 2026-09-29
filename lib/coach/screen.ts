@@ -9,7 +9,12 @@ export const httpCapture: CaptureTransport = async (image, signal) => {
   const response = await fetch('/api/copilot/repo-screen', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image }), signal })
   if (!response.ok) {
     const message = response.status === 401 ? 'Sign in again to enable screen analysis.' : response.status === 429 ? 'Screen analysis limit reached. Try again later.' : response.status === 503 ? 'Screen analysis is unavailable. Check the vision provider configuration.' : `Screen analysis failed (${response.status}). Try again.`
-    throw new Error(message)
+    let detail = message
+    try {
+      const body = await response.json() as { error?: unknown }
+      if (typeof body.error === 'string' && body.error.length <= 500) detail = body.error
+    } catch { /* A proxy may return HTML rather than the endpoint JSON. */ }
+    throw new Error(detail)
   }
   const raw = await response.text()
   if (raw.length > 400_000) throw new Error('Screenshot response exceeded its budget')
@@ -88,7 +93,7 @@ export class ScreenObserver {
       return true
     } catch (failure) {
       const reason = controller.signal.aborted ? 'Screen analysis timed out.' : failure instanceof Error ? failure.message : 'Screenshot could not be safely read.'
-      if (generation === this.generation) this.update({ watching: false, error: `${reason} Screen analysis is paused. Stop sharing and enable it again to retry.` })
+      if (generation === this.generation) this.update({ watching: false, error: `${reason} Screen analysis is paused. Retry analysis to keep the selected screen.` })
       return false
     } finally {
       clearTimeout(timeout)
