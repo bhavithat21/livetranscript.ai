@@ -7,3 +7,8 @@
 
 /* Panel resizing is independent of native window sizing; keep the arrow cursor. */
 .panel{overflow:hidden;box-sizing:border-box;min-width:220px}.body{height:calc(100% - 36px);box-sizing:border-box;overflow:auto;padding-bottom:28px}.resizeHandle{position:absolute;right:2px;bottom:2px;width:26px;height:26px;display:grid;place-items:center;z-index:3;cursor:default!important;touch-action:none;border:0;border-radius:5px;background:rgba(8,17,30,.9);color:#9eafc8}.resizeHandle:focus-visible{outline:2px solid #5b91ef;outline-offset:-2px}
+
+:global(html.lt-desktop) .header{background:rgba(244,248,253,.96);border-color:rgba(46,78,120,.2)}
+:global(html.lt-desktop) .header strong,:global(html.lt-desktop) .header button,:global(html.lt-desktop) .header .grip,:global(html.lt-desktop) .header .state{color:#253b55;text-shadow:none}
+
+:global(html.lt-desktop) .body{text-shadow:none;font-size:20px;line-height:1.7}

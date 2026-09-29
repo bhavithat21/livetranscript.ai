@@ -1,3 +1,4 @@
+import { SCREEN_SCHEMA } from './screenSchema'
 import Anthropic from '@anthropic-ai/sdk'
 import OpenAI from 'openai'
 import type { parseRepoImage } from './agentHttp'
@@ -31,7 +32,7 @@ export async function extractScreenEvidence(input: {
   if (provider === 'anthropic') {
     if (!process.env.ANTHROPIC_API_KEY) throw new ScreenExtractionError('ANTHROPIC_API_KEY is required for this vision model', 503)
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 0, timeout: 18_000 })
-    const result = await client.messages.create({ model: input.model, max_tokens: 6000, system: SCREEN_EXTRACTION_PROMPT, messages: [{ role: 'user', content: [
+    const result = await client.messages.create({ model: input.model, max_tokens: 6000, output_config: { format: { type: 'json_schema', schema: SCREEN_SCHEMA } }, system: SCREEN_EXTRACTION_PROMPT, messages: [{ role: 'user', content: [
       { type: 'image', source: { type: 'base64', media_type: input.image.mediaType, data: input.image.data } },
       { type: 'text', text: 'Transcribe the visible code, paths, requirements and terminal evidence.' },
     ] }] }, { signal })
@@ -44,7 +45,7 @@ export async function extractScreenEvidence(input: {
   if (provider === 'groq') throw new ScreenExtractionError('Groq vision is not enabled for screenshot reconstruction.', 503)
   if (!process.env.OPENAI_API_KEY) throw new ScreenExtractionError('OPENAI_API_KEY is required for this vision model', 503)
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, maxRetries: 0, timeout: 18_000 })
-  const result = await client.chat.completions.create({ model: input.model, max_completion_tokens: 6000, messages: [
+  const result = await client.chat.completions.create({ model: input.model, max_completion_tokens: 6000, response_format: { type: 'json_schema', json_schema: { name: 'screen_evidence', strict: true, schema: SCREEN_SCHEMA } }, messages: [
     { role: 'system', content: SCREEN_EXTRACTION_PROMPT },
     { role: 'user', content: [{ type: 'text', text: 'Transcribe the visible code, paths, requirements and terminal evidence.' }, { type: 'image_url', image_url: { url: `data:${input.image.mediaType};base64,${input.image.data}` } }] },
   ] }, { signal })
@@ -55,7 +56,7 @@ export async function extractScreenEvidence(input: {
 }
 
 function parseResult(raw: string, model: string, usage?: ScreenTokenUsage): ScreenExtractionResult {
-  const json = raw.startsWith('```') ? raw.replace(/^```(?:json)?[ \\t]*(?:\\r?\\n)?/, '').replace(/(?:\\r?\\n)?```[ \\t]*$/, '') : raw
+  const json = raw.startsWith('```') ? raw.replace(/^```(?:json)?[ \t]*(?:\r?\n)?/, '').replace(/(?:\r?\n)?```[ \t]*$/, '') : raw
   let observation: ScreenObservation
   try { observation = parseScreenObservation(JSON.parse(json)) } catch { throw new ScreenExtractionError('Screenshot extraction returned invalid evidence. Try a clearer capture.', 502, model, usage) }
   return { observation, model, raw, ...(usage ? { usage } : {}) }

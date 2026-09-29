@@ -30,3 +30,9 @@ describe('production screenshot extraction completion boundary', () => {
     expect(JSON.stringify(error)).not.toContain(text)
   })
 })
+
+it('requests a constrained response shape and handles fenced JSON whitespace', async () => {
+  create.mockResolvedValue({ model: 'claude-actual', stop_reason: 'end_turn', content: [{ type: 'text', text: '```json\t\r\n' + JSON.stringify(observation) + '\r\n```\t' }] })
+  await expect(extractScreenEvidence(input)).resolves.toMatchObject({ observation })
+  expect(create.mock.calls[0][0].output_config.format).toMatchObject({ type: 'json_schema', schema: { additionalProperties: false, required: ['files', 'visiblePaths', 'terminal', 'requirements'] } })
+})
