@@ -2,6 +2,7 @@ import { expect, it } from 'vitest'
 import { gunzipSync } from 'node:zlib'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { runPreflight } from '../../lib/reliability/preflight'
+import { speechConfiguration } from '../../lib/reliability/speechPolicy'
 import { renderVisionFixture } from '../vision/render'
 import { visionFixtures } from '../vision/fixtures'
 import { DeepgramProvider } from '../../lib/transcription/deepgram'
@@ -11,20 +12,22 @@ import { mintTranscriptionToken } from '../../lib/transcription/token'
 import { diagnosticCode } from '../../lib/diagnostics/schema'
 import speech from './speech.json'
 
-/** Paid and explicit. No skip-on-missing-key path. Reports contain no tokens,
- * source, audio or transcript. The fixture is synthetic, not interview content. */
+/** Every enabled adapter must pass real recognition/recovery. Unconfigured
+ * optional adapters are named as unavailable, never counted as passing. */
 it('requires actual model, screen and ASR reconnect probes before production release', async () => {
-  const report: Record<string, unknown> = { version: 1, at: Date.now(), commit: process.env.VERCEL_GIT_COMMIT_SHA || process.env.GITHUB_SHA, scope: 'synthetic-server-acceptance', deviceVerified: false, passed: false }
-  const root = 'public'; mkdirSync(root, { recursive: true })
-  const save = () => writeFileSync(`${root}/release-readiness.json`, JSON.stringify(report, null, 2))
+  const report: Record<string, unknown> = { version: 1, at: Date.now(), commit: process.env.VERCEL_GIT_COMMIT_SHA || process.env.GITHUB_SHA, scope: 'synthetic-server-acceptance', deviceVerified: false, passed: false, phase: 'configuration' }
+  mkdirSync('public', { recursive: true })
+  const save = () => writeFileSync('public/release-readiness.json', JSON.stringify(report, null, 2))
   const nativeFetch = globalThis.fetch
   const abort = new AbortController(), timeout = setTimeout(() => abort.abort(), 165_000)
   try {
     if (process.env.VERCEL_ENV !== 'production' && process.env.LT_RUN_LIVE_ACCEPTANCE !== '1') throw new Error('Live acceptance requires explicit opt-in')
-    const missing = ['DEEPGRAM_API_KEY', 'ASSEMBLYAI_API_KEY'].filter(key => !process.env[key])
-    if (missing.length) throw new Error('Required ASR credentials missing: live acceptance did not run')
+    const configured = speechConfiguration(); report.transcriptionConfiguration = configured; save()
+    if (!configured.hasProvider) throw new Error('No transcription provider configured')
     if (typeof WebSocket === 'undefined') throw new Error('Live acceptance requires Node 22 or newer with WebSocket')
+    report.phase = 'vision_fixture'; save()
     const fixture = visionFixtures[0], rendered = await renderVisionFixture(fixture)
+    report.phase = 'model_probes'; save()
     const models = await runPreflight(abort.signal, rendered.png.toString('base64'), observation => {
       for (const expected of fixture.expected.files) {
         const actual = observation.files.find(file => file.path === expected.path && file.startLine === expected.startLine)
@@ -32,9 +35,7 @@ it('requires actual model, screen and ASR reconnect probes before production rel
       }
     })
     report.models = models; save()
-    expect(models.passed, 'At least one configured provider/vision probe failed; inspect metadata report').toBe(true)
-    // Invoke the real browser providers from Node. Only their relative token
-    // request is adapted; minting, remote WebSockets and recognition remain real.
+    expect(models.passed, 'Configured provider/vision probe failed; inspect metadata report').toBe(true)
     globalThis.fetch = (async (input, init) => {
       if (input === '/api/token') {
         const provider = JSON.parse(String(init?.body)).provider
@@ -45,7 +46,8 @@ it('requires actual model, screen and ASR reconnect probes before production rel
     }) as typeof fetch
     const pcm = gunzipSync(Buffer.from(speech.audio, 'base64'))
     const results: Array<{ provider: string; passed: boolean; recovered: boolean; durationMs: number }> = []
-    for (const name of ['deepgram', 'assemblyai'] as const) {
+    for (const name of configured.enabled) {
+      report.phase = `transcription_${name}`; save()
       const started = Date.now(), config = { sampleRate: 16000, maxSpeakers: 2, keyterms: [], signal: abort.signal }
       const make = () => name === 'deepgram' ? new DeepgramProvider() : new AssemblyAIProvider()
       const first = make(); await first.connect(config)
@@ -76,9 +78,8 @@ it('requires actual model, screen and ASR reconnect probes before production rel
         report.transcription = results; save()
       } finally { await wrapper.disconnect() }
     }
-    report.passed = true; save()
+    report.passed = true; report.phase = 'complete'; save()
   } catch (error) {
-    // Fail closed without dumping SDK error bodies, tokens, or recognized text.
     report.failure = diagnosticCode(error, (error as { status?: number })?.status); save()
     throw new Error('Live acceptance failed. See release-readiness.json for safe check results.')
   } finally { clearTimeout(timeout); abort.abort(); globalThis.fetch = nativeFetch }
