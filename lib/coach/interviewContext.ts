@@ -1,4 +1,4 @@
-import type { ContextPacket, Lane } from './types'
+import type { ContextPacket, Lane } from './types'\nimport { projectCompactedContext } from './memory'
 
 export const CENTRAL_INTERVIEW_CONTRACT = `You are the reasoning layer for a live technical interview where external AI assistance is permitted.
 Priorities, in order: correctness; first useful answer latency; grounding in observed evidence; natural spoken clarity; complete implementation; verification.
@@ -11,7 +11,7 @@ A newer question, requirement, code revision, or material evidence version inval
 export type InterviewVersions={question:string;evidence:number;code:number;requirements:number;task:number}
 export type InterviewContext={
  schema:1;session:{id:string;permission:string};problem:{objective:string;requirements:string[];constraints:string[];phase:string;implementation:string};
- conversation:ContextPacket['conversation'];evidence:{visibleView:ContextPacket['visibleView'];files:ContextPacket['files'];knownPaths:string[];tests:ContextPacket['tests'];unknown:string[]};
+ conversation:ContextPacket['conversation'];memory:{summary:string;relevant:Array<{id:string;at:number;role:string;summary:string}>;compactedThrough:number;rawTurns:number};evidence:{visibleView:ContextPacket['visibleView'];files:ContextPacket['files'];knownPaths:string[];tests:ContextPacket['tests'];unknown:string[]};
  candidate:{currentActivity:'listening'|'speaking'|'editing'|'testing'|'reviewing';recentPatchStatus:string[]};routing:{requestedLane:Lane};versions:InterviewVersions;currentQuestion:ContextPacket['question'];contextKey:string
 }
 export function compileInterviewContext(packet:ContextPacket,lane:Lane):InterviewContext{
@@ -19,7 +19,7 @@ export function compileInterviewContext(packet:ContextPacket,lane:Lane):Intervie
  if(!packet.visibleView)unknown.push('No current screen view is available.')
  if(packet.files.some(f=>!f.complete))unknown.push('One or more observed files are partial; unseen lines remain unknown.')
  const activity:InterviewContext['candidate']['currentActivity']=packet.tests.some(t=>['awaiting-output','running'].includes(t.status))?'testing':packet.patchReviews.length?'reviewing':packet.task.phase==='implement'?'editing':'listening'
- return{schema:1,session:{id:packet.sessionId,permission:packet.permission},problem:{objective:packet.task.objective,requirements:packet.task.requirements,constraints:packet.task.constraints,phase:packet.task.phase,implementation:packet.task.implementation},conversation:packet.conversation??[],evidence:{visibleView:packet.visibleView,files:packet.files,knownPaths:packet.knownPaths,tests:packet.tests,unknown},candidate:{currentActivity:activity,recentPatchStatus:packet.patchReviews.map(r=>r.status)},routing:{requestedLane:lane},versions:{question:packet.question.id,evidence:packet.evidenceVersion,code:packet.codeVersion,requirements:packet.task.version,task:packet.task.version},currentQuestion:packet.question,contextKey:packet.contextKey}
+ return{schema:1,session:{id:packet.sessionId,permission:packet.permission},problem:{objective:packet.task.objective,requirements:packet.task.requirements,constraints:packet.task.constraints,phase:packet.task.phase,implementation:packet.task.implementation},conversation:projected.recentConversation,memory:projected.memory,evidence:{visibleView:packet.visibleView,files:projected.files,knownPaths:packet.knownPaths,tests:projected.tests,unknown},candidate:{currentActivity:activity,recentPatchStatus:packet.patchReviews.map(r=>r.status)},routing:{requestedLane:lane},versions:{question:packet.question.id,evidence:packet.evidenceVersion,code:packet.codeVersion,requirements:packet.task.version,task:packet.task.version},currentQuestion:packet.question,contextKey:packet.contextKey}
 }
 export function laneInstruction(lane:Lane):string{
  if(lane==='talk')return 'Return only WHAT TO SAY. Give the first grounded useful response immediately. Maximum 80 words. Do not wait for implementation and do not speculate beyond observed evidence.'
