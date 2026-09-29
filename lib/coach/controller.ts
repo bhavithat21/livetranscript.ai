@@ -4,7 +4,7 @@ import { buildContext, EvidenceIndex } from './context'
 import { emptyCoach, normalizeQuestion, parseReplayEvent, reduceCoach, resultCurrent } from './state'
 import { lessonIds, type LessonId } from './learning/policy'
 import { LIMITS, list, object, parseGuidance, redactSecrets, text } from './validation'
-import { diagnosticSpan, recordDiagnostic } from '@/lib/diagnostics/client'
+import { diagnosticSpan, recordDiagnostic } from './diagnostics'
 
 export type ReplayReference = { id: string; lane: string; model: string; text: string; summary: string; note: string; verdict: string }
 export type CoachTransport = (lane: Lane, packet: ContextPacket, options: { signal: AbortSignal; instructions?: string; lessons?: LessonId[]; diagnosticHeaders?: Record<string, string>; delta: (text: string, model: string) => void }) => Promise<{ model: string; guidance: Guidance | null }>

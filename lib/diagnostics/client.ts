@@ -1,5 +1,6 @@
 'use client'
 import { diagnosticCode, parseDiagnosticEvent, sanitizeAttributes, type DiagnosticEvent, type DiagnosticEventName, type Stage } from './schema'
+import { installCoachDiagnostics } from '../coach/diagnostics'
 
 const STORE = 'lt.diagnostics.v1', ENABLED = 'lt.diagnostics.enabled.v1'
 const MAX_EVENTS = 600, MAX_PENDING = 100, TTL = 24 * 60 * 60 * 1000
@@ -27,7 +28,8 @@ export function initializeDiagnostics(): void {
   } catch { /* continue in memory */ }
   const sessionId = newId()
   publish({ enabled: enabled && !!sessionId, sessionId, events: enabled ? events : [] })
-  // Restored events are export-only, NEVER queued under a later signed-in user.
+  installCoachDiagnostics({ span: diagnosticSpan, record: recordDiagnostic, code: diagnosticCode })
+  persist()
 }
 export const subscribeDiagnostics = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener) } }
 export const getDiagnostics = () => state
@@ -38,8 +40,6 @@ function schedule() {
 }
 export function recordDiagnostic(stage: Stage, event: DiagnosticEventName, attrs: unknown = {}, operationId?: string): void {
   try {
-    // Root DiagnosticsRuntime explicitly activates the collector. Imports and
-    // server-side/unit execution have no storage, timers or network side effects.
     if (!initialized || !state.enabled) return
     const entry = parseDiagnosticEvent({ v: 1, sessionId: state.sessionId, operationId: operationId || newId(), seq: ++seq, at: Date.now(), stage, event, attrs: sanitizeAttributes(attrs) })
     pending.push(entry)
@@ -50,15 +50,16 @@ export function recordDiagnostic(stage: Stage, event: DiagnosticEventName, attrs
   } catch { /* telemetry must NEVER affect application behavior */ }
 }
 export function diagnosticSpan(stage: Stage, attrs: unknown = {}) {
-  const started = Date.now(), operationId = newId(), context = sanitizeAttributes(attrs)
+  const started = Date.now(), operationId = newId(), context = sanitizeAttributes(attrs), sessionId = state.sessionId, token = epoch
   let ended = false
+  const valid = () => !ended && token === epoch && sessionId === state.sessionId
   recordDiagnostic(stage, 'start', context, operationId)
   return {
     id: operationId,
-    headers(): Record<string, string> { return initialized && state.enabled && operationId ? { 'x-lt-session-id': state.sessionId, 'x-lt-operation-id': operationId } : {} },
-    event(event: DiagnosticEventName, more: unknown = {}) { if (!ended) recordDiagnostic(stage, event, { ...context, ...sanitizeAttributes(more), durationMs: Date.now() - started }, operationId) },
-    end(event: 'success' | 'error' | 'cancelled' | 'stop', more: unknown = {}) { if (ended) return; ended = true; recordDiagnostic(stage, event, { ...context, ...sanitizeAttributes(more), durationMs: Date.now() - started }, operationId) },
-    failure(error: unknown, status?: number) { if (ended) return; ended = true; const code = diagnosticCode(error, status); recordDiagnostic(stage, code === 'cancelled' ? 'cancelled' : 'error', { ...context, code, httpStatus: status, durationMs: Date.now() - started }, operationId) },
+    headers(): Record<string, string> { return initialized && state.enabled && operationId && valid() ? { 'x-lt-session-id': sessionId, 'x-lt-operation-id': operationId } : {} },
+    event(event: DiagnosticEventName, more: unknown = {}) { if (valid()) recordDiagnostic(stage, event, { ...context, ...sanitizeAttributes(more), durationMs: Date.now() - started }, operationId) },
+    end(event: 'success' | 'error' | 'cancelled' | 'stop', more: unknown = {}) { if (!valid()) return; ended = true; recordDiagnostic(stage, event, { ...context, ...sanitizeAttributes(more), durationMs: Date.now() - started }, operationId) },
+    failure(error: unknown, status?: number) { if (!valid()) return; ended = true; const code = diagnosticCode(error, status); recordDiagnostic(stage, code === 'cancelled' ? 'cancelled' : 'error', { ...context, code, httpStatus: status, durationMs: Date.now() - started }, operationId) },
   }
 }
 export function setDiagnosticsEnabled(enabled: boolean) {

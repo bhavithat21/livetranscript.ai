@@ -1,8 +1,7 @@
 import { KeyframeGate, type FrameSignal } from './keyframes'
 import { hashText, parseObservation } from './validation'
 import type { Observation } from './types'
-import { diagnosticSpan, recordDiagnostic } from '@/lib/diagnostics/client'
-import { diagnosticCode } from '@/lib/diagnostics/schema'
+import { diagnosticSpan, recordDiagnostic, diagnosticCode } from './diagnostics'
 
 export type ScreenStatus = { sharing: boolean; watching: boolean; reading: boolean; captures: number; localSamples: number; error: string | null; source: 'browser' | 'native' | null; lastSampleAt: number | null; lastCaptureAt: number | null; gateReason: 'initial' | 'changed' | 'unchanged' | 'settling' | 'throttled' | 'busy' | null; changedTiles: number }
 export type FrameSource = { signal: () => Promise<FrameSignal | null>; image: () => Promise<string | null>; stop: () => void | Promise<void>; preview?: MediaStream }
