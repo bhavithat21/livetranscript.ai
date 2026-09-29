@@ -4,13 +4,13 @@ import { createPortal } from 'react-dom'
 import { Eye,EyeOff,Lock,Unlock,LayoutTemplate } from 'lucide-react'
 import { OverlayPanel,type OverlayRect } from './OverlayPanel'
 import styles from './OverlayWorkspace.module.css'
-import { getNativeOverlayLock, nativeDesktopAvailable, setNativeCaptureProtection, setNativeOverlayLock, setNativeOverlayWindowSize, setNativeOverlayVisible } from '@/lib/desktop/overlay'
+import { getNativeOverlayLock, nativeDesktopAvailable, setNativeCaptureProtection, setNativeOverlayLock, setNativeOverlayWindowSize, setNativeOverlayVisible, setNativeInterviewPresence } from '@/lib/desktop/overlay'
 type Layout={say:OverlayRect;code:OverlayRect;transcript:OverlayRect}
 const DEFAULT:Layout={say:{x:18,y:54,width:360,height:150,opacity:72},code:{x:392,y:54,width:470,height:360,opacity:78},transcript:{x:18,y:430,width:520,height:70,opacity:55}}
 const MINIMAL:Layout={say:{x:650,y:30,width:390,height:180,opacity:82},code:{x:650,y:228,width:390,height:430,opacity:86},transcript:{x:28,y:590,width:600,height:68,opacity:45}}
 export function OverlayWorkspace({say,code,transcript,status}:{say:React.ReactNode;code:React.ReactNode;transcript:React.ReactNode;status?:React.ReactNode}){
  const [layout,setLayout]=useState<Layout>(()=>{if(typeof window==='undefined')return DEFAULT;try{const raw=localStorage.getItem('lt-overlay-layout-v2');return raw?JSON.parse(raw):DEFAULT}catch{return DEFAULT}}),[locked,setLocked]=useState(false),[visible,setVisible]=useState(true),[showTranscript,setShowTranscript]=useState(false),[native]=useState(()=>nativeDesktopAvailable())
- useEffect(()=>{if(native){void setNativeOverlayWindowSize('small');document.documentElement.classList.add('lt-overlay-mode');void setNativeCaptureProtection(true);void getNativeOverlayLock().then(setLocked).catch(()=>{});return()=>document.documentElement.classList.remove('lt-overlay-mode')}},[native])
+ useEffect(()=>{if(native){void setNativeOverlayWindowSize('small');void setNativeInterviewPresence(true).catch(()=>{});document.documentElement.classList.add('lt-overlay-mode');void setNativeCaptureProtection(true);void getNativeOverlayLock().then(setLocked).catch(()=>{});return()=>{void setNativeInterviewPresence(false).catch(()=>{});document.documentElement.classList.remove('lt-overlay-mode')}}},[native])
  const update=useCallback((key:keyof Layout,next:OverlayRect)=>setLayout(prev=>{const value={...prev,[key]:next};try{localStorage.setItem('lt-overlay-layout-v2',JSON.stringify(value))}catch{}return value}),[])
  const opacity=Math.round((layout.say.opacity+layout.code.opacity+layout.transcript.opacity)/3)
  if(!visible){const hidden=<div className={`${styles.hiddenBar} lt-overlay-root`}><button onClick={()=>setVisible(true)}><Eye size={13}/>Show overlays</button></div>;return native?createPortal(hidden,document.body):hidden}
