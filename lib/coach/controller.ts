@@ -98,6 +98,13 @@ export class CoachController {
       this.scheduleGuide()
     }
   }
+  observeScreen(observation: Observation, capturedAt?: number) {
+    this.observe(observation, 'screen', capturedAt)
+    if (!this.replay && !this.state.question && observation.requirements.some(value => value.trim())) {
+      // Live screen mode can begin from a visible task without waiting for speech.
+      this.question(observation.requirements.join('\n').slice(0, 2000))
+    }
+  }
   private scheduleGuide() {
     if (this.timer) this.clock.clearTimeout(this.timer)
     if (this.replay || this.disposed || this.state.status !== 'running' || !this.state.question) return

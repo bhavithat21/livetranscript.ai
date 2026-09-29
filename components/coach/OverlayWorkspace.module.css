@@ -18,3 +18,6 @@
 
 .workspaceBody{display:flex;flex:1;min-height:0;gap:12px}.workspaceBody>.canvas{flex:1;min-width:0}.workspaceBody>.sessionControls{width:248px;flex:0 0 248px;max-height:none;display:flex;flex-direction:column;align-items:stretch;gap:12px;overflow:auto}.sessionControls label{flex-wrap:wrap}.sessionControls select,.sessionControls input{max-width:100%}.sessionControls details{flex-basis:auto}.sessionControls p{flex-basis:auto}.sessionControls summary{font-weight:600}
 @media(max-width:700px){.workspaceBody{flex-direction:column}.workspaceBody>.sessionControls{width:auto;flex:0 0 auto;max-height:35vh}}
+
+/* Floating panels have no stationary enclosing frame or shadow. */
+:global(html.lt-desktop.lt-overlay-mode) .shell{border:0!important;box-shadow:none!important}

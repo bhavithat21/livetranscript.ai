@@ -29,6 +29,8 @@ function initialLayout(): Layout {
 }
 export function OverlayWorkspace({next,say,code,writing,transcript,status,controls}:{next:React.ReactNode;say:React.ReactNode;code:React.ReactNode;writing:React.ReactNode;transcript:React.ReactNode;status?:React.ReactNode;controls?:React.ReactNode}){
  const [layout,setLayout]=useState<Layout>(initialLayout),[locked,setLocked]=useState(false),[visible,setVisible]=useState(true),[showTranscript,setShowTranscript]=useState(false),[scale,setScale]=useState(1),[native]=useState(()=>nativeDesktopAvailable())
+ const [desktopVersion,setDesktopVersion]=useState<string|null>(null)
+ useEffect(()=>{if(!native)return;let alive=true;void import('@tauri-apps/api/app').then(api=>api.getVersion()).then(version=>{if(alive)setDesktopVersion(version)}).catch(()=>{});return()=>{alive=false}},[native])
  const [windowError,setWindowError]=useState<string|null>(null)
  useEffect(()=>{
   if(!native)return
@@ -48,7 +50,7 @@ export function OverlayWorkspace({next,say,code,writing,transcript,status,contro
   {native && <NativeWindowControls />}
   {windowError && <p role="alert" className={styles.windowError}>{windowError}</p>}
   <div className={styles.workspaceBody}>
-  {controls && <div className={styles.sessionControls} role="region" aria-label="Live interview options"><strong>Live interview options</strong>{controls}</div>}
+  {controls && <div className={styles.sessionControls} role="region" aria-label="Live interview options"><strong>Live interview</strong>{controls}{desktopVersion && <small>Desktop {desktopVersion}</small>}</div>}
   <div className={styles.canvas} data-locked={locked}>
    <OverlayPanel title="What to do next" rect={layout.next} onChange={n=>update('next',n)} locked={locked} accent="neutral">{next}</OverlayPanel>
    <OverlayPanel title="What to say" rect={layout.say} onChange={n=>update('say',n)} locked={locked} accent="say">{say}</OverlayPanel>
