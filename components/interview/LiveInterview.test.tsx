@@ -65,11 +65,12 @@ it('mounts the shared repository coach only when selected before starting', asyn
   expect(screen.queryByText('Shared repository coach')).toBeNull()
 })
 
-it('opens desktop guidance before recording and maximizes only on explicit Start', async () => {
+it('opens a simple desktop start page and maximizes only on explicit Start', async () => {
   stubs.native = true
   stubs.start.mockResolvedValue(undefined)
   const view = render(<LiveInterview visible blocked={false} onActivity={vi.fn()} onComplete={vi.fn()} />)
-  for (const name of ['What to do next', 'What to say', 'What to write']) expect(screen.getByRole('region', { name })).toBeTruthy()
+  expect(screen.getByRole('heading', { name: 'Start your interview' })).toBeTruthy()
+  expect(screen.queryByRole('region', { name: 'What to say' })).toBeNull()
   expect(stubs.start).not.toHaveBeenCalled()
   expect(stubs.maximize).not.toHaveBeenCalled()
   start()
@@ -77,4 +78,13 @@ it('opens desktop guidance before recording and maximizes only on explicit Start
   expect(stubs.maximize).toHaveBeenCalledTimes(1)
   view.rerender(<LiveInterview visible blocked={false} onActivity={vi.fn()} onComplete={vi.fn()} />)
   expect(stubs.maximize).toHaveBeenCalledTimes(1)
+})
+
+it('can start screen-only coaching without requesting either audio channel', async () => {
+  stubs.native = true
+  render(<LiveInterview visible blocked={false} onActivity={vi.fn()} onComplete={vi.fn()} />)
+  fireEvent.change(screen.getByRole('combobox', { hidden: true }), { target: { value: 'screen' } })
+  start()
+  expect(await screen.findByText('Shared repository coach')).toBeTruthy()
+  expect(stubs.start).not.toHaveBeenCalled()
 })

@@ -13,6 +13,7 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
     "qa-results/**",
+    "src-tauri/target/**",
     "qa/refinement/generated-fonts.css",
   ]),
 ]);

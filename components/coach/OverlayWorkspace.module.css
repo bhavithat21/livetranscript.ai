@@ -18,3 +18,9 @@
 
 .workspaceBody{display:flex;flex:1;min-height:0;gap:12px}.workspaceBody>.canvas{flex:1;min-width:0}.workspaceBody>.sessionControls{width:248px;flex:0 0 248px;max-height:none;display:flex;flex-direction:column;align-items:stretch;gap:12px;overflow:auto}.sessionControls label{flex-wrap:wrap}.sessionControls select,.sessionControls input{max-width:100%}.sessionControls details{flex-basis:auto}.sessionControls p{flex-basis:auto}.sessionControls summary{font-weight:600}
 @media(max-width:700px){.workspaceBody{flex-direction:column}.workspaceBody>.sessionControls{width:auto;flex:0 0 auto;max-height:35vh}}
+
+/* Floating panels have no stationary enclosing frame or shadow. */
+:global(html.lt-desktop.lt-overlay-mode) .shell{border:0!important;box-shadow:none!important}
+
+/* All session actions live above the reading panels. */
+.sessionControls{max-height:38vh;align-items:center;font-size:12px;padding:8px 12px;gap:8px}.sessionControls>div{padding:0;border:0;flex:1}.sessionControls p{margin:0}.sessionControls details[open]{flex-basis:100%}.sessionControls textarea{width:100%;min-height:130px;background:#142842;color:white;border:1px solid #57708e;padding:8px}.sessionControls small{margin-left:auto}

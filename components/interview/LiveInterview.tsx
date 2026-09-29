@@ -9,7 +9,9 @@ import { LiveScrollArea } from '@/components/transcript/LiveScrollArea'
 import { LiveAnswerCanvas } from './LiveAnswerCanvas'
 import { openScreenRecordingSettings } from '@/lib/coach/native'
 import { nativeDesktopAvailable, maximizeLiveInterviewWindow } from '@/lib/desktop/overlay'
-import { OverlayWorkspace } from '@/components/coach/OverlayWorkspace'
+import { InterviewBrief } from './InterviewBrief'
+import { NativeWindowControls } from '@/components/NativeWindowControls'
+import { createPortal } from 'react-dom'
 import { RepositoryCoach } from '@/components/coach/RepositoryCoach'
 import { useKeytermPrefs } from '@/lib/transcription/useKeytermPrefs'
 import { liveTranscript, useInterviewRecorder } from '@/lib/interview/useInterviewRecorder'
@@ -32,10 +34,17 @@ export function LiveInterview({ visible, blocked, onActivity, onComplete, videoT
   const { scale } = useTextScale()
   const [interviewerSpeaker, setInterviewerSpeaker] = useState<number | null>(null)
   const { keyterms } = useKeytermPrefs()
-  const [source, setSource] = useState<'both' | 'system' | 'mic'>(videoTest ? 'system' : 'both')
+  const [source, setSource] = useState<'both' | 'system' | 'mic' | 'screen'>(videoTest ? 'system' : 'both')
   const [title, setTitle] = useState(videoTest ? 'Video coding test' : 'Live interview')
   const [consent, setConsent] = useState(false)
   const native = useSyncExternalStore(subscribeDesktop, nativeDesktopAvailable, () => false)
+  const [desktopVersion, setDesktopVersion] = useState<string | null>(null)
+  useEffect(() => {
+    if (!native) return
+    let current = true
+    void import('@tauri-apps/api/app').then(api => api.getVersion()).then(version => { if (current) setDesktopVersion(version) }).catch(() => {})
+    return () => { current = false }
+  }, [native])
   const [repositoryChoice, setRepositoryMode] = useState<boolean | null>(null)
   const repositoryMode = repositoryChoice ?? (videoTest || native)
   const [active, setActive] = useState(false)
@@ -83,13 +92,13 @@ export function LiveInterview({ visible, blocked, onActivity, onComplete, videoT
 
   async function begin() {
     if (activity.current || blocked || !consent) return
-    void maximizeLiveInterviewWindow().catch(() => setError('Could not maximize the window. Use Zoom or resize it manually.'))
+    void maximizeLiveInterviewWindow().catch(() => setError('Could not maximize the window. Reopen LiveTranscript to restore the startup layout.'))
     const token = ++lifecycle.current
     activity.current = true; ending.current = false; sessionId.current = crypto.randomUUID(); startTime.current = Date.now()
     setInterviewerSpeaker(null); setCaptureStartedAt(startTime.current); setElapsed(0); setError(null); setBusy(true); setActive(true); setTranscriptOpen(true); onActivity(true)
     try {
-      if (source !== 'mic') await call.start('system', keyterms)
-      if (token === lifecycle.current && !ending.current && source !== 'system') await microphone.start('mic', keyterms, source === 'mic' ? 5 : 1)
+      if ((source === 'both' || source === 'system')) await call.start('system', keyterms)
+      if (token === lifecycle.current && !ending.current && (source === 'both' || source === 'mic')) await microphone.start('mic', keyterms, source === 'mic' ? 5 : 1)
     } catch (e) {
       if (token !== lifecycle.current) return
       await Promise.all([call.stop(), microphone.stop()])
@@ -109,6 +118,7 @@ export function LiveInterview({ visible, blocked, onActivity, onComplete, videoT
         source === 'mic' ? [] : callRows.filter((row) => row.capturedAt >= startTime.current),
         source === 'system' ? [] : micRows.filter((row) => row.capturedAt >= startTime.current),
       )
+      if (!transcript.trim() && source === 'screen') return
       if (!transcript.trim()) { setError('No speech was captured. Check the selected audio source and start again.'); return }
       onComplete({
         id: sessionId.current, kind: 'live', title: title.trim() || 'Live interview',
@@ -125,7 +135,7 @@ export function LiveInterview({ visible, blocked, onActivity, onComplete, videoT
 
   const callRows = call.segments.filter((row) => row.capturedAt >= captureStartedAt)
   const micRows = microphone.segments.filter((row) => row.capturedAt >= captureStartedAt)
-  const captured = (source !== 'mic' && callRows.length > 0) || (source !== 'system' && micRows.length > 0)
+  const captured = ((source === 'both' || source === 'system') && callRows.length > 0) || ((source === 'both' || source === 'mic') && micRows.length > 0)
   const hasRecording = call.phase === 'recording' || microphone.phase === 'recording'
   const formatTime = (seconds: number) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
   const transcriptRows: ChannelSegment[] = [
@@ -135,16 +145,21 @@ export function LiveInterview({ visible, blocked, onActivity, onComplete, videoT
   const turns = liveTurns(transcriptRows)
   const callSpeakers = [...new Set((source === 'mic' ? micRows : callRows).flatMap(row => row.speaker == null ? [] : [row.speaker]))].sort((a, b) => a - b)
   const readingStyle = { '--live-text-size': `${18 * scale}px` } as CSSProperties
-  const captureStatus = finishing ? 'Saving transcript…' : busy ? 'Connecting audio…' : hasRecording ? 'Listening' : 'Audio paused'
-  if (!active && native && visible && repositoryMode) return <OverlayWorkspace
-    status={<span>Ready to start</span>}
-    controls={<><label><input type="checkbox" checked={consent} onChange={event => setConsent(event.target.checked)} /> I have permission to record and use AI assistance.</label><label>Audio source <select aria-label="Audio source" value={source} onChange={event => setSource(event.target.value as typeof source)}><option value="both">Call audio + my microphone</option><option value="system">Call / system audio only</option><option value="mic">My microphone only</option></select></label><button disabled={blocked || !consent} onClick={() => void begin()}>Start interview</button><button onClick={() => setRepositoryMode(false)}>Session setup</button>{(error || call.error || microphone.error) && <p role="alert">{error || call.error || microphone.error}</p>}{error && <button onClick={() => void openScreenRecordingSettings().catch(() => setError('Open System Settings → Privacy & Security to enable recording permission, then reopen LiveTranscript.'))}>Open recording permissions</button>}</>}
-    next={<><p>Choose your audio source, confirm permission, then start the interview.</p><p>Screen awareness starts when you choose a display during the session.</p>{blocked && <p>End Mock Lab before starting Live.</p>}</>}
-    say={<p>Your spoken answer will appear here.</p>}
-    code={<p>Code, SQL, and implementation guidance will appear here when the task calls for it.</p>}
-    writing={<p>Explanations to use while writing will appear here.</p>}
-    transcript={<p>No audio is being recorded yet.</p>}
-  />
+  const captureStatus = finishing ? 'Saving transcript…' : busy ? 'Connecting audio…' : hasRecording ? 'Listening' : source === 'screen' ? 'Screen-only session' : 'Audio paused'
+  if (!active && native && visible && repositoryMode) return createPortal(<div className={`${styles.desktopStart} lt-overlay-root`}>
+    <NativeWindowControls />
+    <section aria-label="Start live interview">
+      <h1>Start your interview</h1>
+      <p>Automatic answers from the conversation and the screen you choose to share. No language selection needed.</p>
+      <label><input type="checkbox" checked={consent} onChange={event => setConsent(event.target.checked)} /> I have permission to record and use AI assistance.</label>
+      <button disabled={blocked || !consent || busy} onClick={() => void begin()}>{busy ? 'Starting…' : 'Start interview'}</button>
+      <details><summary>Audio options</summary><label>Audio source <select aria-label="Audio source" value={source} onChange={event => setSource(event.target.value as typeof source)}><option value="both">Call audio + my microphone</option><option value="system">Call / system audio only</option><option value="mic">My microphone only</option>{repositoryMode && <option value="screen">Screen only — no audio</option>}</select></label></details>
+      {(error || call.error || microphone.error) && <p role="alert">{error || call.error || microphone.error}</p>}
+      {error && <button onClick={() => void openScreenRecordingSettings().catch(() => setError('Open System Settings → Privacy & Security to enable recording permission, then reopen LiveTranscript.'))}>Open recording permissions</button>}
+      {blocked && <p>End Mock Lab before starting Live.</p>}
+      {desktopVersion && <small>Desktop {desktopVersion}</small>}
+    </section>
+  </div>, document.body)
   if (!active) return <div>
     <section className={styles.liveStage} style={readingStyle} aria-labelledby="live-setup-heading">
       <div className={styles.liveTopbar}><span className={styles.liveMark}><AudioLines size={17} aria-hidden /></span><span className={styles.liveTitle}>A clear space for your next conversation</span><span className={styles.sessionTime}>Ready to set up</span></div>
@@ -162,7 +177,7 @@ export function LiveInterview({ visible, blocked, onActivity, onComplete, videoT
           {setupOpen && <fieldset id="live-setup-fields" className={styles.setupFields}>
             <legend className="sr-only">Interview configuration</legend>
             <label className={styles.field}>Session title<input maxLength={180} value={title} onChange={(event) => setTitle(event.target.value)} /></label>
-            <label className={styles.field}>Audio source<select value={source} onChange={(event) => setSource(event.target.value as typeof source)}><option value="both">Call audio + my microphone</option><option value="system">Call / system audio only</option><option value="mic">My microphone only</option></select></label>
+            <label className={styles.field}>Audio source<select value={source} onChange={(event) => setSource(event.target.value as typeof source)}><option value="both">Call audio + my microphone</option><option value="system">Call / system audio only</option><option value="mic">My microphone only</option>{repositoryMode && <option value="screen">Screen only — no audio</option>}</select></label>
             <p className={styles.setupNote}><Headphones size={14} aria-hidden />Use headphones with dual-channel capture to reduce echo.</p>
           </fieldset>}
           {blocked && <p role="status" className={styles.livePaused}>End Mock Lab before starting Live.</p>}
@@ -193,10 +208,10 @@ export function LiveInterview({ visible, blocked, onActivity, onComplete, videoT
       {videoTest && interviewerSpeaker === null && <p className={styles.activityNotice}>Video test: select the interviewer in Speakers after both voices appear. Automatic answers wait for this assignment; voices are not identities.</p>}
       <div className={`${styles.liveGrid} ${repositoryMode || !transcriptOpen ? styles.liveGridNoRail : ''}`}>
         <div className={styles.answerColumn}>
-          {repositoryMode ? <RepositoryCoach overlayVisible={visible} overlayControls={<><span>{captureStatus} · {formatTime(elapsed)}</span><button disabled={finishing} onClick={() => void finish()}>End interview</button>{(error || call.error || microphone.error) && <p role="alert">{error || call.error || microphone.error}</p>}{error && <button onClick={() => void openScreenRecordingSettings().catch(() => setError('Open System Settings → Privacy & Security to enable recording permission, then reopen LiveTranscript.'))}>Open recording permissions</button>}</>} permission={videoTest ? 'practice' : 'external-ai-allowed'} getQuestionTranscript={questionText} getConversation={conversation} /> : <LiveAnswerCanvas getTranscript={text} getQuestionTranscript={questionText} />}
+          {repositoryMode ? <RepositoryCoach instructions={tuning.state.active.instructions} overlayVisible={visible} overlayControls={<><InterviewBrief /><span>{captureStatus} · {formatTime(elapsed)}</span><button disabled={finishing} onClick={() => void finish()}>End interview</button>{(error || call.error || microphone.error) && <p role="alert">{error || call.error || microphone.error}</p>}{error && <button onClick={() => void openScreenRecordingSettings().catch(() => setError('Open System Settings → Privacy & Security to enable recording permission, then reopen LiveTranscript.'))}>Open recording permissions</button>}</>} permission={videoTest ? 'practice' : 'external-ai-allowed'} getQuestionTranscript={questionText} getConversation={conversation} /> : <LiveAnswerCanvas getTranscript={text} getQuestionTranscript={questionText} />}
           <div className={styles.captureBar}>
-            {source !== 'system' && <span className={styles.channel}><span className={`${styles.channelDot} ${microphone.phase === 'recording' ? styles.channelDotOn : ''}`} /><Mic size={12} aria-hidden />Mic · {microphone.phase === 'recording' ? 'on' : 'waiting'}</span>}
-            {source !== 'mic' && <span className={styles.channel}><span className={`${styles.channelDot} ${call.phase === 'recording' ? styles.channelDotOn : ''}`} /><Monitor size={12} aria-hidden />System · {call.phase === 'recording' ? 'on' : 'waiting'}</span>}
+            {(source === 'both' || source === 'mic') && <span className={styles.channel}><span className={`${styles.channelDot} ${microphone.phase === 'recording' ? styles.channelDotOn : ''}`} /><Mic size={12} aria-hidden />Mic · {microphone.phase === 'recording' ? 'on' : 'waiting'}</span>}
+            {(source === 'both' || source === 'system') && <span className={styles.channel}><span className={`${styles.channelDot} ${call.phase === 'recording' ? styles.channelDotOn : ''}`} /><Monitor size={12} aria-hidden />System · {call.phase === 'recording' ? 'on' : 'waiting'}</span>}
             <div className={styles.captureActions}><button type="button" className={styles.darkButton} aria-expanded={transcriptOpen} aria-controls="live-transcript" onClick={() => setTranscriptOpen((open) => !open)}><FileText size={13} aria-hidden />{transcriptOpen ? 'Hide transcript' : 'Transcript'}</button><button type="button" className={styles.darkButton} disabled={!captured} onClick={() => downloadInterview(title, text())}><Download size={13} aria-hidden />Export</button></div>
           </div>
         </div>

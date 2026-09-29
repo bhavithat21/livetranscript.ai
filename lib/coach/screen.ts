@@ -7,7 +7,10 @@ export type FrameSource = { signal: () => Promise<FrameSignal | null>; image: ()
 export type CaptureTransport = (image: string, signal: AbortSignal) => Promise<Observation>
 export const httpCapture: CaptureTransport = async (image, signal) => {
   const response = await fetch('/api/copilot/repo-screen', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image }), signal })
-  if (!response.ok) throw new Error('Screenshot extraction failed')
+  if (!response.ok) {
+    const message = response.status === 401 ? 'Sign in again to enable screen analysis.' : response.status === 429 ? 'Screen analysis limit reached. Try again later.' : response.status === 503 ? 'Screen analysis is unavailable. Check the vision provider configuration.' : `Screen analysis failed (${response.status}). Try again.`
+    throw new Error(message)
+  }
   const raw = await response.text()
   if (raw.length > 400_000) throw new Error('Screenshot response exceeded its budget')
   return parseObservation(JSON.parse(raw).observation)
@@ -59,8 +62,9 @@ export class ScreenObserver {
             if (generation === this.generation) this.gate.finish(signal, accepted)
           })
         }
-      } catch {
-        if (generation === this.generation) { this.update({ watching: false, reading: false, error: 'Screen capture stopped. Check permissions or select the IDE again.' }); return }
+      } catch (failure) {
+        const reason = failure instanceof Error ? failure.message : typeof failure === 'string' ? failure : 'Check screen-recording permission and select the display again.'
+        if (generation === this.generation) { this.update({ watching: false, reading: false, error: `Screen capture stopped: ${reason}` }); return }
       }
       if (generation === this.generation && this.status.watching) this.timer = setTimeout(() => void tick(), 250)
     }
@@ -82,8 +86,9 @@ export class ScreenObserver {
       this.onObservation(observation, capturedAt)
       this.update({ captures: this.status.captures + 1, lastCaptureAt: capturedAt })
       return true
-    } catch {
-      if (generation === this.generation) this.update({ watching: false, error: 'Screenshot could not be safely read. Watch is paused. Recapture explicitly; no automatic retry is made.' })
+    } catch (failure) {
+      const reason = controller.signal.aborted ? 'Screen analysis timed out.' : failure instanceof Error ? failure.message : 'Screenshot could not be safely read.'
+      if (generation === this.generation) this.update({ watching: false, error: `${reason} Screen analysis is paused. Stop sharing and enable it again to retry.` })
       return false
     } finally {
       clearTimeout(timeout)

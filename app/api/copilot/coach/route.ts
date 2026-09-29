@@ -5,7 +5,7 @@ import { readRepoJson, RepoRequestError } from '@/lib/repo/agentHttp'
 import { callRepoModel, streamRepoModel, type ModelUsage } from '@/lib/repo/agentProviders'
 import { assertRepoModelConfigured, repoModelFor, validRepoModel } from '@/lib/repo/modelPolicy'
 import { parseContext } from '@/lib/coach/context'
-import { object, parseGuidance } from '@/lib/coach/validation'
+import { object, parseGuidance, text } from '@/lib/coach/validation'
 import { lessonIds, lessonPrompt, type LessonId } from '@/lib/coach/learning/policy'
 import { coachPrompt } from '@/lib/coach/prompts'
 import { compileInterviewPrompt } from '@/lib/coach/interviewContext'
@@ -19,11 +19,11 @@ export async function POST(req: Request) {
   if (req.headers.get('origin') !== new URL(req.url).origin) return Response.json({ error: 'Same-origin request required' }, { status: 403 })
   // Per-instance protection, not a fleet-wide spending guarantee.
   if (!rateLimit(`repo-coach:${userId}`, 18, 60_000)) return Response.json({ error: 'Model request budget reached. Pause before retrying.' }, { status: 429, headers: { 'Retry-After': '10' } })
-  let lane: Lane, context: ContextPacket, lessons: LessonId[]
+  let lane: Lane, context: ContextPacket, lessons: LessonId[], instructions: string
   try {
-    const body = object(await readRepoJson(req, 100_000), ['lane', 'context', 'lessons'])
+    const body = object(await readRepoJson(req, 100_000), ['lane', 'context', 'lessons', 'instructions'])
     if (!['talk', 'guide', 'review'].includes(String(body.lane))) throw new Error('Invalid lane')
-    lane = body.lane as Lane; context = parseContext(body.context); lessons = lessonIds(body.lessons ?? [])
+    instructions = text(body.instructions ?? '', 1500); lane = body.lane as Lane; context = parseContext(body.context); lessons = lessonIds(body.lessons ?? [])
   } catch (error) {
     return Response.json({ error: 'Invalid or oversized repository context' }, { status: error instanceof RepoRequestError ? error.status : 400 })
   }
@@ -49,7 +49,7 @@ export async function POST(req: Request) {
       const emit = (value: Record<string, unknown>) => { if (!closed && !signal.aborted) controller.enqueue(encoder.encode(`${JSON.stringify(value)}\n`)) }
       try {
         emit({ type: 'started', lane, evidenceVersion: context.evidenceVersion, decision })
-        const compiled = compileInterviewPrompt(context, lane)
+        const compiled = compileInterviewPrompt(context, lane, instructions)
         const request = { model, system: compiled.system + '\\n' + coachPrompt(lane) + lessonPrompt(lessons), evidence: compiled.evidence, signal, maxTokens: lane === 'talk' ? 384 : lane === 'review' ? 2200 : 3400 }
         if (lane === 'talk') {
           let returned = model, visible = '', firstTextMs: number | null = null

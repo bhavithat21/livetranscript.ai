@@ -2,6 +2,8 @@ import Foundation
 import ScreenCaptureKit
 import CoreMedia
 import CoreAudio
+import AppKit
+import CoreImage
 
 // LiveTranscript macOS system-audio helper.
 //
@@ -237,6 +239,84 @@ final class AudioCapturer: NSObject, SCStreamOutput, SCStreamDelegate {
         diag("stopped: \(error)")
         exit(1)
     }
+}
+
+// System-selected, session-scoped screen capture. No display enumeration or TCC
+// preflight is used in this mode; the OS picker supplies the authorized filter.
+@available(macOS 14.0, *)
+final class ScreenPickerCapturer: NSObject, SCContentSharingPickerObserver, SCStreamOutput, SCStreamDelegate {
+    private var stream: SCStream?
+    private let context = CIContext()
+    private let queue = DispatchQueue(label: "ai.livetranscript.screen-frames")
+    func start() {
+        let picker = SCContentSharingPicker.shared
+        var configuration = SCContentSharingPickerConfiguration()
+        configuration.allowedPickerModes = [.singleWindow, .singleDisplay]
+        configuration.excludedBundleIDs = ["ai.livetranscript.desktop"]
+        picker.defaultConfiguration = configuration
+        picker.add(self)
+        picker.isActive = true
+        picker.present()
+    }
+    func contentSharingPicker(_ picker: SCContentSharingPicker, didCancelFor stream: SCStream?) {
+        if self.stream == nil { FileHandle.standardError.write(Data("Screen selection cancelled.\n".utf8)); exit(1) }
+    }
+    func contentSharingPickerStartDidFailWithError(_ error: Error) {
+        FileHandle.standardError.write(Data("Screen picker failed: \(error.localizedDescription)\n".utf8)); exit(1)
+    }
+    func contentSharingPicker(_ picker: SCContentSharingPicker, didUpdateWith filter: SCContentFilter, for stream: SCStream?) {
+        Task {
+            do {
+                if let current = self.stream { try await current.updateContentFilter(filter); return }
+                let config = SCStreamConfiguration()
+                let size = filter.contentRect.size
+                let scale = min(1, 2400 / max(1, max(size.width, size.height)))
+                config.width = max(2, Int(size.width * scale))
+                config.height = max(2, Int(size.height * scale))
+                config.minimumFrameInterval = CMTime(value: 1, timescale: 2)
+                config.queueDepth = 3
+                config.showsCursor = false
+                config.capturesAudio = false
+                let capture = SCStream(filter: filter, configuration: config, delegate: self)
+                self.stream = capture
+                try capture.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
+                try await capture.startCapture()
+            } catch { self.contentSharingPickerStartDidFailWithError(error) }
+        }
+    }
+    func stream(_ stream: SCStream, didOutputSampleBuffer sample: CMSampleBuffer, of type: SCStreamOutputType) {
+        guard type == .screen, sample.isValid,
+              let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
+              let status = attachments.first?[.status] as? Int, status == SCFrameStatus.complete.rawValue,
+              let buffer = CMSampleBufferGetImageBuffer(sample) else { return }
+        autoreleasepool {
+            let image = CIImage(cvPixelBuffer: buffer)
+            guard let jpeg = context.jpegRepresentation(of: image, colorSpace: CGColorSpaceCreateDeviceRGB(), options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: 0.8]),
+                  jpeg.count <= 4_400_000 else { return }
+            var length = UInt32(jpeg.count).littleEndian
+            var packet = withUnsafeBytes(of: &length) { Data($0) }
+            packet.append(jpeg)
+            FileHandle.standardOutput.write(packet)
+        }
+    }
+    func stream(_ stream: SCStream, didStopWithError error: Error) {
+        FileHandle.standardError.write(Data("Screen sharing ended: \(error.localizedDescription)\n".utf8)); exit(1)
+    }
+}
+
+if CommandLine.arguments.contains("--screen") {
+    guard #available(macOS 14.0, *) else { exit(2) }
+    let app = NSApplication.shared
+    app.setActivationPolicy(.accessory)
+    let capture = ScreenPickerCapturer()
+    let parent = getppid()
+    let parentWatch = DispatchSource.makeTimerSource(queue: .main)
+    parentWatch.schedule(deadline: .now() + 1, repeating: 1)
+    parentWatch.setEventHandler { if getppid() != parent { exit(0) } }
+    parentWatch.resume()
+    DispatchQueue.main.async { capture.start() }
+    withExtendedLifetime((capture, parentWatch)) { app.run() }
+    exit(0)
 }
 
 // MARK: - Main: tap first, SCK fallback

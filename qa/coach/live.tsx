@@ -58,7 +58,7 @@ window.fetch = async (input, init) => {
   if (url === '/api/copilot/repo-screen') return Response.json({ observation: source, model: 'fixture-vision-NOT-a-model' })
   if (url === '/api/copilot/coach') {
     const body = JSON.parse(String(init?.body)), context = parseContext(body.context)
-    calls.push({ lane: body.lane, context })
+    calls.push({ lane: body.lane, context, instructions: body.instructions } as typeof calls[number])
     if (init?.signal?.aborted) throw new DOMException('Fixture cancelled', 'AbortError')
     let messages: object[]
     if (body.lane === 'talk') messages = [

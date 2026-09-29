@@ -7,14 +7,26 @@ export function nativeAvailable(): boolean {
 }
 async function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   const { invoke } = await import('@tauri-apps/api/core')
-  return invoke<T>(command, args)
+  try { return await invoke<T>(command, args) }
+  catch (failure) {
+    const message = failure instanceof Error ? failure.message : String(failure)
+    if (/not found|unknown command/i.test(message)) throw new Error('This installed desktop app is too old for screen sharing. Install LiveTranscript 0.1.10 or newer, then quit and reopen the app.')
+    throw new Error(message)
+  }
 }
 export async function nativeDisplays(): Promise<NativeDisplay[]> {
   if (!nativeAvailable()) return []
   return invoke<NativeDisplay[]>('coach_displays')
 }
-export async function nativeFrameSource(displayId: string): Promise<FrameSource> {
-  const { leaseId } = await invoke<{ leaseId: string }>('coach_start', { displayId, approved: true })
+export async function nativeFrameSource(displayId: string, signal?: AbortSignal): Promise<FrameSource> {
+  const requestId = crypto.randomUUID()
+  if (signal?.aborted) throw new Error('Screen selection cancelled.')
+  const cancel = () => { void invoke('coach_stop', { leaseId: requestId }).catch(() => {}) }
+  const starting = invoke<{ leaseId: string }>('coach_start', { displayId, approved: true, requestId })
+  signal?.addEventListener('abort', cancel, { once: true })
+  let leaseId: string
+  try { ({ leaseId } = await starting) } finally { signal?.removeEventListener('abort', cancel) }
+  if (signal?.aborted) { await invoke('coach_stop', { leaseId }).catch(() => {}); throw new Error('Screen selection cancelled.') }
   let stopped = false
   return {
     async signal() {

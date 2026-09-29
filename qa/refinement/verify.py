@@ -109,20 +109,11 @@ with sync_playwright() as p:
     page.evaluate('window.__refinementQA.show("home")')
     page.set_viewport_size({'width':1440,'height':1000})
     page.wait_for_timeout(100)
-    page.get_by_role('button',name='Pause motion',exact=True).click()
-    page.wait_for_timeout(50)
-    assert page.locator('[data-motion-paused]').count()==1
-    assert page.evaluate("document.getAnimations().filter(a=>a.playState==='running').length")==0
+    assert page.get_by_role('heading',name='Ready for your interview?',exact=True).is_visible()
+    assert page.get_by_role('link',name='Start live interview',exact=True).get_attribute('href')=='/interview#live'
     page.emulate_media(reduced_motion='reduce')
-    # Remount with the OS preference active; Pause motion is intentionally hidden
-    # under reduced-motion, so this is independent of the manual pause state.
-    page.evaluate('window.__refinementQA.show("transcript")')
-    page.get_by_role('button',name='Reading view',exact=True).wait_for()
-    page.evaluate('window.__refinementQA.show("home")')
-    page.wait_for_timeout(100)
-    page.get_by_role('heading',name='Before you press play.',exact=False).scroll_into_view_if_needed()
     assert page.evaluate("document.getAnimations().filter(a=>a.playState==='running').length")==0
-    report['checks'].append('Pause motion and reduced-motion leave content visible with zero running decorative animations')
+    report['checks'].append('Simple interview start page exposes the live route and has no decorative motion')
     page.evaluate('window.__refinementQA.show("transcript")')
     assert page.locator('.live-scroll-area[data-flow="true"]').count()==1
     report['checks'].append('Archived shared document retains normal page scrolling, never forced to its latest line')

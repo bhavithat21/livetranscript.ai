@@ -18,6 +18,8 @@
          system sound but no words". -->
     <key>NSAudioCaptureUsageDescription</key>
     <string>LiveTranscript captures your computer&#39;s audio output to transcribe what&#39;s playing (e.g. a meeting), without touching your microphone.</string>
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>LiveTranscript reads the display you choose to provide screen-aware AI assistance while sharing is enabled.</string>
     <key>NSCameraUsageDescription</key>
     <string>LiveTranscript can use your camera for video features.</string>
   </dict>
