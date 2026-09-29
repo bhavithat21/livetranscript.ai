@@ -76,8 +76,16 @@ with sync_playwright() as p:
         if not page.locator('details:has(>summary[aria-label="Text size and reading preferences"])').get_attribute('open') == '': control.click()
         field=page.get_by_label('Custom text size percent')
         field.fill(str(percent)); field.press('Tab')
+        # Resize and details-toggle handlers place the fixed popup asynchronously.
+        # Await the same strict bounds instead of sampling before that update paints.
+        try:
+          page.wait_for_function("(width) => {const e=document.querySelector('input[aria-label=\"Custom text size percent\"]');if(!e)return false;const r=e.getBoundingClientRect();return r.left>=0 && r.right<=width}",arg=width,timeout=3000)
+        except Exception:
+          page.screenshot(path=str(ROOT/f'popup-failure-{theme}-{width}-{percent}.png'),full_page=True)
+          print(json.dumps({'theme':theme,'width':width,'percent':percent,'bounds':field.bounding_box()}),flush=True)
+          raise
         bounds=field.evaluate('(e)=>{const r=e.getBoundingClientRect();return {left:r.left,right:r.right}}')
-        assert bounds['left']>=0 and bounds['right']<=width
+        assert bounds['left']>=0 and bounds['right']<=width,(theme,width,percent,bounds)
         control.click()
         page.wait_for_function("() => {const s=document.querySelector('#live-transcript .live-scroll-viewport');return s && Math.abs(s.scrollHeight-s.scrollTop-s.clientHeight)<2}")
         measured=page.locator('#live-transcript .live-scroll-viewport p').first.evaluate('(e)=>parseFloat(getComputedStyle(e).fontSize)')
