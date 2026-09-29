@@ -1,5 +1,6 @@
 'use client'
-import { useCallback,useEffect,useState } from 'react'\nimport { createPortal } from 'react-dom'
+import { useCallback,useEffect,useState } from 'react' 
+import { createPortal } from 'react-dom'
 import { Eye,EyeOff,Lock,Unlock,LayoutTemplate } from 'lucide-react'
 import { OverlayPanel,type OverlayRect } from './OverlayPanel'
 import styles from './OverlayWorkspace.module.css'
@@ -21,4 +22,5 @@ export function OverlayWorkspace({say,code,transcript,status}:{say:React.ReactNo
    <OverlayPanel title="Latest question" rect={layout.transcript} onChange={n=>update('transcript',n)} locked={locked} accent="transcript">{transcript}</OverlayPanel>
   </div>
  </div>
+ return native ? createPortal(workspace, document.body) : workspace
 }
