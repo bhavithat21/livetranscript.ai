@@ -74,13 +74,7 @@ export function WorkspaceShell({ active, children, interviewView = 'live', onInt
         {active === 'interview' && interviewView === view && <span className={styles.selectedDot} aria-hidden />}
       </Link>)}
       <Link href="/dashboard" onClick={(event) => navigate(event)} aria-current={active === 'transcripts' ? 'page' : undefined} className={styles.navLink}><FileText size={17} strokeWidth={1.7} aria-hidden /><span>Transcripts</span></Link>
-      <details className={styles.moreTools} open={TOOL_LINKS.some(item => item.id === active)}>
-        <summary><span>More tools</span><ChevronDown size={15} aria-hidden /></summary>
-      {TOOL_LINKS.map(({ id, href, label, icon: Icon }) => <Link key={id} href={href} onClick={(event) => navigate(event)} aria-current={active === id ? 'page' : undefined} className={styles.navLink}>
-        <Icon size={17} strokeWidth={1.7} aria-hidden /><span>{label}</span>
-      </Link>)}
-        <Link href="/download" onClick={(event) => navigate(event)} className={styles.navLink}><Download size={17} strokeWidth={1.7} aria-hidden />Desktop app</Link>
-      </details>
+      <details className={styles.moreTools} open={TOOL_LINKS.some(item => item.id === active)}><summary><span>More tools</span><ChevronDown size={15} aria-hidden /></summary>{TOOL_LINKS.map(({ id, href, label, icon: Icon }) => <Link key={id} href={href} onClick={(event) => navigate(event)} aria-current={active === id ? 'page' : undefined} className={styles.navLink}><Icon size={17} strokeWidth={1.7} aria-hidden /><span>{label}</span></Link>)}<Link href="/download" onClick={(event) => navigate(event)} className={styles.navLink}><Download size={17} aria-hidden />Desktop app</Link></details>
       <div className={styles.navBottom}>
         <Link href="/settings" onClick={(event) => navigate(event)} aria-current={active === 'settings' ? 'page' : undefined} className={styles.navLink}><Settings2 size={17} strokeWidth={1.7} aria-hidden />Settings</Link>
       </div>

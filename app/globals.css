@@ -643,3 +643,7 @@ html.lt-desktop.lt-overlay-mode .lt-overlay-root [class*='canvas']::after{displa
 /* Interview overlay isolation: no underlying workspace text, cards or controls may bleed through. */
 html.lt-desktop.lt-overlay-mode #workspace-content,html.lt-desktop.lt-overlay-mode aside,html.lt-desktop.lt-overlay-mode header:not(.lt-overlay-root header),html.lt-desktop.lt-overlay-mode main{visibility:hidden!important;opacity:0!important;pointer-events:none!important;background:transparent!important}
 html.lt-desktop.lt-overlay-mode .lt-overlay-root,html.lt-desktop.lt-overlay-mode .lt-overlay-root *{visibility:visible!important;opacity:1;}
+
+/* Confined native app frame: one clean boundary instead of content floating edge-to-edge. */
+html.lt-desktop:not(.lt-overlay-mode) body{padding:10px;background:transparent!important}
+html.lt-desktop:not(.lt-overlay-mode) body>div#__next,html.lt-desktop:not(.lt-overlay-mode) body>main{border:1px solid rgba(130,151,181,.28);border-radius:14px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.28)}

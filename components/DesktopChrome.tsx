@@ -1,5 +1,6 @@
 'use client'
 import { useEffect } from 'react'
+import { NativeWindowControls } from './NativeWindowControls'
 
 // Marks the document as running inside the native Tauri shell by adding
 // `lt-desktop` to <html>. That class flips the app to its transparent "glass
@@ -17,5 +18,5 @@ export function DesktopChrome() {
     if (isTauri) document.documentElement.classList.add('lt-desktop')
     return () => document.documentElement.classList.remove('lt-desktop')
   }, [])
-  return null
+  return <NativeWindowControls />
 }
