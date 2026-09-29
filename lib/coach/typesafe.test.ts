@@ -1,5 +1,6 @@
 import { describe,expect,it,vi,afterEach } from 'vitest'
-import { judgeLiveContext,routeDecision } from './typesafe'\nimport type { ContextPacket } from './types'
+import { judgeLiveContext,routeDecision } from './typesafe'
+import type { ContextPacket } from './types'
 const context:ContextPacket={question:{id:'q',original:'Why is this failing?',text:'Why is this failing?',at:1},task:{objective:'Debug',requirements:[],constraints:[],phase:'debug',implementation:'allowed',version:1},visibleView:null,knownPaths:[],files:[],relations:[],tests:[],patches:[],patchReviews:[],conversation:[],evidenceVersion:1,codeVersion:1,schema:1,sessionId:'s',permission:'practice',contextKey:'k',budget:{maxCharacters:4000,usedCharacters:0,omittedPaths:[]}}
 afterEach(()=>{vi.unstubAllGlobals();vi.unstubAllEnvs()})
 describe('TypeSafe decision fabric',()=>{
