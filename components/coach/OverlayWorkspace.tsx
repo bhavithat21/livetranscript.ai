@@ -15,9 +15,9 @@ export function OverlayWorkspace({say,code,transcript,status}:{say:React.ReactNo
  return <div className={styles.shell}>
   <div className={styles.toolbar}><span className={styles.liveDot}/><strong>Overlay workspace</strong>{status}<span className={styles.spacer}/><label>Background <input aria-label="Overlay background transparency" type="range" min="20" max="96" value={opacity} onChange={e=>{const v=Number(e.target.value);setLayout(p=>{const n={say:{...p.say,opacity:v},code:{...p.code,opacity:v},transcript:{...p.transcript,opacity:Math.max(20,v-18)}};try{localStorage.setItem('lt-overlay-layout-v1',JSON.stringify(n))}catch{}return n})}}/><span>{opacity}%</span></label><button onClick={()=>setLocked(v=>!v)}>{locked?<><Lock size={13}/>Locked</>:<><Unlock size={13}/>Move & resize</>}</button><button onClick={()=>setLayout(p=>({...MINIMAL,say:{...MINIMAL.say,opacity:p.say.opacity},code:{...MINIMAL.code,opacity:p.code.opacity},transcript:{...MINIMAL.transcript,opacity:p.transcript.opacity}}))}><LayoutTemplate size={13}/>Compact</button><button onClick={()=>setLayout(DEFAULT)}><LayoutTemplate size={13}/>Full</button><button onClick={()=>setVisible(false)}><EyeOff size={13}/>Hide</button></div>
   <div className={styles.canvas} data-locked={locked}>
-   <OverlayPanel id="say" title="What to say" rect={layout.say} onChange={n=>update('say',n)} locked={locked} accent="say">{say}</OverlayPanel>
-   <OverlayPanel id="code" title="Code / solution" rect={layout.code} onChange={n=>update('code',n)} locked={locked} accent="code">{code}</OverlayPanel>
-   <OverlayPanel id="transcript" title="Latest question" rect={layout.transcript} onChange={n=>update('transcript',n)} locked={locked} accent="transcript">{transcript}</OverlayPanel>
+   <OverlayPanel title="What to say" rect={layout.say} onChange={n=>update('say',n)} locked={locked} accent="say">{say}</OverlayPanel>
+   <OverlayPanel title="Code / solution" rect={layout.code} onChange={n=>update('code',n)} locked={locked} accent="code">{code}</OverlayPanel>
+   <OverlayPanel title="Latest question" rect={layout.transcript} onChange={n=>update('transcript',n)} locked={locked} accent="transcript">{transcript}</OverlayPanel>
   </div>
  </div>
 }
