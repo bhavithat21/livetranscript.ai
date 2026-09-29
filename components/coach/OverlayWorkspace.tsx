@@ -7,8 +7,7 @@ type Layout={say:OverlayRect;code:OverlayRect;transcript:OverlayRect}
 const DEFAULT:Layout={say:{x:28,y:28,width:430,height:190,opacity:78},code:{x:480,y:28,width:560,height:500,opacity:84},transcript:{x:28,y:548,width:1012,height:120,opacity:58}}
 const MINIMAL:Layout={say:{x:650,y:30,width:390,height:180,opacity:82},code:{x:650,y:228,width:390,height:430,opacity:86},transcript:{x:28,y:590,width:600,height:68,opacity:45}}
 export function OverlayWorkspace({say,code,transcript,status}:{say:React.ReactNode;code:React.ReactNode;transcript:React.ReactNode;status?:React.ReactNode}){
- const [layout,setLayout]=useState<Layout>(DEFAULT),[locked,setLocked]=useState(false),[visible,setVisible]=useState(true)
- useEffect(()=>{try{const raw=localStorage.getItem('lt-overlay-layout-v1');if(raw)setLayout(JSON.parse(raw))}catch{}},[])
+ const [layout,setLayout]=useState<Layout>(()=>{if(typeof window==='undefined')return DEFAULT;try{const raw=localStorage.getItem('lt-overlay-layout-v1');return raw?JSON.parse(raw):DEFAULT}catch{return DEFAULT}}),[locked,setLocked]=useState(false),[visible,setVisible]=useState(true)
  const update=useCallback((key:keyof Layout,next:OverlayRect)=>setLayout(prev=>{const value={...prev,[key]:next};try{localStorage.setItem('lt-overlay-layout-v1',JSON.stringify(value))}catch{}return value}),[])
  const opacity=Math.round((layout.say.opacity+layout.code.opacity+layout.transcript.opacity)/3)
  if(!visible)return <div className={styles.hiddenBar}><button onClick={()=>setVisible(true)}><Eye size={13}/>Show overlays</button></div>
