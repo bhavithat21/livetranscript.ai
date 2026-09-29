@@ -12,7 +12,9 @@ function measured(): RepoBenchmarkPolicy {
 
 describe('measured repository model policy', () => {
   it('labels defaults honestly and gives explicit role config priority', () => {
-    expect(repoModelFor('debugger', {})).toEqual({ model: DEFAULT_REPO_MODEL, source: 'default' })\n    expect(repoModelFor('requirements', {})).toEqual({ model: DEFAULT_LIVE_MODEL, source: 'default' })\n    expect(repoModelFor('vision', {})).toEqual({ model: DEFAULT_VISION_MODEL, source: 'default' })
+    expect(repoModelFor('debugger', {})).toEqual({ model: DEFAULT_REPO_MODEL, source: 'default' })
+    expect(repoModelFor('requirements', {})).toEqual({ model: DEFAULT_LIVE_MODEL, source: 'default' })
+    expect(repoModelFor('vision', {})).toEqual({ model: DEFAULT_VISION_MODEL, source: 'default' })
     expect(repoModelFor('debugger', { COPILOT_REPO_MODEL_DEBUGGER: 'gpt-4.1' })).toEqual({ model: 'gpt-4.1', source: 'configured' })
   })
   it('keeps legacy administrator routing but does not mislabel it a measured winner', () => {
