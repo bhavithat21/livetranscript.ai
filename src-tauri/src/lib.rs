@@ -16,6 +16,7 @@
 // (lib/audio/useNativeCapture.ts).
 use std::sync::Mutex;
 use tauri::ipc::{Channel, InvokeResponseBody};
+use tauri::Manager;
 
 mod remote_assist;
 mod coach_capture;
@@ -65,6 +66,9 @@ impl Default for ProtectionState {
 // so the ONLY ways out are the global hotkey (works unfocused) and the tray item —
 // never an in-window control. This flag mirrors the window state so the tray
 // checkmark and the hotkey toggle agree. Starts unlocked.
+pub struct RecoveryState { shortcut_registered: Mutex<bool> }
+impl Default for RecoveryState { fn default() -> Self { Self { shortcut_registered: Mutex::new(false) } } }
+
 pub struct LockState {
     click_through: Mutex<bool>,
 }
@@ -207,6 +211,15 @@ fn set_lock_mode(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
 
 // Read the current lock state so the web UI can reflect it (e.g. show the right
 // button label) and stay in sync after a hotkey/tray toggle.
+#[tauri::command]
+fn set_interview_presence(app: tauri::AppHandle, active: bool) -> Result<(), String> {
+    use tauri::Manager;
+    if active && !*lock(&app.state::<RecoveryState>().shortcut_registered) { return Err("Cannot hide menu-bar recovery until a global unlock shortcut is registered.".into()); }
+    if let Some(tray) = app.tray_by_id("main-tray") { tray.set_visible(!active).map_err(|e| e.to_string())?; }
+    #[cfg(target_os = "macos")] app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+    Ok(())
+}
+
 #[tauri::command]
 fn get_lock_mode(app: tauri::AppHandle) -> bool {
     use tauri::Manager;
@@ -496,7 +509,8 @@ pub fn run() {
         .manage(remote_assist::RemoteAssistState::default())
         .manage(coach_capture::CoachCaptureState::default())
         .manage(ProtectionState::default())
-        .manage(LockState::default());
+        .manage(LockState::default())
+        .manage(RecoveryState::default());
     #[cfg(desktop)]
     let builder = builder.manage(TrayHandles::default());
 
@@ -505,6 +519,7 @@ pub fn run() {
             set_content_protection,
             set_lock_mode,
             get_lock_mode,
+            set_interview_presence,
             request_screen_capture_access,
             start_native_audio,
             stop_native_audio,
@@ -616,6 +631,7 @@ pub fn run() {
                     }
                 }).is_ok();
                 if !space_registered { eprintln!("[shortcuts] Cmd/Ctrl+Shift+Space unavailable; use Cmd/Ctrl+Shift+U or tray Unlock overlays"); }
+                *lock(&app.state::<RecoveryState>().shortcut_registered) = space_registered || _unlock_u_registered;
 
                 // Tray-only mode: build the tray FIRST, then hide the Dock icon
                 // (macOS Accessory policy; Windows uses skipTaskbar in the config).
