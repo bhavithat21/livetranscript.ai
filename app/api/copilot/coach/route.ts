@@ -8,7 +8,8 @@ import { parseContext } from '@/lib/coach/context'
 import { object, parseGuidance } from '@/lib/coach/validation'
 import { lessonIds, lessonPrompt, type LessonId } from '@/lib/coach/learning/policy'
 import { coachPrompt } from '@/lib/coach/prompts'
-import type { ContextPacket, Lane } from '@/lib/coach/types'\nimport { judgeLiveContext, routeDecision } from '@/lib/coach/typesafe'
+import type { ContextPacket, Lane } from '@/lib/coach/types'
+import { judgeLiveContext, routeDecision } from '@/lib/coach/typesafe'
 
 export const maxDuration = 40
 export async function POST(req: Request) {
