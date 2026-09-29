@@ -16,6 +16,7 @@
 // (lib/audio/useNativeCapture.ts).
 use std::sync::Mutex;
 use tauri::ipc::{Channel, InvokeResponseBody};
+use tauri::Manager;
 
 mod remote_assist;
 mod coach_capture;
@@ -211,7 +212,6 @@ fn set_lock_mode(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
 // Read the current lock state so the web UI can reflect it (e.g. show the right
 // button label) and stay in sync after a hotkey/tray toggle.
 #[tauri::command]
-#[tauri::command]
 fn set_interview_presence(app: tauri::AppHandle, active: bool) -> Result<(), String> {
     use tauri::Manager;
     if active && !*lock(&app.state::<RecoveryState>().shortcut_registered) { return Err("Cannot hide menu-bar recovery until a global unlock shortcut is registered.".into()); }
@@ -220,6 +220,7 @@ fn set_interview_presence(app: tauri::AppHandle, active: bool) -> Result<(), Str
     Ok(())
 }
 
+#[tauri::command]
 fn get_lock_mode(app: tauri::AppHandle) -> bool {
     use tauri::Manager;
     *lock(&app.state::<LockState>().click_through)
