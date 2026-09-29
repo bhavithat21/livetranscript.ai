@@ -2,7 +2,9 @@ import type { RepoAgentRole } from './agentTypes'
 
 // Defaults are operational choices, NOT measured benchmark winners. Current ID
 // verified against https://platform.claude.com/docs/en/models/overview (2026-09-22).
-export const DEFAULT_REPO_MODEL = 'claude-sonnet-5'
+export const DEFAULT_REPO_MODEL = 'gpt-6-sol'
+export const DEFAULT_LIVE_MODEL = 'gpt-6-luna'
+export const DEFAULT_VISION_MODEL = 'claude-sonnet-5-5'
 export const REPO_AGENT_ROLES: RepoAgentRole[] = ['requirements', 'implementation', 'debugger', 'reviewer', 'synthesis']
 export type RepoModelSelection = { model: string; source: 'configured' | 'measured' | 'default'; benchmarkId?: string }
 export type RepoModelPurpose = RepoAgentRole | 'navigation' | 'vision'
@@ -31,7 +33,7 @@ export function validRepoQualityGates(value: unknown): value is RepoQualityGates
 }
 
 function validMeasuredRole(role: RepoAgentRole | 'vision', result: MeasuredRepoRole): boolean {
-  if (!result || !validRepoModel(result.model) || (role === 'vision' && !result.model.startsWith('claude-')) || typeof result.benchmarkId !== 'string' || !result.benchmarkId.trim()
+  if (!result || !validRepoModel(result.model)  || typeof result.benchmarkId !== 'string' || !result.benchmarkId.trim()
     || !validRepoQualityGates(result.qualityGates) || !Number.isInteger(result.samples) || !Array.isArray(result.measurements)
     || !result.evidence || ![result.evidence.reportSha256, result.evidence.reviewSha256, result.evidence.suiteSha256].every((hash) => typeof hash === 'string' && SHA256.test(hash))) return false
   const expected = role === 'requirements' ? ['requirements', 'navigation'] : [role]
@@ -66,7 +68,7 @@ export function repoModelFor(role: RepoAgentRole | 'vision', env: Record<string,
       if (policy.version === 1) {
         // Backward-compatible routing, but three arbitrary samples do not prove
         // distinct scenarios or correctness. Do not label legacy config measured.
-        if (role === 'vision') return { model: DEFAULT_REPO_MODEL, source: 'default' }
+        if (role === 'vision') return { model: DEFAULT_VISION_MODEL, source: 'default' }
         if (!validRepoModel(result.model) || !Number.isInteger(result.samples) || result.samples < 3 || typeof result.benchmarkId !== 'string' || !result.benchmarkId.trim()) throw new Error(`Incomplete configured policy for ${role}`)
         return { model: result.model, source: 'configured' }
       }
@@ -74,6 +76,8 @@ export function repoModelFor(role: RepoAgentRole | 'vision', env: Record<string,
       return { model: result.model, source: 'measured', benchmarkId: result.benchmarkId }
     }
   }
+  if (role === 'vision') return { model: DEFAULT_VISION_MODEL, source: 'default' }
+  if (role === 'requirements') return { model: DEFAULT_LIVE_MODEL, source: 'default' }
   return { model: DEFAULT_REPO_MODEL, source: 'default' }
 }
 
