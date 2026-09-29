@@ -37,6 +37,13 @@ export function LiveInterview({ visible, blocked, onActivity, onComplete, videoT
   const [title, setTitle] = useState(videoTest ? 'Video coding test' : 'Live interview')
   const [consent, setConsent] = useState(false)
   const native = useSyncExternalStore(subscribeDesktop, nativeDesktopAvailable, () => false)
+  const [desktopVersion, setDesktopVersion] = useState<string | null>(null)
+  useEffect(() => {
+    if (!native) return
+    let current = true
+    void import('@tauri-apps/api/app').then(api => api.getVersion()).then(version => { if (current) setDesktopVersion(version) }).catch(() => {})
+    return () => { current = false }
+  }, [native])
   const [repositoryChoice, setRepositoryMode] = useState<boolean | null>(null)
   const repositoryMode = repositoryChoice ?? (videoTest || native)
   const [active, setActive] = useState(false)
@@ -149,6 +156,7 @@ export function LiveInterview({ visible, blocked, onActivity, onComplete, videoT
       {(error || call.error || microphone.error) && <p role="alert">{error || call.error || microphone.error}</p>}
       {error && <button onClick={() => void openScreenRecordingSettings().catch(() => setError('Open System Settings → Privacy & Security to enable recording permission, then reopen LiveTranscript.'))}>Open recording permissions</button>}
       {blocked && <p>End Mock Lab before starting Live.</p>}
+      {desktopVersion && <small>Desktop {desktopVersion}</small>}
     </section>
   </div>, document.body)
   if (!active) return <div>
