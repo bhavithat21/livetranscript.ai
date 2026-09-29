@@ -1,4 +1,5 @@
-import type { ContextPacket, Lane } from './types'\nimport { projectCompactedContext } from './memory'
+import type { ContextPacket, Lane } from './types'
+import { projectCompactedContext } from './memory'
 
 export const CENTRAL_INTERVIEW_CONTRACT = `You are the reasoning layer for a live technical interview where external AI assistance is permitted.
 Priorities, in order: correctness; first useful answer latency; grounding in observed evidence; natural spoken clarity; complete implementation; verification.
