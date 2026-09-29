@@ -289,7 +289,7 @@ fn apply_lock(_app: &tauri::AppHandle, _enabled: bool) -> Result<(), String> {
 // until capture is confirmed live (or returns Err). So a returned Ok means audio
 // is really flowing — the frontend can trust it and skip the browser fallback.
 #[tauri::command]
-fn start_native_audio(
+async fn start_native_audio(
     _app: tauri::AppHandle,
     state: tauri::State<'_, AudioState>,
     _on_frame: Channel<InvokeResponseBody>,
@@ -298,15 +298,21 @@ fn start_native_audio(
     // and a stuck session) so we never run two captures at once.
     stop_session(&state);
 
-    #[cfg(target_os = "macos")]
-    let result = macos_capture::start(_app, _on_frame);
-    #[cfg(target_os = "windows")]
-    let result = windows_capture::start(_on_frame);
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    let result: Result<(u32, Stopper), String> = {
-        let _ = _on_frame;
-        Err("native capture not supported on this platform".into())
-    };
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(target_os = "macos")]
+        let result = macos_capture::start(_app, _on_frame);
+        #[cfg(target_os = "windows")]
+        let result = windows_capture::start(_on_frame);
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        let result: Result<(u32, Stopper), String> = {
+            let _ = _on_frame;
+            Err("native capture not supported on this platform".into())
+        };
+
+        result
+    })
+    .await
+    .map_err(|error| format!("Audio startup failed: {error}"))?;
 
     let (rate, stopper) = result?;
     *lock(&state.session) = Some(stopper);
