@@ -176,3 +176,6 @@ Document titles identify each route through existing Next metadata, preserving
 user-selected app identity. Error views retain a route back and actionable retry;
 raw server stack traces stay out of product copy. Permission/auth boundaries are
 not weakened to make previews or browser tests easier.
+
+## Transparent coding overlay workspace (2026-09-28)
+Screen-aware Live sessions do not show a mirrored screen preview. The selected display remains capture input only. The user sees independently movable/resizable Code/Solution, What to Say and Latest Question surfaces. Background opacity is configurable while text remains fully opaque/readable. Full and Compact presets are provided; geometry persists device-locally. Browser mode can lock geometry but cannot promise OS-level click-through. Native desktop click-through/window exclusion requires native verification before being represented as active. The full transcript remains available through Live controls rather than occupying primary coding space.
