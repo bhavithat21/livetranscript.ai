@@ -16,6 +16,7 @@ export type InterviewContext={
  candidate:{currentActivity:'listening'|'speaking'|'editing'|'testing'|'reviewing';recentPatchStatus:string[]};routing:{requestedLane:Lane};versions:InterviewVersions;currentQuestion:ContextPacket['question'];contextKey:string
 }
 export function compileInterviewContext(packet:ContextPacket,lane:Lane):InterviewContext{
+ const projected=projectCompactedContext(packet,lane)
  const unknown=[...packet.budget.omittedPaths.map(path=>`Not included in current context: ${path}`)]
  if(!packet.visibleView)unknown.push('No current screen view is available.')
  if(packet.files.some(f=>!f.complete))unknown.push('One or more observed files are partial; unseen lines remain unknown.')
