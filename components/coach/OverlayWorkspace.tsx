@@ -2,7 +2,8 @@
 import { useCallback,useState } from 'react'
 import { Eye,EyeOff,Lock,Unlock,LayoutTemplate } from 'lucide-react'
 import { OverlayPanel,type OverlayRect } from './OverlayPanel'
-import styles from './OverlayWorkspace.module.css'\nimport { getNativeOverlayLock, nativeDesktopAvailable, setNativeCaptureProtection, setNativeOverlayLock } from '@/lib/desktop/overlay'
+import styles from './OverlayWorkspace.module.css'
+import { getNativeOverlayLock, nativeDesktopAvailable, setNativeCaptureProtection, setNativeOverlayLock } from '@/lib/desktop/overlay'
 type Layout={say:OverlayRect;code:OverlayRect;transcript:OverlayRect}
 const DEFAULT:Layout={say:{x:28,y:28,width:430,height:190,opacity:78},code:{x:480,y:28,width:560,height:500,opacity:84},transcript:{x:28,y:548,width:1012,height:120,opacity:58}}
 const MINIMAL:Layout={say:{x:650,y:30,width:390,height:180,opacity:82},code:{x:650,y:228,width:390,height:430,opacity:86},transcript:{x:28,y:590,width:600,height:68,opacity:45}}
