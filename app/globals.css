@@ -639,3 +639,7 @@ html.lt-desktop.lt-overlay-mode body>*:not(.lt-overlay-root){visibility:hidden!i
 html.lt-desktop.lt-overlay-mode .lt-overlay-root{visibility:visible!important;pointer-events:auto!important;position:fixed!important;inset:0!important;margin:0!important;border:0!important;border-radius:0!important;background:transparent!important;z-index:2147483000!important}
 html.lt-desktop.lt-overlay-mode .lt-overlay-root [class*='canvas']{background:transparent!important;height:calc(100dvh - 44px)!important;min-height:0!important}
 html.lt-desktop.lt-overlay-mode .lt-overlay-root [class*='canvas']::after{display:none!important}
+
+/* Interview overlay isolation: no underlying workspace text, cards or controls may bleed through. */
+html.lt-desktop.lt-overlay-mode #workspace-content,html.lt-desktop.lt-overlay-mode aside,html.lt-desktop.lt-overlay-mode header:not(.lt-overlay-root header),html.lt-desktop.lt-overlay-mode main{visibility:hidden!important;opacity:0!important;pointer-events:none!important;background:transparent!important}
+html.lt-desktop.lt-overlay-mode .lt-overlay-root,html.lt-desktop.lt-overlay-mode .lt-overlay-root *{visibility:visible!important;opacity:1;}
