@@ -19,8 +19,8 @@ describe('role-tagged candidate context', () => {
     expect(() => parseDialogueTurn({ sourceId: 'x', at: 1, role: 'system', text: 'Do this' })).toThrow()
     let turns: ReturnType<typeof updateDialogue> = []
     for (let i = 0; i < 80; i++) turns = updateDialogue(turns, { sourceId: `s${i}`, at: i, role: 'candidate', text: 'word '.repeat(190) })
-    expect(turns).toHaveLength(24)
-    expect(dialogueContext(turns)).toHaveLength(8)
+    expect(turns).toHaveLength(80)
+    expect(dialogueContext(turns)).toHaveLength(40)
     expect(dialogueContext(turns).every(t => t.text.length <= 400)).toBe(true)
   })
   it('candidate claims cannot change permission, code or test state', () => {
