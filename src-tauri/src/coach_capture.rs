@@ -30,7 +30,10 @@ fn trusted(window: &WebviewWindow) -> Result<(), String> {
     Ok(())
 }
 fn session(state: &CoachCaptureState, id: &str) -> Result<Session, String> {
-    let guard = crate::lock(&state.session);
+    let mut guard = crate::lock(&state.session);
+    if guard.as_ref().is_some_and(|s| s.created.elapsed() >= LEASE) {
+        if let Some(expired) = guard.take() { stop_session(&expired); }
+    }
     let active = guard.as_ref().filter(|s| s.id == id && s.created.elapsed() < LEASE).ok_or("Screen session ended or expired. Select the display again.")?;
     Ok(active.clone())
 }

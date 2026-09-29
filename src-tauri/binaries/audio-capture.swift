@@ -309,8 +309,13 @@ if CommandLine.arguments.contains("--screen") {
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory)
     let capture = ScreenPickerCapturer()
+    let parent = getppid()
+    let parentWatch = DispatchSource.makeTimerSource(queue: .main)
+    parentWatch.schedule(deadline: .now() + 1, repeating: 1)
+    parentWatch.setEventHandler { if getppid() != parent { exit(0) } }
+    parentWatch.resume()
     DispatchQueue.main.async { capture.start() }
-    withExtendedLifetime(capture) { app.run() }
+    withExtendedLifetime((capture, parentWatch)) { app.run() }
     exit(0)
 }
 
