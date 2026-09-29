@@ -88,3 +88,6 @@ Geist fonts. Test 42 presentation layouts plus 28 live layouts (7 sizes, both
 themes), burst updates, revised finals, history pause/resume, text reflow and
 motion preferences. `qa/coach` additionally tests the real integrated Live rail.
 Browser fixtures do not establish microphone, provider or physical-device quality.
+
+## Transparent interview overlays (2026-09-28)
+During screen-aware coding sessions the captured display is not mirrored back into the product. Code/Solution and What to Say are primary independent overlays; Latest Question is secondary. Each overlay owns position, width, height, collapse state and background opacity. Lower background opacity must not lower text opacity: foreground stays fully opaque with a restrained text shadow/backdrop blur so Chrome/HackerRank remains visible beneath it. Overlay geometry persists locally. Lock state prevents accidental movement/resizing; native desktop click-through is a separate platform capability and must not be claimed by browser UI.

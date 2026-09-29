@@ -11,6 +11,7 @@ import type { CoachState, Permission, ResultRecord, DialogueTurn } from '@/lib/c
 import { LearningPanel } from './LearningPanel'
 import { useLessonPolicy } from '@/lib/coach/learning/LearningContext'
 import styles from './RepositoryCoach.module.css'
+import { OverlayWorkspace } from './OverlayWorkspace'
 
 const EMPTY_TRANSCRIPT = () => ''
 type Resources = { controller: CoachController; screen: ScreenObserver }
@@ -66,7 +67,7 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
   const [objective, setObjective] = useState(presetObjective || 'Investigate the current task and identify the smallest safe implementation change.')
   const [error, setError] = useState<string | null>(null), [reading, setReading] = useState(false), [exportAllowed, setExportAllowed] = useState(false)
   const [displays, setDisplays] = useState<NativeDisplay[]>([]), [displayId, setDisplayId] = useState(''), [selecting, setSelecting] = useState(false), [loadedReplay, setLoadedReplay] = useState(false)
-  const screenshots = useRef<HTMLInputElement>(null), replayInput = useRef<HTMLInputElement>(null), preview = useRef<HTMLVideoElement>(null)
+  const screenshots = useRef<HTMLInputElement>(null), replayInput = useRef<HTMLInputElement>(null)
   const generation = useRef(0), mounted = useRef(true), previousSpeech = useRef('')
   const activity = useRef(onActivity)
   useEffect(() => { activity.current = onActivity }, [onActivity])
@@ -75,14 +76,6 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
   const dialogueGetter = useRef(getConversation)
   useEffect(() => { dialogueGetter.current = getConversation }, [getConversation])
   const running = state.status === 'running'
-  useEffect(() => {
-    const video = preview.current
-    if (!video) return
-    const stream = screen.getPreviewStream()
-    if (video.srcObject !== stream) video.srcObject = stream
-    if (stream) void video.play().catch(() => {})
-    return () => { if (video.srcObject === stream) video.srcObject = null }
-  }, [screen, capture.sharing, capture.source])
   useEffect(() => { if (!running) controller.configureLessons(lessonPolicy?.state.active ?? []) }, [controller, running, lessonPolicy?.state.active])
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; activity.current?.(false) } }, [])
   useEffect(() => { activity.current?.(running) }, [running])
@@ -168,7 +161,6 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
         {state.status !== 'ended' && <button className={styles.button} onClick={end}>End coach</button>}
       </div>
       {native && <details className={`${styles.details} ${styles.main}`}><summary>Desktop display capture</summary><p>Use a selected display through the native app. This does not grant remote control. Screen-recording permission is required.</p><button className={styles.button} disabled={!running || selecting} onClick={() => { void nativeDisplays().then(items => { setDisplays(items); setDisplayId(items[0]?.id || '') }).catch(() => setError('Native capture requires the updated desktop installer and screen-recording permission.')) }}>Find displays</button>{displays.length > 0 && <label className={styles.label}>Display<select className={styles.input} value={displayId} onChange={event => setDisplayId(event.target.value)}>{displays.map(display => <option key={display.id} value={display.id}>{display.name} · {display.width} × {display.height}</option>)}</select><button className={styles.button} disabled={!running || !displayId || selecting} onClick={() => void selectScreen(true)}>Share selected display</button></label>}</details>}
-      {capture.sharing && <section className={styles.screenStage} aria-label="Live shared screen"><div className={styles.screenStageHeader}><div><div className={styles.eyebrow}>Live screen</div><strong>{capture.source === 'native' ? 'Desktop display' : 'Shared window or display'}</strong></div><span className={styles.health}>{capture.watching ? 'Watching' : 'Paused'} · {capture.lastSampleAt ? 'live' : 'starting'}</span></div>{capture.source === 'browser' ? <video ref={preview} className={styles.screenPreview} muted playsInline autoPlay /> : <div className={styles.nativePreview}><strong>Native display capture is active.</strong><span>The desktop host samples the selected display locally; semantic keyframes appear below as evidence.</span></div>}<div className={styles.screenTelemetry}><span>{capture.localSamples} local samples</span><span>{capture.captures} semantic frames</span><span>{capture.gateReason ? `gate: ${capture.gateReason}` : 'waiting for first frame'}</span>{capture.changedTiles > 0 && <span>{capture.changedTiles} changed tiles</span>}</div></section>}
       {(capture.sharing || capture.reading || reading) && <p className={styles.notice} role="status">{capture.reading ? 'Reading a changed view…' : reading ? 'Reading selected screen evidence…' : capture.watching ? 'Watching the selected screen continuously. Only stable semantic keyframes are sent to your configured vision provider.' : 'Screen selected; automatic visual analysis paused.'}</p>}
       {loadedReplay && <section className={styles.main} aria-label="Replay timeline">
         <label className={styles.label} htmlFor="coach-replay-checkpoint">Observation {replay.position} of {replay.total} · {replay.event}</label>
@@ -178,6 +170,10 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
         {replay.references.length > 0 && <details className={styles.details}><summary>Previous responses and saved feedback · reference only</summary><ul className={styles.list}>{replay.references.map((item, index) => <li key={`${item.id}-${index}`}><strong>{item.lane} · {item.model || 'Model not recorded'} · {item.verdict || 'Not reviewed'}</strong><pre className={styles.code}>{item.text || item.summary}</pre>{item.note && <p>Review: {item.note}</p>}</li>)}</ul></details>}
       </section>}
       {state.status === 'paused' && <p className={styles.notice}>Coach paused. No new model calls or screen analysis. The parent interview’s audio capture has separate controls.</p>}
+      <OverlayWorkspace status={<span>{capture.sharing ? (capture.watching ? 'Screen aware · live' : 'Screen aware · paused') : 'Screen not selected'}</span>}
+        say={<div><div className={styles.talk}>{talk?.text || 'Listening for the next question…'}</div>{talk?.status === 'running' && <div className={styles.status}>Composing…</div>}</div>}
+        code={<div>{guiding && <div className={styles.status}>Analyzing visible code…</div>}{guide?.guidance ? <><p className={styles.next}>{guide.guidance.summary}</p>{guide.guidance.patches.map(patch => <div key={patch.id}><p className={styles.codeLabel}>{patch.path} · line {patch.startLine}</p><pre className={styles.code}>{patch.after}</pre><p className={styles.muted}>{patch.reason}</p></div>)}{guide.guidance.findings.slice(0,4).map((finding,index)=><p key={index} className={styles.next}><strong>{finding.severity}</strong> · {finding.text}</p>)}</> : <p className={styles.empty}>Show the problem and relevant code. The detailed solution will appear here without covering Chrome.</p>}</div>}
+        transcript={<div><strong className={styles.question}>{state.question?.text || 'Waiting for the interviewer’s next question…'}</strong><p className={styles.muted}>The full transcript remains available from the interview controls.</p></div>} />
       <div className={styles.layout}>
         <div className={styles.main} data-testid="coach-main">
           <div className={styles.eyebrow}>Current question</div><h3 className={styles.question}>{state.question?.text || 'Listening for the interviewer’s next question…'}</h3>

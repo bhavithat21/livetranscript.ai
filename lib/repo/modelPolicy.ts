@@ -3,6 +3,10 @@ import type { RepoAgentRole } from './agentTypes'
 // Defaults are operational choices, NOT measured benchmark winners. Current ID
 // verified against https://platform.claude.com/docs/en/models/overview (2026-09-22).
 export const DEFAULT_REPO_MODEL = 'gpt-6-sol'
+export const DEFAULT_IMPLEMENTATION_MODEL = 'gemini-3.1-pro-preview'
+export const DEFAULT_DEBUG_MODEL = 'claude-sonnet-5-5'
+export const DEFAULT_REVIEW_MODEL = 'claude-sonnet-5-5'
+export const DEFAULT_SYNTHESIS_MODEL = 'gpt-6-sol'
 export const DEFAULT_LIVE_MODEL = 'gpt-6-luna'
 export const DEFAULT_VISION_MODEL = 'claude-sonnet-5-5'
 export const REPO_AGENT_ROLES: RepoAgentRole[] = ['requirements', 'implementation', 'debugger', 'reviewer', 'synthesis']
@@ -81,13 +85,14 @@ export function repoModelFor(role: RepoAgentRole | 'vision', env: Record<string,
   return { model: DEFAULT_REPO_MODEL, source: 'default' }
 }
 
-export function repoProvider(model: string): 'anthropic' | 'openai' | 'groq' {
+export function repoProvider(model: string): 'anthropic' | 'openai' | 'groq' | 'gemini' {
   if (model.startsWith('claude-')) return 'anthropic'
+  if (model.startsWith('gemini-')) return 'gemini'
   if (/^(?:llama|qwen|moonshotai|meta-llama|openai\/)/.test(model)) return 'groq'
   return 'openai'
 }
 
 export function assertRepoModelConfigured(model: string): void {
-  const key = { anthropic: 'ANTHROPIC_API_KEY', openai: 'OPENAI_API_KEY', groq: 'GROQ_API_KEY' }[repoProvider(model)]
+  const key = { anthropic: 'ANTHROPIC_API_KEY', openai: 'OPENAI_API_KEY', groq: 'GROQ_API_KEY', gemini: 'GEMINI_API_KEY' }[repoProvider(model)]
   if (!process.env[key]) throw new Error(`${key} is required for ${model}`)
 }
