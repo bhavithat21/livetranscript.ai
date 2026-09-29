@@ -2,15 +2,16 @@
 import { act, cleanup, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TranscriptEvent } from '@/lib/transcription/types'
-const mocks = vi.hoisted(() => ({ browserStart: vi.fn(), browserStop: vi.fn(), nativeStart: vi.fn(), nativeStop: vi.fn(), connect: vi.fn(), send: vi.fn(), disconnect: vi.fn(), partial: vi.fn(), final: vi.fn(), status: vi.fn() }))
+const mocks = vi.hoisted(() => ({ isNative: false, browserStart: vi.fn(), browserStop: vi.fn(), nativeStart: vi.fn(), nativeStop: vi.fn(), connect: vi.fn(), send: vi.fn(), disconnect: vi.fn(), partial: vi.fn(), final: vi.fn(), status: vi.fn() }))
 vi.mock('@/lib/audio/useMicStream', () => ({ useMicStream: () => ({ start: mocks.browserStart, stop: mocks.browserStop, error: null }) }))
-vi.mock('@/lib/audio/useNativeCapture', () => ({ useNativeCapture: () => ({ start: mocks.nativeStart, stop: mocks.nativeStop }) }))
+vi.mock('@/lib/audio/useNativeCapture', () => ({ useNativeCapture: () => ({ start: mocks.nativeStart, stop: mocks.nativeStop, isNative: mocks.isNative }) }))
 vi.mock('@/lib/transcription', () => ({ connectWithFallback: mocks.connect }))
 import { captureText, liveTranscript, useInterviewRecorder } from './useInterviewRecorder'
 let emit: (event: TranscriptEvent) => void
 const event: TranscriptEvent = { text: 'Final answer', isFinal: true, speaker: 0, startMs: 0, endMs: 100 }
 beforeEach(() => {
   vi.clearAllMocks()
+  mocks.isNative = false
   mocks.browserStart.mockResolvedValue(16_000)
   mocks.nativeStart.mockResolvedValue(0)
   mocks.nativeStop.mockResolvedValue(undefined)
@@ -135,4 +136,35 @@ it('speaker-only split revisions retain the original arrival timestamp',async()=
   const original=result.current.segments[0].capturedAt
   act(()=>emit({...event,text:'Hello. Hi.',utteranceId:'stream:1',parts:[{text:'Hello.',speaker:0,startMs:0,endMs:40},{text:'Hi.',speaker:1,startMs:50,endMs:100}]}))
   expect(result.current.segments.map(p=>p.capturedAt)).toEqual([original,original])
+})
+
+
+it('preserves native permission failures instead of hiding them behind browser capture', async () => {
+  mocks.isNative = true
+  mocks.nativeStart.mockRejectedValueOnce('Enable system audio recording for LiveTranscript')
+  const { result } = renderHook(() => useInterviewRecorder())
+  await act(async () => { await expect(result.current.start('system')).rejects.toThrow('Enable system audio recording') })
+  expect(mocks.browserStart).not.toHaveBeenCalled()
+  expect(mocks.connect).not.toHaveBeenCalled()
+  expect(result.current.phase).toBe('idle')
+  expect(result.current.error).toContain('Enable system audio recording')
+  mocks.nativeStart.mockResolvedValueOnce(48000)
+  await act(async () => result.current.start('system'))
+  expect(result.current.phase).toBe('recording')
+})
+
+it('rejects a transcription startup timeout so the parent can return to setup', async () => {
+  vi.useFakeTimers()
+  try {
+    mocks.connect.mockImplementationOnce(({ signal }: { signal: AbortSignal }) => new Promise((_resolve, reject) => {
+      signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+    }))
+    const { result } = renderHook(() => useInterviewRecorder())
+    let failure: unknown
+    await act(async () => { void result.current.start('mic').catch(error => { failure = error }); await Promise.resolve() })
+    await act(async () => { await vi.advanceTimersByTimeAsync(25001) })
+    expect(failure).toBeInstanceOf(Error)
+    expect((failure as Error).message).toContain('could not connect in time')
+    expect(result.current.phase).toBe('idle')
+  } finally { vi.useRealTimers() }
 })

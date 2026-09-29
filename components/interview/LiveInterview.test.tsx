@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-const stubs = vi.hoisted(() => ({ start: vi.fn(), stop: vi.fn(), mic: vi.fn() }))
+const stubs = vi.hoisted(() => ({ start: vi.fn(), stop: vi.fn(), mic: vi.fn(), native: false, maximize: vi.fn() }))
+vi.mock('@/lib/desktop/overlay', () => ({ nativeDesktopAvailable: () => stubs.native, maximizeLiveInterviewWindow: stubs.maximize }))
+vi.mock('@/components/coach/OverlayWorkspace', () => ({ OverlayWorkspace: ({ controls, next, say, code }: { controls: React.ReactNode; next: React.ReactNode; say: React.ReactNode; code: React.ReactNode }) => <div>{controls}<section aria-label="What to do next">{next}</section><section aria-label="What to say">{say}</section><section aria-label="What to write">{code}</section></div> }))
 vi.mock('@/lib/interview/useInterviewRecorder', () => ({
   useInterviewRecorder: () => ({ start: stubs.start, stop: stubs.stop, getSegments: () => [], segments: [], phase: 'idle', error: null }),
   liveTranscript: () => '',
@@ -11,7 +13,7 @@ vi.mock('@/lib/interview/TuningContext', () => ({ useInterviewTuning: () => ({ s
 vi.mock('./LiveAnswerCanvas', () => ({ LiveAnswerCanvas: () => <div>Answer canvas</div> }))
 vi.mock('@/components/coach/RepositoryCoach', () => ({ RepositoryCoach: () => <div>Shared repository coach</div> }))
 import { LiveInterview } from './LiveInterview'
-beforeEach(() => { stubs.start.mockReset(); stubs.stop.mockReset().mockResolvedValue([]) })
+beforeEach(() => { stubs.native = false; stubs.maximize.mockReset().mockResolvedValue(true); stubs.start.mockReset(); stubs.stop.mockReset().mockResolvedValue([]) })
 afterEach(cleanup)
 function start() { fireEvent.click(screen.getByRole('checkbox', { name: /I have permission to record/ })); fireEvent.click(screen.getByRole('button', { name: 'Start interview' })) }
 describe('live startup lifecycle', () => {
@@ -61,4 +63,18 @@ it('mounts the shared repository coach only when selected before starting', asyn
   fireEvent.click(screen.getByRole('button', { name: 'End' }))
   await screen.findByRole('button', { name: 'Start interview' })
   expect(screen.queryByText('Shared repository coach')).toBeNull()
+})
+
+it('opens desktop guidance before recording and maximizes only on explicit Start', async () => {
+  stubs.native = true
+  stubs.start.mockResolvedValue(undefined)
+  const view = render(<LiveInterview visible blocked={false} onActivity={vi.fn()} onComplete={vi.fn()} />)
+  for (const name of ['What to do next', 'What to say', 'What to write']) expect(screen.getByRole('region', { name })).toBeTruthy()
+  expect(stubs.start).not.toHaveBeenCalled()
+  expect(stubs.maximize).not.toHaveBeenCalled()
+  start()
+  expect(await screen.findByText('Shared repository coach')).toBeTruthy()
+  expect(stubs.maximize).toHaveBeenCalledTimes(1)
+  view.rerender(<LiveInterview visible blocked={false} onActivity={vi.fn()} onComplete={vi.fn()} />)
+  expect(stubs.maximize).toHaveBeenCalledTimes(1)
 })

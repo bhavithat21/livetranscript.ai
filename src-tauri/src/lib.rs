@@ -501,6 +501,7 @@ pub fn run() {
             remote_assist::remote_assist_input,
             remote_assist::remote_assist_stop,
             coach_capture::coach_displays,
+            coach_capture::coach_open_screen_settings,
             coach_capture::coach_start,
             coach_capture::coach_sample,
             coach_capture::coach_grab,

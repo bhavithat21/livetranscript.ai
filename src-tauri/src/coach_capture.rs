@@ -59,10 +59,10 @@ pub async fn coach_start(window: WebviewWindow, state: tauri::State<'_, CoachCap
         if !platform_displays()?.iter().any(|d| d.id == display_id) { return Err("Selected display is no longer connected".into()); }
         Ok::<(), String>(())
     }).await.unwrap_or_else(|_| Err("Screen permission worker failed".to_string()));
-    if result.is_err() {
+    if let Err(error) = result {
         let mut guard = crate::lock(&state.session);
         if guard.as_ref().is_some_and(|s| s.id == id) { guard.take(); }
-        return Err("Screen permission or display validation failed. Check OS Screen Recording permissions.".into());
+        return Err(error);
     }
     session(&state, &id)?;
     Ok(Started { lease_id: id })
@@ -125,7 +125,7 @@ fn request_permission() -> Result<(), String> {
     #[link(name = "CoreGraphics", kind = "framework")]
     extern "C" { fn CGPreflightScreenCaptureAccess() -> bool; }
     // SAFETY: stable zero-argument macOS Screen Recording permission APIs.
-    if unsafe { CGPreflightScreenCaptureAccess() } { Ok(()) } else { Err("Screen Recording is enabled in System Settings but this running app has not picked it up yet. Quit LiveTranscript completely and reopen it once.".to_string()) }
+    if unsafe { CGPreflightScreenCaptureAccess() } { Ok(()) } else { Err("Screen recording access is not available. In System Settings > Privacy & Security > Screen & System Audio Recording, enable LiveTranscript, then quit and reopen the app.".to_string()) }
 }
 #[cfg(target_os = "windows")]
 fn request_permission() -> Result<(), String> { Ok(()) }
@@ -146,4 +146,17 @@ mod tests {
     #[test] fn stop_cannot_revive_session() { let state = seeded(); crate::lock(&state.session).take(); assert!(session(&state, "fixture").is_err()); }
     #[test] fn bounds_concurrent_capture() { let s = session(&seeded(), "fixture").unwrap(); let p = acquire(&s).unwrap(); assert!(acquire(&s).is_err()); drop(p); assert!(acquire(&s).is_ok()); }
     #[test] fn rejects_expired_lease() { let state = seeded(); crate::lock(&state.session).as_mut().unwrap().created = Instant::now() - LEASE; assert!(session(&state, "fixture").is_err()); }
+}
+
+// A fixed OS settings destination, never a web-provided URL or automatic prompt.
+#[tauri::command]
+pub fn coach_open_screen_settings(window: WebviewWindow) -> Result<(), String> {
+    trusted(&window)?;
+    use tauri_plugin_opener::OpenerExt;
+    #[cfg(target_os = "macos")]
+    return window.app_handle().opener().open_url("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture", None::<&str>).map_err(|e| e.to_string());
+    #[cfg(target_os = "windows")]
+    return window.app_handle().opener().open_url("ms-settings:privacy-screenshot", None::<&str>).map_err(|e| e.to_string());
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    Err("Open your operating system screen-recording settings.".into())
 }

@@ -38,3 +38,9 @@ export async function nativeFrameSource(displayId: string): Promise<FrameSource>
     async stop() { if (!stopped) { stopped = true; await invoke('coach_stop', { leaseId }).catch(() => {}) } },
   }
 }
+
+/** Explicit user action only; never opens a permission dialog on startup. */
+export async function openScreenRecordingSettings(): Promise<void> {
+  if (!nativeAvailable()) return
+  await invoke('coach_open_screen_settings')
+}
