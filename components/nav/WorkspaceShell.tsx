@@ -75,7 +75,7 @@ export function WorkspaceShell({ active, children, interviewView = 'live', onInt
     </nav>
   }
 
-  const currentLabel = active === 'interview' ? INTERVIEW_LINKS.find(item => item.view === interviewView)?.label : active === 'settings' ? 'Settings' : active === 'transcripts' ? 'Transcripts'
+  const currentLabel = active === 'interview' ? INTERVIEW_LINKS.find(item => item.view === interviewView)?.label : active === 'settings' ? 'Settings' : active === 'transcripts' ? 'Transcripts' : active
 
   return <div className={styles.shell}>
     <a href="#workspace-content" className={styles.skipLink}>Skip to workspace</a>
