@@ -3,35 +3,39 @@ import { recordUsage } from '@/lib/usage'
 import { parseRepoImage, readRepoJson, RepoRequestError } from '@/lib/repo/agentHttp'
 import { repoModelFor } from '@/lib/repo/modelPolicy'
 import { extractScreenEvidence, ScreenExtractionError } from '@/lib/repo/screenProvider'
+import { serverDiagnostic } from '@/lib/diagnostics/server'
+import { diagnosticCode } from '@/lib/diagnostics/schema'
 
 export const maxDuration = 60
-
 export async function POST(req: Request) {
   const userId = await currentUserId()
-  if (!userId) return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!userId) { serverDiagnostic(req, 'screen_model', 'error', { httpStatus: 401, code: 'unauthorized' }); return Response.json({ error: 'Unauthorized' }, { status: 401 }) }
   let image: ReturnType<typeof parseRepoImage>
-  try {
-    const body = await readRepoJson(req, 6_001_000)
-    image = parseRepoImage(body.image)
-  } catch (error) {
+  try { const body = await readRepoJson(req, 6_001_000); image = parseRepoImage(body.image) }
+  catch (error) {
+    serverDiagnostic(req, 'screen_model', 'error', { code: 'invalid_shape', httpStatus: error instanceof RepoRequestError ? error.status : 400 })
     return Response.json({ error: error instanceof RepoRequestError ? error.message : 'Invalid screenshot request' }, { status: error instanceof RepoRequestError ? error.status : 400 })
   }
   let model: string
   try { model = repoModelFor('vision').model } catch {
+    serverDiagnostic(req, 'screen_model', 'error', { code: 'provider_unavailable', httpStatus: 503 })
     return Response.json({ error: 'Invalid repository vision model configuration' }, { status: 503 })
   }
   const started = Date.now()
+  serverDiagnostic(req, 'screen_model', 'start', { model })
   try {
-    const { observation, model: actualModel } = await extractScreenEvidence({ model, image, signal: req.signal })
+    const { observation, model: actualModel, attempts = 1 } = await extractScreenEvidence({ model, image, signal: req.signal })
     recordUsage('repo-screen', userId, { model: actualModel, files: observation.files.length })
+    serverDiagnostic(req, 'screen_model', 'success', { model: actualModel, attempts, durationMs: Date.now() - started, count: observation.files.length })
     return Response.json({ observation, model: actualModel }, { headers: { 'Cache-Control': 'no-store' } })
   } catch (error) {
-    // Metadata only: do not log screenshot data, model responses, or SDK errors.
-    const providerStatus = error && typeof error === 'object' && 'status' in error && typeof error.status === 'number' ? error.status : undefined
-    console.warn('[repo-screen]', { model, elapsedMs: Date.now() - started, kind: error instanceof ScreenExtractionError ? error.message : error instanceof Error ? error.name : 'unknown', status: providerStatus, cancelled: req.signal.aborted })
-    if (error instanceof ScreenExtractionError && !req.signal.aborted) {
-      return Response.json({ error: error.message }, { status: error.status })
-    }
-    return Response.json({ error: req.signal.aborted ? 'Screenshot capture cancelled' : 'Screenshot extraction failed or timed out. Existing evidence is unchanged.' }, { status: req.signal.aborted ? 499 : 502 })
+    const status = error && typeof error === 'object' && 'status' in error && typeof error.status === 'number' ? error.status : undefined
+    serverDiagnostic(req, 'screen_model', req.signal.aborted ? 'cancelled' : 'error', {
+      model, durationMs: Date.now() - started, httpStatus: status,
+      code: error instanceof ScreenExtractionError && error.validationCode ? error.validationCode : diagnosticCode(error, status),
+      attempts: error instanceof ScreenExtractionError ? error.attempts : undefined,
+    })
+    if (error instanceof ScreenExtractionError && !req.signal.aborted) return Response.json({ error: error.message }, { status: error.status, headers: { 'Cache-Control': 'no-store' } })
+    return Response.json({ error: req.signal.aborted ? 'Screenshot capture cancelled' : 'Screenshot extraction failed or timed out. Existing evidence is unchanged.' }, { status: req.signal.aborted ? 499 : 502, headers: { 'Cache-Control': 'no-store' } })
   }
 }

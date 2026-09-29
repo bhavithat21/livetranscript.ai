@@ -25,7 +25,8 @@ describe('production screenshot extraction completion boundary', () => {
   ])('retains billed response telemetry after rejecting $stop_reason without exposing raw content', async ({ stop_reason, text, status }) => {
     create.mockResolvedValue({ model: 'claude-actual', stop_reason, content: [{ type: 'text', text }], usage: { input_tokens: 125, output_tokens: 34 } })
     const error = await extractScreenEvidence(input).catch((failure: unknown) => failure)
-    expect(error).toMatchObject({ status, model: 'claude-actual', usage: { inputTokens: 125, outputTokens: 34 } })
+    const attempts = stop_reason === 'end_turn' ? 2 : 1
+    expect(error).toMatchObject({ status, model: 'claude-actual', usage: { inputTokens: 125 * attempts, outputTokens: 34 * attempts } })
     expect(error).not.toHaveProperty('raw')
     expect(JSON.stringify(error)).not.toContain(text)
   })

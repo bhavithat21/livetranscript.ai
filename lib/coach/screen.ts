@@ -1,24 +1,30 @@
 import { KeyframeGate, type FrameSignal } from './keyframes'
 import { hashText, parseObservation } from './validation'
 import type { Observation } from './types'
+import { diagnosticSpan, recordDiagnostic, diagnosticCode } from './diagnostics'
 
 export type ScreenStatus = { sharing: boolean; watching: boolean; reading: boolean; captures: number; localSamples: number; error: string | null; source: 'browser' | 'native' | null; lastSampleAt: number | null; lastCaptureAt: number | null; gateReason: 'initial' | 'changed' | 'unchanged' | 'settling' | 'throttled' | 'busy' | null; changedTiles: number }
 export type FrameSource = { signal: () => Promise<FrameSignal | null>; image: () => Promise<string | null>; stop: () => void | Promise<void>; preview?: MediaStream }
 export type CaptureTransport = (image: string, signal: AbortSignal) => Promise<Observation>
 export const httpCapture: CaptureTransport = async (image, signal) => {
-  const response = await fetch('/api/copilot/repo-screen', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image }), signal })
-  if (!response.ok) {
-    const message = response.status === 401 ? 'Sign in again to enable screen analysis.' : response.status === 429 ? 'Screen analysis limit reached. Try again later.' : response.status === 503 ? 'Screen analysis is unavailable. Check the vision provider configuration.' : `Screen analysis failed (${response.status}). Try again.`
-    let detail = message
-    try {
-      const body = await response.json() as { error?: unknown }
-      if (typeof body.error === 'string' && body.error.length <= 500) detail = body.error
-    } catch { /* A proxy may return HTML rather than the endpoint JSON. */ }
-    throw new Error(detail)
-  }
-  const raw = await response.text()
-  if (raw.length > 400_000) throw new Error('Screenshot response exceeded its budget')
-  return parseObservation(JSON.parse(raw).observation)
+  const trace = diagnosticSpan('screen_model')
+  let status: number | undefined
+  try {
+    const response = await fetch('/api/copilot/repo-screen', { method: 'POST', headers: { 'Content-Type': 'application/json', ...trace.headers() }, body: JSON.stringify({ image }), signal })
+    status = response.status
+    if (!response.ok) {
+      const message = response.status === 401 ? 'Sign in again to enable screen analysis.' : response.status === 429 ? 'Screen analysis limit reached. Try again later.' : response.status === 503 ? 'Screen analysis is unavailable. Check the vision provider configuration.' : `Screen analysis failed (${response.status}). Try again.`
+      let detail = message
+      try { const body = await response.json() as { error?: unknown }; if (typeof body.error === 'string' && body.error.length <= 500) detail = body.error } catch { /* proxy HTML */ }
+      throw new Error(detail)
+    }
+    const raw = await response.text()
+    if (raw.length > 400_000) throw new Error('Screenshot response exceeded its budget')
+    const result = JSON.parse(raw)
+    const observation = parseObservation(result.observation)
+    trace.end('success', { httpStatus: status, model: result.model, count: observation.files.length })
+    return observation
+  } catch (error) { trace.failure(error, status); throw error }
 }
 export class ScreenObserver {
   private source: FrameSource | null = null
@@ -26,6 +32,7 @@ export class ScreenObserver {
   private generation = 0
   private timer: ReturnType<typeof setTimeout> | null = null
   private gate = new KeyframeGate()
+  private heartbeatAt = 0
   private status: ScreenStatus = { sharing: false, watching: false, reading: false, captures: 0, localSamples: 0, error: null, source: null, lastSampleAt: null, lastCaptureAt: null, gateReason: null, changedTiles: 0 }
   private listeners = new Set<() => void>()
   private requests: number[] = []
@@ -34,13 +41,18 @@ export class ScreenObserver {
   getSnapshot = () => this.status
   getPreviewStream = () => this.source?.preview ?? null
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener) } }
-  private update(value: Partial<ScreenStatus>) { this.status = { ...this.status, ...value }; this.listeners.forEach(listener => listener()) }
+  private update(value: Partial<ScreenStatus>) {
+    if (value.error && value.error !== this.status.error) recordDiagnostic('screen', 'error', { code: diagnosticCode(value.error), source: this.status.source })
+    if (value.watching !== undefined && value.watching !== this.status.watching) recordDiagnostic('screen', value.watching ? 'start' : 'paused', { source: this.status.source })
+    this.status = { ...this.status, ...value }; this.listeners.forEach(listener => listener())
+  }
   async attach(source: FrameSource, type: 'browser' | 'native') {
     const stopping = this.stop(), expectedGeneration = this.generation
     await stopping
     if (expectedGeneration !== this.generation) { await source.stop(); return }
-    this.source = source; this.gate.reset()
+    this.source = source; this.gate.reset(); this.heartbeatAt = 0
     this.update({ sharing: true, watching: false, source: type, error: null, lastSampleAt: null, lastCaptureAt: null, gateReason: null, changedTiles: 0 })
+    recordDiagnostic('screen', 'ready', { source: type })
   }
   watch(enabled: boolean) {
     if (this.timer) clearTimeout(this.timer)
@@ -54,18 +66,21 @@ export class ScreenObserver {
       try {
         const signal = await this.source.signal()
         if (generation !== this.generation) return
+        const first = this.status.lastSampleAt === null
         this.update({ localSamples: this.status.localSamples + 1, lastSampleAt: Date.now() })
         if (!signal) throw new Error('Selected screen is no longer available')
+        if (first) recordDiagnostic('screen', 'first_frame', { source: this.status.source })
         const decision = this.gate.sample(signal, performance.now())
         this.update({ gateReason: decision.reason, changedTiles: decision.changedTiles })
+        if (Date.now() - this.heartbeatAt >= 30_000) {
+          this.heartbeatAt = Date.now()
+          recordDiagnostic('screen', 'heartbeat', { source: this.status.source, frames: this.status.localSamples, count: this.status.captures, gate: decision.reason, captureAgeMs: this.status.lastCaptureAt === null ? undefined : Date.now() - this.status.lastCaptureAt })
+        }
         if (decision.capture) {
           const capturedAt = Date.now(), image = await this.source.image()
           if (generation !== this.generation) return
           if (!image) throw new Error('Selected screen is no longer available')
-          // Local samples continue while one extraction runs. No frame queue grows.
-          void this.capture(image, capturedAt).then(accepted => {
-            if (generation === this.generation) this.gate.finish(signal, accepted)
-          })
+          void this.capture(image, capturedAt).then(accepted => { if (generation === this.generation) this.gate.finish(signal, accepted) })
         }
       } catch (failure) {
         const reason = failure instanceof Error ? failure.message : typeof failure === 'string' ? failure : 'Check screen-recording permission and select the display again.'
@@ -107,6 +122,7 @@ export class ScreenObserver {
     return this.capture(image, capturedAt)
   }
   async stop() {
+    if (this.source) recordDiagnostic('screen', 'stop', { source: this.status.source, count: this.status.captures })
     this.generation++
     if (this.timer) clearTimeout(this.timer)
     this.timer = null; this.controller?.abort(); this.controller = null
@@ -117,8 +133,11 @@ export class ScreenObserver {
   dispose() { void this.stop(); this.listeners.clear() }
 }
 export async function browserFrameSource(onEnded: () => void): Promise<FrameSource> {
-  if (!navigator.mediaDevices?.getDisplayMedia) throw new Error('Browser screen sharing is unavailable; use the desktop app or upload a screenshot.')
-  const stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 30, max: 30 } }, audio: false })
+  const trace = diagnosticSpan('screen', { source: 'browser' })
+  if (!navigator.mediaDevices?.getDisplayMedia) { trace.end('error', { code: 'unavailable' }); throw new Error('Browser screen sharing is unavailable; use the desktop app or upload a screenshot.') }
+  let stream: MediaStream
+  try { stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 30, max: 30 } }, audio: false }); trace.end('success') }
+  catch (error) { trace.failure(error); throw error }
   const video = document.createElement('video'); video.muted = true; video.srcObject = stream
   let stopped = false
   const stop = () => { if (!stopped) { stopped = true; stream.getTracks().forEach(track => track.stop()); video.pause(); video.srcObject = null } }

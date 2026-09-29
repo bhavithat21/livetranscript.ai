@@ -5,24 +5,20 @@ import { useNativeCapture } from '@/lib/audio/useNativeCapture'
 import { connectWithFallback } from '@/lib/transcription'
 import type { TranscriptEvent, TranscriptionProvider } from '@/lib/transcription/types'
 import { mergeSegments, type Segment } from '@/lib/transcript/store'
+import { diagnosticSpan } from '@/lib/diagnostics/client'
 
 export type CapturedSegment = Segment & { capturedAt: number }
 export type CapturePhase = 'idle' | 'starting' | 'recording' | 'stopping'
-
+type Trace = ReturnType<typeof diagnosticSpan>
 type RecordingRun = {
-  cancelled: boolean
-  acceptFinals: boolean
-  abort: AbortController
-  nativeAttempted: boolean
-  captureReleased: boolean
-  connected: TranscriptionProvider | null
-  stop: Promise<CapturedSegment[]> | null
-  timeout: ReturnType<typeof setTimeout> | null
+  cancelled: boolean; acceptFinals: boolean; abort: AbortController
+  nativeAttempted: boolean; captureReleased: boolean; connected: TranscriptionProvider | null
+  stop: Promise<CapturedSegment[]> | null; timeout: ReturnType<typeof setTimeout> | null
+  captureTrace: Trace; asrTrace: Trace | null; watchdog: ReturnType<typeof setInterval> | null
 }
 
-/** Independent ASR channel. Cancelling startup does not wait for a browser
- * permission dialog. Normal Stop still accepts the established ASR stream's
- * trailing final before returning the transcript for feedback. */
+/** Independent ASR channel. Diagnostic timers report metadata only; they never
+ * change capture, provider selection, cancellation or transcript contents. */
 export function useInterviewRecorder() {
   const { start: startBrowser, stop: stopBrowser } = useMicStream()
   const { start: startNative, stop: stopNative, isNative } = useNativeCapture()
@@ -33,18 +29,19 @@ export function useInterviewRecorder() {
   const rows = useRef<CapturedSegment[]>([])
   const runRef = useRef<RecordingRun | null>(null)
   const mounted = useRef(true)
-
   const releaseCapture = useCallback((run: RecordingRun) => {
     if (run.captureReleased) return
     run.captureReleased = true
+    if (run.watchdog) clearInterval(run.watchdog)
+    run.watchdog = null
+    run.captureTrace.event('stop', { phase: 'stopping' })
     stopBrowser()
     if (run.nativeAttempted) {
-      void stopNative().catch(() => {
-        if (mounted.current && (!runRef.current || runRef.current === run)) {
-          setError('Native audio did not confirm it stopped. Close the desktop app to end capture.')
-        }
+      void stopNative().then(() => run.captureTrace.end('success', { phase: 'idle' })).catch(cause => {
+        run.captureTrace.failure(cause)
+        if (mounted.current && (!runRef.current || runRef.current === run)) setError('Native audio did not confirm it stopped. Close the desktop app to end capture.')
       })
-    }
+    } else run.captureTrace.end('success', { phase: 'idle' })
   }, [stopBrowser, stopNative])
 
   const stop = useCallback((): Promise<CapturedSegment[]> => {
@@ -54,8 +51,6 @@ export function useInterviewRecorder() {
     run.cancelled = true
     if (run.timeout) clearTimeout(run.timeout)
     releaseCapture(run)
-    // Startup has no final transcript to flush; abort token fetch / websocket
-    // now. The pending capture bridges retire any late permission grant.
     if (!run.connected) run.abort.abort()
     if (mounted.current) setPhase('stopping')
     run.stop = (async () => {
@@ -63,21 +58,16 @@ export function useInterviewRecorder() {
       if (provider) {
         let timer: ReturnType<typeof setTimeout> | undefined
         try {
-          await Promise.race([
-            provider.disconnect(),
-            new Promise<void>((resolve) => { timer = setTimeout(resolve, 2500) }),
-          ])
-        } catch {
+          await Promise.race([provider.disconnect(), new Promise<void>((resolve) => { timer = setTimeout(resolve, 2500) })])
+        } catch (cause) {
+          run.asrTrace?.failure(cause)
           if (mounted.current && runRef.current === run) setError('The audio connection ended unexpectedly. Verify the final transcript lines.')
         } finally { clearTimeout(timer) }
       }
+      run.asrTrace?.end('stop')
       run.acceptFinals = false
-      run.abort.abort()
-      run.connected = null
-      if (runRef.current === run) {
-        runRef.current = null
-        if (mounted.current) { setPhase('idle'); setLevel(0) }
-      }
+      run.abort.abort(); run.connected = null
+      if (runRef.current === run) { runRef.current = null; if (mounted.current) { setPhase('idle'); setLevel(0) } }
       return rows.current.slice()
     })()
     return run.stop
@@ -87,35 +77,44 @@ export function useInterviewRecorder() {
     if (runRef.current) throw new Error('Audio capture is already active or stopping.')
     if (!mounted.current) return
     const run: RecordingRun = {
-      cancelled: false, acceptFinals: true, abort: new AbortController(),
-      nativeAttempted: false, captureReleased: false, connected: null, stop: null, timeout: null,
+      cancelled: false, acceptFinals: true, abort: new AbortController(), nativeAttempted: false, captureReleased: false,
+      connected: null, stop: null, timeout: null, watchdog: null, asrTrace: null,
+      captureTrace: diagnosticSpan('audio', { channel: source, source: source === 'system' && isNative ? 'native' : 'browser', phase: 'starting' }),
     }
-    runRef.current = run
-    rows.current = []
-    setSegments([])
-    setError(null)
-    setPhase('starting')
+    runRef.current = run; rows.current = []; setSegments([]); setError(null); setPhase('starting')
     const valid = () => mounted.current && runRef.current === run && !run.cancelled
     const pending: ArrayBuffer[] = []
-    let bufferedBytes = 0
+    let bufferedBytes = 0, frames = 0, bytes = 0, partials = 0, finals = 0, lastFrameAt = 0, speechDetected = false, stallReported = false
+    const startedAt = Date.now()
+    run.watchdog = setInterval(() => {
+      if (!valid()) return
+      const age = Date.now() - (lastFrameAt || startedAt)
+      run.captureTrace.event('heartbeat', { frames, bytes, hasFrames: frames > 0, sampleAgeMs: age, speechDetected })
+      run.asrTrace?.event('heartbeat', { partials, finals, speechDetected })
+      if (age >= 30_000 && !stallReported) { run.captureTrace.event('stall', { hasFrames: frames > 0, sampleAgeMs: age }); stallReported = true }
+      speechDetected = false
+    }, 30_000)
     const onPcm = (pcm: ArrayBuffer) => {
       if (!valid()) return
+      if (pcm.byteLength) {
+        if (!frames) run.captureTrace.event('first_frame')
+        frames++; bytes += pcm.byteLength; lastFrameAt = Date.now(); stallReported = false
+      }
       if (run.connected) {
         try { run.connected.sendAudio(pcm) }
-        catch { setError('The audio connection ended unexpectedly.'); void stop() }
+        catch (cause) { run.asrTrace?.failure(cause); setError('The audio connection ended unexpectedly.'); void stop() }
       } else if (pcm.byteLength && pcm.byteLength <= 512 * 1024) {
-        pending.push(pcm)
-        bufferedBytes += pcm.byteLength
+        pending.push(pcm); bufferedBytes += pcm.byteLength
         while (pending.length > 60 || bufferedBytes > 512 * 1024) bufferedBytes -= pending.shift()!.byteLength
       }
     }
     let lastLevelAt = -Infinity
     const onLevel = (rms: number) => {
       if (!valid() || performance.now() - lastLevelAt < 80) return
-      lastLevelAt = performance.now()
-      setLevel(Number.isFinite(rms) ? Math.max(0, Math.min(1, rms)) : 0)
+      if (Number.isFinite(rms) && rms > 0.02) speechDetected = true
+      lastLevelAt = performance.now(); setLevel(Number.isFinite(rms) ? Math.max(0, Math.min(1, rms)) : 0)
     }
-    const onEnded = () => { if (valid()) void stop() }
+    const onEnded = () => { if (valid()) { run.captureTrace.event('stop'); void stop() } }
     let startupError: Error | null = null
     try {
       let rate = 0
@@ -125,55 +124,41 @@ export function useInterviewRecorder() {
         catch (cause) {
           if (!valid()) return
           await stopNative()
-          // A desktop permission/sidecar failure must not disappear behind a
-          // browser getDisplayMedia error (WKWebView may not support it).
           if (isNative) throw new Error(typeof cause === 'string' ? cause : cause instanceof Error ? cause.message : 'System audio could not start. Check macOS audio recording permission and reopen the app.')
         }
       }
       if (!valid()) return
       if (!rate) rate = await startBrowser(onPcm, onLevel, { source, onEnded })
       if (!valid()) return
+      run.captureTrace.event('ready')
+      run.asrTrace = diagnosticSpan('transcription', { channel: source })
       run.timeout = setTimeout(() => {
         if (!valid()) return
         startupError = new Error('Transcription could not connect in time. Check your connection and try again.')
-        setError(startupError.message)
-        void stop()
+        run.asrTrace?.end('error', { code: 'timeout' }); setError(startupError.message); void stop()
       }, 25_000)
       const result = await connectWithFallback({ keyterms, sampleRate: rate, maxSpeakers: Math.max(1, Math.min(10, maxSpeakers)), signal: run.abort.signal })
-      if (!valid()) {
-        void result.provider.disconnect().catch(() => {})
-        if (startupError) throw startupError
-        return
-      }
+      if (!valid()) { void result.provider.disconnect().catch(() => {}); if (startupError) throw startupError; return }
       if (run.timeout) clearTimeout(run.timeout)
-      run.timeout = null
-      run.connected = result.provider
+      run.timeout = null; run.connected = result.provider
+      run.asrTrace.event('ready')
       const ingest = (event: TranscriptEvent) => {
-        // Established Stop may flush a final; a replaced/unmounted run may not.
         if (!mounted.current || runRef.current !== run || !run.acceptFinals) return
         const previous = new Map(rows.current.map((row) => [row.id, row.capturedAt]))
         const utteranceTime = event.utteranceId ? rows.current.find(row => row.utteranceId === event.utteranceId)?.capturedAt : undefined
         rows.current = mergeSegments(rows.current, event).map((row) => ({ ...row, capturedAt: previous.get(row.id) ?? utteranceTime ?? Date.now() }))
         setSegments(rows.current)
       }
-      result.provider.onPartial(ingest)
-      result.provider.onFinal(ingest)
-      result.provider.onStatus?.(({ error: message }) => {
-        if (!valid()) return
-        setError(message)
-        void stop()
-      })
-      for (const chunk of pending) {
-        if (!valid()) break
-        result.provider.sendAudio(chunk)
-      }
+      result.provider.onPartial(event => { if (mounted.current && runRef.current === run && run.acceptFinals) { if (!partials++) run.asrTrace?.event('first_partial') }; ingest(event) })
+      result.provider.onFinal(event => { if (mounted.current && runRef.current === run && run.acceptFinals) { if (!finals++) run.asrTrace?.event('first_final') }; ingest(event) })
+      result.provider.onStatus?.(({ error: message }) => { if (!valid()) return; run.asrTrace?.failure(message); setError(message); void stop() })
+      for (const chunk of pending) { if (!valid()) break; result.provider.sendAudio(chunk) }
       pending.length = 0
       if (valid()) setPhase('recording')
     } catch (cause) {
       if (!valid()) { if (startupError) throw startupError; return }
-      setError(cause instanceof Error ? cause.message : 'Audio capture failed.')
-      await stop()
-      throw cause
+      if (run.asrTrace) run.asrTrace.failure(cause); else run.captureTrace.failure(cause)
+      setError(cause instanceof Error ? cause.message : 'Audio capture failed.'); await stop(); throw cause
     }
   }, [startNative, stopNative, startBrowser, stop, isNative])
 
@@ -181,26 +166,16 @@ export function useInterviewRecorder() {
     mounted.current = true
     const onPageHide = () => { void stop() }
     window.addEventListener('pagehide', onPageHide)
-    return () => {
-      mounted.current = false
-      window.removeEventListener('pagehide', onPageHide)
-      void stop()
-    }
+    return () => { mounted.current = false; window.removeEventListener('pagehide', onPageHide); void stop() }
   }, [stop])
-
   const getSegments = useCallback(() => rows.current.slice(), [])
   return { start, stop, phase, segments, error, level, getSegments }
 }
-
 export function captureText(segments: CapturedSegment[]): string {
   return segments.filter((row) => row.text.trim()).map((row) => `${row.text}${row.isFinal ? '' : ' [Unfinalized transcription; verify]'}`).join('\n')
 }
-
 export function liveTranscript(call: CapturedSegment[], microphone: CapturedSegment[]): string {
-  return [
-    ...call.map((row) => ({ ...row, label: `Call${row.speaker == null ? '' : ` / speaker ${row.speaker + 1}`}` })),
-    ...microphone.map((row) => ({ ...row, label: 'Candidate microphone' })),
-  ].sort((a, b) => a.capturedAt - b.capturedAt)
-    .filter((row) => row.text.trim())
+  return [...call.map((row) => ({ ...row, label: `Call${row.speaker == null ? '' : ` / speaker ${row.speaker + 1}`}` })), ...microphone.map((row) => ({ ...row, label: 'Candidate microphone' }))]
+    .sort((a, b) => a.capturedAt - b.capturedAt).filter((row) => row.text.trim())
     .map((row) => `${row.label}: ${row.text}${row.isFinal ? '' : ' [Unfinalized transcription; verify]'}`).join('\n')
 }

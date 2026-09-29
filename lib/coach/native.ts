@@ -1,10 +1,9 @@
 import type { FrameSource } from './screen'
 import { hashText } from './validation'
+import { diagnosticSpan } from '@/lib/diagnostics/client'
 
 export type NativeDisplay = { id: string; name: string; width: number; height: number }
-export function nativeAvailable(): boolean {
-  return typeof window !== 'undefined' && ('__TAURI_INTERNALS__' in window || '__TAURI__' in window)
-}
+export function nativeAvailable(): boolean { return typeof window !== 'undefined' && ('__TAURI_INTERNALS__' in window || '__TAURI__' in window) }
 async function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   const { invoke } = await import('@tauri-apps/api/core')
   try { return await invoke<T>(command, args) }
@@ -14,19 +13,20 @@ async function invoke<T>(command: string, args?: Record<string, unknown>): Promi
     throw new Error(message)
   }
 }
-export async function nativeDisplays(): Promise<NativeDisplay[]> {
-  if (!nativeAvailable()) return []
-  return invoke<NativeDisplay[]>('coach_displays')
-}
+export async function nativeDisplays(): Promise<NativeDisplay[]> { if (!nativeAvailable()) return []; return invoke<NativeDisplay[]>('coach_displays') }
 export async function nativeFrameSource(displayId: string, signal?: AbortSignal): Promise<FrameSource> {
+  const trace = diagnosticSpan('screen', { source: 'native' })
   const requestId = crypto.randomUUID()
-  if (signal?.aborted) throw new Error('Screen selection cancelled.')
+  if (signal?.aborted) { trace.end('cancelled'); throw new Error('Screen selection cancelled.') }
   const cancel = () => { void invoke('coach_stop', { leaseId: requestId }).catch(() => {}) }
   const starting = invoke<{ leaseId: string }>('coach_start', { displayId, approved: true, requestId })
   signal?.addEventListener('abort', cancel, { once: true })
   let leaseId: string
-  try { ({ leaseId } = await starting) } finally { signal?.removeEventListener('abort', cancel) }
-  if (signal?.aborted) { await invoke('coach_stop', { leaseId }).catch(() => {}); throw new Error('Screen selection cancelled.') }
+  try { ({ leaseId } = await starting) }
+  catch (error) { trace.failure(error); throw error }
+  finally { signal?.removeEventListener('abort', cancel) }
+  if (signal?.aborted) { trace.end('cancelled'); await invoke('coach_stop', { leaseId }).catch(() => {}); throw new Error('Screen selection cancelled.') }
+  trace.end('success')
   let stopped = false
   return {
     async signal() {
@@ -50,9 +50,5 @@ export async function nativeFrameSource(displayId: string, signal?: AbortSignal)
     async stop() { if (!stopped) { stopped = true; await invoke('coach_stop', { leaseId }).catch(() => {}) } },
   }
 }
-
-/** Explicit user action only; never opens a permission dialog on startup. */
-export async function openScreenRecordingSettings(): Promise<void> {
-  if (!nativeAvailable()) return
-  await invoke('coach_open_screen_settings')
-}
+/** Explicit user action only. */
+export async function openScreenRecordingSettings(): Promise<void> { if (!nativeAvailable()) return; await invoke('coach_open_screen_settings') }

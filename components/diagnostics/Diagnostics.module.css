@@ -1,0 +1,15 @@
+.launcher { position: fixed; right: 14px; bottom: 10px; z-index: 10000; pointer-events: auto; padding: 5px 10px; border: 1px solid #60656e; border-radius: 6px; color: #eee; background: #25282d; font: 12px/1.4 system-ui; cursor: pointer; }
+.dialog { width: min(900px, calc(100vw - 32px)); max-height: calc(100vh - 40px); overflow: auto; border: 1px solid #60656e; border-radius: 10px; padding: 20px; color: #eee; background: #1c1f24; font: 14px/1.5 system-ui; pointer-events: auto; }
+.dialog::backdrop { background: #0008; }
+.dialog header { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.dialog h2 { font-size: 22px; font-weight: 600; margin: 0; }
+.dialog h3 { font-size: 16px; font-weight: 600; margin: 18px 0 6px; }
+.dialog p { margin: 10px 0; }
+.dialog button { cursor: pointer; padding: 6px 10px; border: 1px solid #747b85; border-radius: 5px; background: #30343b; color: inherit; }
+.dialog button:disabled { opacity: .5; cursor: default; }
+.dialog button:focus-visible, .launcher:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.timeline { overflow: auto; max-height: 300px; }
+.timeline table { border-collapse: collapse; width: 100%; font-size: 12px; }
+.timeline th, .timeline td { text-align: left; vertical-align: top; padding: 6px; border-bottom: 1px solid #484d56; }
+.timeline code { white-space: pre-wrap; overflow-wrap: anywhere; }
