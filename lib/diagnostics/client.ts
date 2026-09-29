@@ -15,7 +15,8 @@ function newId() { try { return crypto.randomUUID() } catch { return '' } }
 export function initializeDiagnostics(): void {
   if (initialized || typeof window === 'undefined') return
   initialized = true
-  let enabled = true, events: DiagnosticEvent[] = []
+  let enabled = true
+  const events: DiagnosticEvent[] = []
   try {
     enabled = localStorage.getItem(ENABLED) !== 'false'
     const raw = localStorage.getItem(STORE)
