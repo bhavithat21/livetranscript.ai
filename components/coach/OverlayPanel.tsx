@@ -3,7 +3,7 @@ import { useEffect,useRef,useState,type CSSProperties, type ReactNode } from 're
 import { Grip, Lock, Unlock, Minus, Maximize2 } from 'lucide-react'
 import styles from './OverlayPanel.module.css'
 export type OverlayRect={x:number;y:number;width:number;height:number;opacity:number}
-export function OverlayPanel({id,title,rect,onChange,locked,children,accent='neutral'}:{id:string;title:string;rect:OverlayRect;onChange:(next:OverlayRect)=>void;locked:boolean;children:ReactNode;accent?:'neutral'|'say'|'code'|'transcript'}){
+export function OverlayPanel({title,rect,onChange,locked,children,accent='neutral'}:{title:string;rect:OverlayRect;onChange:(next:OverlayRect)=>void;locked:boolean;children:ReactNode;accent?:'neutral'|'say'|'code'|'transcript'}){
  const ref=useRef<HTMLElement>(null),drag=useRef<{x:number;y:number;left:number;top:number}|null>(null),[collapsed,setCollapsed]=useState(false)
  useEffect(()=>{const el=ref.current;if(!el)return;const ro=new ResizeObserver(([entry])=>{if(!entry||locked)return;const {width,height}=entry.contentRect;if(Math.abs(width-rect.width)>2||Math.abs(height-rect.height)>2)onChange({...rect,width:Math.round(width),height:Math.round(height)})});ro.observe(el);return()=>ro.disconnect()},[locked,onChange,rect])
  function down(e:React.PointerEvent){if(locked)return;drag.current={x:e.clientX,y:e.clientY,left:rect.x,top:rect.y};e.currentTarget.setPointerCapture(e.pointerId)}
