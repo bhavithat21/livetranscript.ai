@@ -397,7 +397,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let lock_item = CheckMenuItem::with_id(
         app,
         "toggle_lock",
-        if lock_on { "Unlock overlays" } else { "Lock overlays (click-through)" },
+        "Unlock / Lock overlays",
         true,
         lock_on,
         None::<&str>,
