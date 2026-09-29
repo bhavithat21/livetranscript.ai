@@ -3,7 +3,8 @@ import { rateLimit } from '@/lib/rateLimit'
 import { recordUsage } from '@/lib/usage'
 import { readRepoJson, RepoRequestError } from '@/lib/repo/agentHttp'
 import { callRepoModel, streamRepoModel, type ModelUsage } from '@/lib/repo/agentProviders'
-import { assertRepoModelConfigured, repoModelFor, validRepoModel } from '@/lib/repo/modelPolicy'
+import { assertRepoModelConfigured, validRepoModel } from '@/lib/repo/modelPolicy'
+import { liveCoachModel } from '@/lib/reliability/liveModel'
 import { parseContext } from '@/lib/coach/context'
 import { object, parseGuidance, text } from '@/lib/coach/validation'
 import { lessonIds, lessonPrompt, type LessonId } from '@/lib/coach/learning/policy'
@@ -41,8 +42,7 @@ export async function POST(req: Request) {
   lane = routed.lane
   let model: string
   try {
-    const role = lane === 'talk' ? 'requirements' : lane === 'review' ? 'reviewer' : 'implementation'
-    model = process.env[`COPILOT_COACH_${lane.toUpperCase()}_MODEL`] || repoModelFor(role).model
+    model = liveCoachModel(lane)
     if (!validRepoModel(model)) throw new Error('Invalid model')
     assertRepoModelConfigured(model)
   } catch {
