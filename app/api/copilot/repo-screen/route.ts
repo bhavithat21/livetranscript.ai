@@ -20,11 +20,15 @@ export async function POST(req: Request) {
   try { model = repoModelFor('vision').model } catch {
     return Response.json({ error: 'Invalid repository vision model configuration' }, { status: 503 })
   }
+  const started = Date.now()
   try {
     const { observation, model: actualModel } = await extractScreenEvidence({ model, image, signal: req.signal })
     recordUsage('repo-screen', userId, { model: actualModel, files: observation.files.length })
     return Response.json({ observation, model: actualModel }, { headers: { 'Cache-Control': 'no-store' } })
   } catch (error) {
+    // Metadata only: do not log screenshot data, model responses, or SDK errors.
+    const providerStatus = error && typeof error === 'object' && 'status' in error && typeof error.status === 'number' ? error.status : undefined
+    console.warn('[repo-screen]', { model, elapsedMs: Date.now() - started, kind: error instanceof ScreenExtractionError ? error.message : error instanceof Error ? error.name : 'unknown', status: providerStatus, cancelled: req.signal.aborted })
     if (error instanceof ScreenExtractionError && !req.signal.aborted) {
       return Response.json({ error: error.message }, { status: error.status })
     }
