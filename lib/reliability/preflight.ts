@@ -6,19 +6,18 @@ import { extractScreenEvidence } from '../repo/screenProvider'
 import { mintTranscriptionToken } from '../transcription/token'
 import type { ScreenObservation } from '../repo/screenEvidence'
 import { diagnosticCode } from '../diagnostics/schema'
+import { SPEECH_PROVIDERS, speechConfiguration } from './speechPolicy'
+import { liveCoachModel } from './liveModel'
 
 export type ProbeCheck = { role: string; model?: string; status: 'passed' | 'failed' | 'disabled'; durationMs: number; code?: string }
 export type PreflightReport = { version: 1; at: number; passed: boolean; scope: 'synthetic-server-probes'; deviceVerified: false; checks: ProbeCheck[] }
-// Valid synthetic blank PNG. The release gate supplies a rendered code fixture
-// instead; the in-app probe only tests the vision request/validation contract.
 const BLANK = 'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKUlEQVR4nO3NMQEAAAjDMMC/52ECvlRA00nqs3m9AwAAAAAAAAAAgMMWx/EDPS4YA2MAAAAASUVORK5CYII='
 export async function runPreflight(parent: AbortSignal, image = BLANK, validateVision?: (observation: ScreenObservation) => void): Promise<PreflightReport> {
   const checks: ProbeCheck[] = []
   const tasks: Array<{ role: string; model?: string; run: (signal: AbortSignal) => Promise<unknown> }> = []
   for (const lane of ['talk', 'guide', 'review'] as const) {
-    const role = lane === 'talk' ? 'requirements' : lane === 'review' ? 'reviewer' : 'implementation'
     try {
-      const model = process.env[`COPILOT_COACH_${lane.toUpperCase()}_MODEL`] || repoModelFor(role).model
+      const model = liveCoachModel(lane)
       tasks.push({ role: lane, model, run: async signal => { let text = ''; for await (const chunk of streamRepoModel({ model, system: 'Reply READY only.', evidence: 'Synthetic readiness check.', signal, maxTokens: lane === 'talk' ? 384 : 512 })) text += chunk.text; if (!text.trim()) throw new Error('No answer') } })
     } catch { checks.push({ role: lane, status: 'failed', durationMs: 0, code: 'provider_unavailable' }) }
   }
@@ -30,9 +29,12 @@ export async function runPreflight(parent: AbortSignal, image = BLANK, validateV
     if (!model) { checks.push({ role, status: 'disabled', durationMs: 0 }); continue }
     tasks.push({ role, model, run: signal => probeAnswerModel(model, signal) })
   }
-  // A token-mint success is not speech transcription. The release gate and
-  // device checklist test audio delivery and recognized words separately.
-  for (const provider of ['deepgram', 'assemblyai'] as const) tasks.push({ role: `${provider}-token`, run: signal => mintTranscriptionToken(provider, signal) })
+  const speech = speechConfiguration()
+  if (!speech.hasProvider) checks.push({ role: 'transcription', status: 'failed', durationMs: 0, code: 'provider_unavailable' })
+  for (const provider of SPEECH_PROVIDERS) {
+    if (!speech.enabled.includes(provider)) { checks.push({ role: `${provider}-token`, status: 'disabled', durationMs: 0, code: 'unavailable' }); continue }
+    tasks.push({ role: `${provider}-token`, run: signal => mintTranscriptionToken(provider, signal) })
+  }
   let next = 0
   async function worker() {
     for (;;) {

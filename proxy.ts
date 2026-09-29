@@ -5,6 +5,7 @@ import { NextResponse } from 'next/server'
 const isPublicRoute = createRouteMatcher([
   '/',
   '/api/health', // public release identity only; no credentials or user data
+  '/release-readiness.json', // synthetic build metadata only; no user content or credentials
   '/sign-in(.*)',
   '/sign-up(.*)',
   '/s/(.*)',

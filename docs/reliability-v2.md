@@ -1,24 +1,35 @@
 # Reliability v2 — 0.1.14
 
-## What changed
+## Model access and routing
 
-- Groq's retired Llama 3.3 is no longer the default fast/draft model or an automatic fallback destination. The default is `openai/gpt-oss-120b`. `COPILOT_DRAFT_MODEL` (or the fast tier) selects the draft; `off` disables it. Explicit model configuration is never silently replaced. The readiness check tests actual access, not just the presence of an API key.
-- A stalled quick draft is cancelled as soon as the deep answer becomes ready; it cannot block that answer behind a separate provider timeout. Text-only drafts do not receive a screenshot.
-- Live Interview wraps ASR with bounded reconnects: at most three recovery rounds per interruption, six per recorder run, and a shared 20-second recovery deadline. Each round uses the existing ordered provider fallback under an 8-second connection deadline. Only the failed network stream is replaced; there is no automated OS permission prompt or capture restart.
-- Unsent PCM is kept only in memory, capped at two seconds / 512 KB, and drained at no more than 1.25x realtime. Already-sent audio is not replayed. Provider-accepted but unfinalized words may still be lost. Gaps are explicitly reported. Provider timestamps are offset through a connection timeline; utterance and speaker identifiers do not alias across automatic reconnects.
-- Call audio and microphone failures are isolated. Failed channels have separate Retry buttons, preserving existing transcript rows. Permission flows remain serialized to avoid simultaneous OS pickers. A new ASR connection clears the selected interviewer voice instead of assuming diarization IDs identify the same person.
-- Native macOS audio now forwards allowlisted helper lifecycle events over its existing channel. Unexpected helper EOF reaches the UI rather than leaving a recording illusion. Helper errors record numeric codes and fixed domains, not localized messages or captured content. Local helper logs move to `~/Library/Logs/LiveTranscript/native-audio.log`, rotated at startup above 256 KB with one prior file, permissions 0600. None of these events establishes a retrospective cause for an older crash.
+Groq's retired Llama 3.3 is no longer the default fast/draft model or an automatic fallback destination. The fast default is `openai/gpt-oss-120b`. `COPILOT_DRAFT_MODEL` or the fast tier chooses the preferred draft; `off` disables it. The draft resolver can choose a keyed fallback when the preferred provider is unconfigured. A stalled draft is cancelled as soon as the deeper answer is ready. Text-only drafts do not receive screenshots.
 
-## Verification and release gates
+Live coaching and preflight share `liveCoachModel`. Explicit coaching lane/role settings and administrator benchmark policies are never rewritten. Only defaults with no configured provider key may choose a keyed operational alternative: Groq for fast talk, Anthropic for guide/review where available. A key is not proof of access; synthetic preflight must exercise the exact resolved model. Responses and diagnostics identify the actual model. These defaults are operational choices, not measured benchmark winners.
 
-Diagnostics includes an authenticated model/token access check. It uses synthetic inputs and can incur small provider charges. A successful token mint does not prove speech recognition. The device checklist observes actual PCM, finalized speech, vision success, completed guidance, and finalized speech after reconnection. Its full 45-minute quality review and Stop/permission checks remain explicit user attestations, not automated proof. It does not run OS actions without user input.
+## Speech and channel recovery
 
-`pnpm run build` runs paid live acceptance on Vercel production. Local/preview builds explicitly report `not-run` unless `LT_RUN_LIVE_ACCEPTANCE=1` is supplied. Paid acceptance is fail-closed: missing keys, unsupported model parameters, a source-mismatched vision fixture, or failed real ASR speech/reconnect probes blocks that build. The report at `/release-readiness.json` contains metadata only and always states `deviceVerified: false`.
+Live Interview reconnects only the failed ASR stream: at most three recovery rounds per interruption, six per recorder run, and a shared 20-second recovery deadline. Each round uses ordered provider fallback with an eight-second connection deadline. A missing optional fallback cannot erase an earlier transient active-provider failure. Budgets still prevent an infinite retry loop. Physical capture is not restarted and OS permission prompts are not reopened automatically.
 
-The synthetic speech fixture is generated with eSpeak: "Can you explain this code?", mono 16kHz PCM, with one second of silence, gzip/base64 encoded. It contains no recorded person or user speech. Acceptance uses the real Deepgram and AssemblyAI adapters and the same recovery wrapper, with only the relative token route adapted for the Node test runtime. This is not a test of macOS screen permissions, Teams routing, or an entire real interview.
+Only unsent PCM is buffered in memory, capped at two seconds / 512 KB. Deepgram recovery is paced at no more than 1.25x realtime; AssemblyAI/unknown adapters at realtime. Already-sent audio is not replayed. Provider-accepted but unfinalized words can still be lost; gap and discarded-buffer metadata report that risk. Timestamp mapping and utterance/speaker namespaces separate automatic reconnect generations. Old callbacks cannot change a newer connection's transcript.
 
-Run an authorized 45-minute mock on the actual installed Mac app before relying on it. Test each audio input, both together, screenshot changes, ASR reconnect, denied permissions, and Stop during reconnection. Export metadata diagnostics for any failure. The additional native lifecycle events require desktop 0.1.14; hosted JS reconnect and model checks can work with older desktop shells.
+Call audio and microphone failures are isolated. Each failed channel has its own Retry button that retains existing transcript rows and does not stop the healthy channel. Permission flows remain serialized. Reconnection clears interviewer assignment instead of assuming new diarization IDs identify the same person.
 
-## Rollback
+## Native lifecycle and diagnostics
 
-An unsuccessful new production build leaves the existing deployment serving. Revert this release's code (or restore the prior known-good Vercel deployment) if regression appears. Desktop changes remain an explicit preview until device acceptance; do not promote the stable updater solely because compilation passed.
+Native macOS audio forwards allowlisted helper lifecycle events over the capture channel. Unexpected helper EOF reaches the UI. Errors use fixed stages, numeric codes and allowlisted domains, not localized messages or captured content. Local logs are at `~/Library/Logs/LiveTranscript/native-audio.log`, rotated at startup above 256 KB with one previous file and file permissions 0600. These improvements do not retrospectively establish the cause of the earlier Mac incident.
+
+Diagnostics contains paid synthetic model/token preflight, explicit mock-only ASR interruption, and a device checklist. Startup events alone are insufficient: the checklist requires actual PCM, finalized speech, validated screen evidence, completed guidance, and finalized speech after recovery. Milestones survive local event-buffer rotation. Full 45-minute quality review and Stop/permission verification remain separate user attestations, not independent certification.
+
+## Production release gate
+
+`pnpm run build` runs paid live acceptance on Vercel production. Local/preview builds report `not-run` unless `LT_RUN_LIVE_ACCEPTANCE=1` is supplied. To explicitly run it outside production: `LT_RUN_LIVE_ACCEPTANCE=1 pnpm run test:live-acceptance`.
+
+The gate requires at least one configured speech provider and tests EVERY enabled provider. Unconfigured optional providers are explicitly marked unavailable/disabled, not passing. Both providers are exercised when both are configured. Any active model failure, exact-source vision mismatch, failed token mint, or failed real speech/reconnection check blocks production. A successful token mint alone never proves speech recognition. An existing working deployment remains serving after a failed new build.
+
+`/release-readiness.json` is public metadata-only build evidence with the exact commit and failing phase when applicable. It does not include API keys, raw provider errors, screenshots, transcripts, or user audio. It always reports `deviceVerified: false`. Preview results are not production proof.
+
+Synthetic speech is generated by eSpeak: "Can you explain this code?", mono 16 kHz PCM plus silence. The gate uses real model/screen APIs and actual enabled ASR adapters, intentionally disconnects the ASR connection, requires new finalized speech after recovery, then checks Stop. It is not an end-to-end test of macOS permissions, Teams routing, or a full interview. An unavailable optional ASR vendor does not provide cross-vendor redundancy.
+
+## Device acceptance and rollback
+
+Run an authorized 45-minute mock on the actual Mac app. Test each input, both together, screen changes, ASR recovery, denied permissions, and Stop during reconnect. Export metadata diagnostics for failure. Native lifecycle changes require desktop 0.1.14; hosted JS can update older shells. Keep the new unsigned installer/automatic release in preview until device acceptance; do not promote the stable updater merely because compilation passed. Revert source or restore the previous Vercel deployment on regression.
