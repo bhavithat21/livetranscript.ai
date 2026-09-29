@@ -1,6 +1,7 @@
 import type { TranscriptionProvider, TranscriptionConfig } from './types'
 import { AssemblyAIProvider } from './assemblyai'
 import { DeepgramProvider } from './deepgram'
+import { retryableTranscriptionFailure } from './recovery'
 import { readRecognitionMode } from './recognition'
 
 export type ProviderMaker = { name: string; make: () => TranscriptionProvider }
@@ -40,5 +41,6 @@ export async function connectWithFallback(
       lastErr = e
     }
   }
-  throw new Error(`All transcription providers failed: ${String(lastErr)}`)
+  const failure = lastErr as { status?: number; retryable?: boolean } | undefined
+  throw Object.assign(new Error('All transcription providers failed to connect'), { status: failure?.status, retryable: failure?.retryable ?? retryableTranscriptionFailure(lastErr) })
 }

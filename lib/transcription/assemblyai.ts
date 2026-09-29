@@ -1,4 +1,4 @@
-import type { TranscriptionProvider, TranscriptionConfig, TranscriptEvent } from './types'
+import type { TranscriptionProvider, TranscriptionConfig, TranscriptEvent, TranscriptionStatus } from './types'
 import { assemblyResult, type ResultMessage } from './results'
 import { reviseSpeakers } from './speakerRevision'
 import { boundedKeyterms } from './recognition'
@@ -15,7 +15,7 @@ export class AssemblyAIProvider implements TranscriptionProvider {
   private removeAbort: (() => void) | null = null
   private partialCb: (e: TranscriptEvent) => void = () => {}
   private finalCb: (e: TranscriptEvent) => void = () => {}
-  private statusCb: (s: { error: string }) => void = () => {}
+  private statusCb: (s: TranscriptionStatus) => void = () => {}
   // Resolves only on terminal acknowledgement, close, abort or bounded timeout.
   private onFinalFlush: (() => void) | null = null
 
@@ -27,10 +27,10 @@ export class AssemblyAIProvider implements TranscriptionProvider {
     const res = await fetch('/api/token', {
       method: 'POST',
       signal: config.signal,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...config.diagnosticHeaders },
       body: JSON.stringify({ provider: 'assemblyai' }),
     })
-    if (!res.ok) throw new Error('AssemblyAI token mint failed')
+    if (!res.ok) throw Object.assign(new Error('AssemblyAI token mint failed'), { status: res.status, retryable: res.headers?.get('x-lt-retryable') !== 'false' })
     const { token } = await res.json()
     config.signal?.throwIfAborted()
 
@@ -87,13 +87,13 @@ export class AssemblyAIProvider implements TranscriptionProvider {
         }
         this.statusCb({ error: 'Transcription connection lost' })
       }
-      ws.onclose = () => {
+      ws.onclose = (event) => {
         clearTimeout(timeout)
         this.removeAbort?.()
         this.removeAbort = null
         if (!opened) { reject(new Error('AssemblyAI connection closed before opening')); return }
         this.onFinalFlush?.() // unblock a pending disconnect flush
-        this.statusCb({ error: 'Transcription connection closed' })
+        this.statusCb({ error: 'Transcription connection closed', closeCode: event?.code, retryable: ![1008, 4001, 4003, 4401, 4403].includes(event?.code ?? 0) })
       }
       ws.onmessage = (msg) => {
         // Bad frames must not crash the recording page or mutate transcript state.
@@ -142,7 +142,8 @@ export class AssemblyAIProvider implements TranscriptionProvider {
   }
 
   sendAudio(chunk: ArrayBuffer): void {
-    if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(chunk)
+    if (this.ws?.readyState !== WebSocket.OPEN) return
+    this.ws.send(chunk)
   }
   async updateKeyterms(): Promise<void> {
     /* v1: keyterms fixed at connect */
@@ -153,7 +154,7 @@ export class AssemblyAIProvider implements TranscriptionProvider {
   onFinal(cb: (e: TranscriptEvent) => void) {
     this.finalCb = cb
   }
-  onStatus(cb: (s: { error: string }) => void) {
+  onStatus(cb: (s: TranscriptionStatus) => void) {
     this.statusCb = cb
   }
   async disconnect(): Promise<void> {

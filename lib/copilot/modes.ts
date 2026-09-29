@@ -27,17 +27,10 @@ export interface ModeProfile {
   maxTokens: number
 }
 
-// Best-per-purpose defaults (2026). fast = Groq-hosted Llama 3.3 70B: on
-// specialized silicon it streams at hundreds of tok/s (verified ~plain-content
-// stream, no reasoning preamble), so a proactive/chat/behavioral answer paints
-// while the candidate is still talking — the latency win Haiku couldn't give. Groq
-// free tier rate-limits, so providers.ts falls back to Haiku (fastFallbackModel)
-// on any Groq error, and the fast tier's prompt is short (new question + short
-// tail) so losing cross-vendor cache reuse costs little. smart = Claude Sonnet 5
-// (best coder) stays on Anthropic where the long cached prefix pays off. Vendor is
-// inferred from the id, so an env override (COPILOT_MODEL_FAST/SMART) switches
-// vendor with no code change.
-const TIER_DEFAULTS = { fast: 'llama-3.3-70b-versatile', smart: 'claude-sonnet-5' } as const
+// Operational defaults, not measured winners. Groq retired Llama 3.3 for
+// free/developer accounts in August 2026. Configured enterprise IDs still work,
+// but preflight must verify actual access; a key alone is not an access check.
+const TIER_DEFAULTS = { fast: 'openai/gpt-oss-120b', smart: 'claude-sonnet-5' } as const
 
 export type Vendor = 'openai' | 'anthropic' | 'groq' | 'google'
 
@@ -88,20 +81,21 @@ export function hasKeyFor(model: string): boolean {
 // Peers are env-overridable so tuning to the current-best model needs no code change.
 const FALLBACK_CHAINS: Record<string, string[]> = {
   'llama-3.3-70b-versatile': ['gpt-4o-mini', 'claude-haiku-4-5'],
-  'claude-sonnet-5': ['gpt-4o', 'llama-3.3-70b-versatile'],
+  'claude-sonnet-5': ['gpt-4o', 'openai/gpt-oss-120b'],
+  'openai/gpt-oss-120b': ['gpt-4o-mini', 'claude-haiku-4-5'],
 }
 
 // The ordered fallback chain for a model: [peer, …, backstop], filtered to vendors
 // that actually have a key. Env overrides COPILOT_FALLBACK_<PRIMARY-ish> aren't
 // worth the complexity; instead the two tier envs already let you swap the primary,
 // and the chain adapts because it's keyed by resolved id. Always ends with a
-// guaranteed-reachable model if ANY key is set, so the chain is never empty in prod.
+// configured candidate when a key exists. Availability requires a live probe.
 export function fallbackChain(model: string): string[] {
   const declared = FALLBACK_CHAINS[model] ?? []
   // A universal backstop appended for ANY model: the first reachable of these that
   // isn't the primary. llama first (fast, and the free Groq key is always present
   // here), then the frontier vendors.
-  const universal = ['llama-3.3-70b-versatile', 'claude-haiku-4-5', 'gpt-4o-mini']
+  const universal = ['openai/gpt-oss-120b', 'claude-haiku-4-5', 'gpt-4o-mini']
   const ordered = [...declared, ...universal].filter((m) => m !== model)
   // Keep only reachable vendors, dedupe, preserve order.
   const seen = new Set<string>()
@@ -111,7 +105,15 @@ export function fallbackChain(model: string): string[] {
 // First reachable fallback (or a sensible default if no keys at all) — kept for the
 // answer route's keyless-degrade check, which just needs one reachable model.
 export function fastFallbackModel(): string {
-  return fallbackChain('llama-3.3-70b-versatile')[0] ?? (process.env.ANTHROPIC_API_KEY ? 'claude-haiku-4-5' : 'gpt-4o-mini')
+  return fallbackChain(TIER_DEFAULTS.fast)[0] ?? (process.env.ANTHROPIC_API_KEY ? 'claude-haiku-4-5' : 'gpt-4o-mini')
+}
+
+/** Draft selection shares the fast-tier configuration rather than bypassing it.
+ * An explicit 'off' disables speculative drafts without changing the deep model. */
+export function configuredDraftModel(): string | null {
+  if (process.env.COPILOT_DRAFT_MODEL === 'off') return null
+  const preferred = process.env.COPILOT_DRAFT_MODEL || modelForTier('fast')
+  return hasKeyFor(preferred) ? preferred : fallbackChain(preferred)[0] ?? null
 }
 
 export type ThinkingConfig = { type: 'disabled' } | { type: 'adaptive'; display?: 'summarized' | 'omitted' }

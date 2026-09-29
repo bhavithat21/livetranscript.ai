@@ -31,9 +31,15 @@ private let err = FileHandle.standardError
 // Diagnostics go to stderr (parent forwards to its console) AND to a file, so we
 // can debug Finder-launched apps where nothing captures the parent's stderr.
 private let diagLog: FileHandle? = {
-    let path = "/tmp/livetranscript-audio.log"
+    let directory = NSHomeDirectory() + "/Library/Logs/LiveTranscript"
+    try? FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+    let path = directory + "/native-audio.log"
+    if let size = (try? FileManager.default.attributesOfItem(atPath: path)[.size]) as? UInt64, size > 262144 {
+        try? FileManager.default.removeItem(atPath: path + ".previous")
+        try? FileManager.default.moveItem(atPath: path, toPath: path + ".previous")
+    }
     if !FileManager.default.fileExists(atPath: path) {
-        FileManager.default.createFile(atPath: path, contents: nil)
+        FileManager.default.createFile(atPath: path, contents: nil, attributes: [.posixPermissions: 0o600])
     }
     let h = FileHandle(forWritingAtPath: path)
     h?.seekToEndOfFile()
@@ -42,6 +48,12 @@ private let diagLog: FileHandle? = {
 private func diag(_ s: String) {
     err.write((s + "\n").data(using: .utf8)!)
     diagLog?.write("[\(Date())] \(s)\n".data(using: .utf8)!)
+}
+
+private func diagFailure(_ error: Error, stage: String) {
+    let value = error as NSError
+    let domain = ["com.apple.ScreenCaptureKit.SCStreamErrorDomain", "NSOSStatusErrorDomain", "NSCocoaErrorDomain"].contains(value.domain) ? value.domain : "other"
+    diag("AUDIO_FAILURE stage=\(stage) domain=\(domain) code=\(value.code)")
 }
 
 struct CaptureError: Error, CustomStringConvertible {
@@ -114,7 +126,7 @@ final class AudioCapturer: NSObject, SCStreamOutput, SCStreamDelegate {
     }
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
-        diag("stopped: \(error)")
+        diagFailure(error, stage: "stream-stopped")
         exit(1)
     }
 }
@@ -141,7 +153,7 @@ final class AudioPickerCapturer: NSObject, SCContentSharingPickerObserver {
         if !selected { diag("Audio selection cancelled. The interview can continue without audio."); exit(1) }
     }
     func contentSharingPickerStartDidFailWithError(_ error: Error) {
-        diag("Audio picker failed: \(error.localizedDescription)"); exit(1)
+        diagFailure(error, stage: "audio-picker"); exit(1)
     }
     func contentSharingPicker(_ picker: SCContentSharingPicker, didUpdateWith filter: SCContentFilter, for stream: SCStream?) {
         selected = true
@@ -160,7 +172,7 @@ final class AudioPickerCapturer: NSObject, SCContentSharingPickerObserver {
                 diag("RATE 48000")
                 diag("READY")
             }
-            catch { diag("Audio capture failed: \(error.localizedDescription)"); exit(1) }
+            catch { diagFailure(error, stage: "audio-start"); exit(1) }
         }
     }
 }
@@ -192,7 +204,7 @@ final class ScreenPickerCapturer: NSObject, SCContentSharingPickerObserver, SCSt
         if self.stream == nil { diag("Screen selection cancelled."); exit(1) }
     }
     func contentSharingPickerStartDidFailWithError(_ error: Error) {
-        diag("Screen picker failed: \(error.localizedDescription)"); exit(1)
+        diagFailure(error, stage: "screen-picker"); exit(1)
     }
     func contentSharingPicker(_ picker: SCContentSharingPicker, didUpdateWith filter: SCContentFilter, for stream: SCStream?) {
         Task {
@@ -274,6 +286,6 @@ guard #available(macOS 13.0, *) else { diag("requires macOS 13+"); exit(1) }
 let capturer = AudioCapturer()
 Task {
     do { try await capturer.start() }
-    catch { diag("Audio capture failed: \(error.localizedDescription)"); exit(1) }
+    catch { diagFailure(error, stage: "audio-start"); exit(1) }
 }
 dispatchMain()

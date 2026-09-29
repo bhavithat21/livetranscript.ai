@@ -1,6 +1,7 @@
 'use client'
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react'
 import { AudioLines, Download, FileText, Headphones, Mic, Monitor, Play, Settings2, ShieldCheck, Sparkles, Square } from 'lucide-react'
+import { startIndependentChannels } from '@/lib/interview/channelStartup'
 import { ReadingControls } from '@/components/transcript/ReadingControls'
 import { ListeningIndicator } from '@/components/transcript/ListeningIndicator'
 import { useTextScale } from '@/lib/transcript/useTextScale'
@@ -32,7 +33,9 @@ export function LiveInterview({ visible, blocked, onActivity, onComplete, videoT
   const microphone = useInterviewRecorder()
   const tuning = useInterviewTuning()
   const { scale } = useTextScale()
-  const [interviewerSpeaker, setInterviewerSpeaker] = useState<number | null>(null)
+  const [speakerSelection, setSpeakerSelection] = useState<{ value: number | null; generation: number | undefined }>({ value: null, generation: undefined })
+  const interviewerSpeaker = speakerSelection.generation === call.connectionGeneration ? speakerSelection.value : null
+  const setInterviewerSpeaker = (value: number | null) => setSpeakerSelection({ value, generation: call.connectionGeneration })
   const { keyterms } = useKeytermPrefs()
   const [source, setSource] = useState<'both' | 'system' | 'mic' | 'screen'>(videoTest ? 'system' : 'both')
   const [title, setTitle] = useState(videoTest ? 'Video coding test' : 'Live interview')
@@ -97,15 +100,22 @@ export function LiveInterview({ visible, blocked, onActivity, onComplete, videoT
     activity.current = true; ending.current = false; sessionId.current = crypto.randomUUID(); startTime.current = Date.now()
     setInterviewerSpeaker(null); setCaptureStartedAt(startTime.current); setElapsed(0); setError(null); setBusy(true); setActive(true); setTranscriptOpen(true); onActivity(true)
     try {
-      if ((source === 'both' || source === 'system')) await call.start('system', keyterms)
-      if (token === lifecycle.current && !ending.current && (source === 'both' || source === 'mic')) await microphone.start('mic', keyterms, source === 'mic' ? 5 : 1)
-    } catch (e) {
-      if (token !== lifecycle.current) return
-      await Promise.all([call.stop(), microphone.stop()])
-      if (token !== lifecycle.current) return
-      // Keep the screen session and answer panels mounted after denied audio.
-      if (!ending.current) setError(`${e instanceof Error ? e.message : 'Could not start audio capture.'} Audio is paused; you can continue with screen sharing or end the interview to retry audio.`)
+      const failures = await startIndependentChannels([
+        ...(source === 'both' || source === 'system' ? [{ name: 'system' as const, start: () => call.start('system', keyterms) }] : []),
+        ...(source === 'both' || source === 'mic' ? [{ name: 'mic' as const, start: () => microphone.start('mic', keyterms, source === 'mic' ? 5 : 1) }] : []),
+      ], () => token === lifecycle.current && !ending.current)
+      if (token === lifecycle.current && !ending.current && failures.length) setError(`${failures.join(' ')} Healthy inputs and screen sharing remain available. Retry only the failed channel.`)
     } finally { if (token === lifecycle.current && !ending.current) setBusy(false) }
+  }
+
+  async function retryAudio(channel: 'system' | 'mic') {
+    if (busy || finishing || ending.current) return
+    const recorder = channel === 'system' ? call : microphone
+    if (recorder.phase !== 'idle') return
+    const token = lifecycle.current; setBusy(true); setError(null)
+    try { await recorder.start(channel, keyterms, channel === 'mic' && source !== 'mic' ? 1 : 5, true) }
+    catch (cause) { if (token === lifecycle.current) setError(cause instanceof Error ? cause.message : 'Audio could not restart.') }
+    finally { if (token === lifecycle.current && !ending.current) setBusy(false) }
   }
 
   async function finish() {
@@ -123,11 +133,11 @@ export function LiveInterview({ visible, blocked, onActivity, onComplete, videoT
       onComplete({
         id: sessionId.current, kind: 'live', title: title.trim() || 'Live interview',
         createdAt: startTime.current, durationSeconds: Math.max(0, Math.round((Date.now() - startTime.current) / 1000)), transcript, turns: [],
-        captureNote: source === 'both'
+        captureNote: (source === 'both'
           ? 'Separate call/system audio and candidate microphone channels. Speaker numbers in the call channel do not identify the candidate. Microphone is presumed candidate; nearby voices/echo can be present. Arrival order is approximate, not synchronized word timing. AI/copilot suggestions are not included.'
           : source === 'system'
             ? 'System/call audio only. The candidate microphone was NOT captured separately; candidate answers may be missing. Do not infer candidate identity from speaker numbers. AI/copilot suggestions are not included.'
-            : 'Microphone only, presumed to be the candidate. Interviewer questions may be missing. Nearby voices may also be present. AI/copilot suggestions are not included.',
+            : 'Microphone only, presumed to be the candidate. Interviewer questions may be missing. Nearby voices may also be present. AI/copilot suggestions are not included.') + ((call.recoveryNotice || microphone.recoveryNotice) ? ' A transcription connection was interrupted. Some audio may be missing; verify this transcript.' : ''),
       })
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not finish the interview. Export the transcript before leaving.') }
     finally { activity.current = false; ending.current = false; setFinishing(false); setActive(false); setBusy(false); onActivity(false) }
@@ -136,6 +146,8 @@ export function LiveInterview({ visible, blocked, onActivity, onComplete, videoT
   const callRows = call.segments.filter((row) => row.capturedAt >= captureStartedAt)
   const micRows = microphone.segments.filter((row) => row.capturedAt >= captureStartedAt)
   const captured = ((source === 'both' || source === 'system') && callRows.length > 0) || ((source === 'both' || source === 'mic') && micRows.length > 0)
+  const reconnecting = call.phase === 'reconnecting' || microphone.phase === 'reconnecting'
+  const audioRetryControls = <>{(source === 'both' || source === 'system') && call.phase === 'idle' && <button disabled={busy || finishing} onClick={() => void retryAudio('system')}>Retry call audio</button>}{(source === 'both' || source === 'mic') && microphone.phase === 'idle' && <button disabled={busy || finishing} onClick={() => void retryAudio('mic')}>Retry microphone</button>}{(call.recoveryNotice || microphone.recoveryNotice) && <p role="status">{call.recoveryNotice || microphone.recoveryNotice}</p>}</>
   const hasRecording = call.phase === 'recording' || microphone.phase === 'recording'
   const formatTime = (seconds: number) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
   const transcriptRows: ChannelSegment[] = [
@@ -145,7 +157,7 @@ export function LiveInterview({ visible, blocked, onActivity, onComplete, videoT
   const turns = liveTurns(transcriptRows)
   const callSpeakers = [...new Set((source === 'mic' ? micRows : callRows).flatMap(row => row.speaker == null ? [] : [row.speaker]))].sort((a, b) => a - b)
   const readingStyle = { '--live-text-size': `${18 * scale}px` } as CSSProperties
-  const captureStatus = finishing ? 'Saving transcript…' : busy ? native && (source === 'both' || source === 'system') ? 'Choose your call app or display in the macOS picker…' : 'Connecting audio…' : hasRecording ? 'Listening' : source === 'screen' ? 'Screen-only session' : 'Audio paused'
+  const captureStatus = finishing ? 'Saving transcript…' : busy ? native && (source === 'both' || source === 'system') ? 'Choose your call app or display in the macOS picker…' : 'Connecting audio…' : reconnecting ? 'Reconnecting transcription… capture continues' : hasRecording ? 'Listening' : source === 'screen' ? 'Screen-only session' : 'Audio paused'
   if (!active && native && visible && repositoryMode) return createPortal(<div className={`${styles.desktopStart} lt-overlay-root`}>
     <NativeWindowControls />
     <section aria-label="Start live interview">
@@ -208,11 +220,11 @@ export function LiveInterview({ visible, blocked, onActivity, onComplete, videoT
       {videoTest && interviewerSpeaker === null && <p className={styles.activityNotice}>Video test: select the interviewer in Speakers after both voices appear. Automatic answers wait for this assignment; voices are not identities.</p>}
       <div className={`${styles.liveGrid} ${repositoryMode || !transcriptOpen ? styles.liveGridNoRail : ''}`}>
         <div className={styles.answerColumn}>
-          {repositoryMode ? <RepositoryCoach screenSelectionBlocked={busy} instructions={tuning.state.active.instructions} overlayVisible={visible} overlayControls={<><InterviewBrief /><span>{captureStatus} · {formatTime(elapsed)}</span><button disabled={finishing} onClick={() => void finish()}>End interview</button>{(error || call.error || microphone.error) && <p role="alert">{error || call.error || microphone.error}</p>}{error && <button onClick={() => void openScreenRecordingSettings().catch(() => setError('Open System Settings → Privacy & Security to enable recording permission, then reopen LiveTranscript.'))}>Open recording permissions</button>}</>} permission={videoTest ? 'practice' : 'external-ai-allowed'} getQuestionTranscript={questionText} getConversation={conversation} /> : <LiveAnswerCanvas getTranscript={text} getQuestionTranscript={questionText} />}
+          {repositoryMode ? <RepositoryCoach screenSelectionBlocked={busy} instructions={tuning.state.active.instructions} overlayVisible={visible} overlayControls={<><InterviewBrief />{audioRetryControls}<span>{captureStatus} · {formatTime(elapsed)}</span><button disabled={finishing} onClick={() => void finish()}>End interview</button>{(error || call.error || microphone.error) && <p role="alert">{error || call.error || microphone.error}</p>}{error && <button onClick={() => void openScreenRecordingSettings().catch(() => setError('Open System Settings → Privacy & Security to enable recording permission, then reopen LiveTranscript.'))}>Open recording permissions</button>}</>} permission={videoTest ? 'practice' : 'external-ai-allowed'} getQuestionTranscript={questionText} getConversation={conversation} /> : <LiveAnswerCanvas getTranscript={text} getQuestionTranscript={questionText} />}
           <div className={styles.captureBar}>
             {(source === 'both' || source === 'mic') && <span className={styles.channel}><span className={`${styles.channelDot} ${microphone.phase === 'recording' ? styles.channelDotOn : ''}`} /><Mic size={12} aria-hidden />Mic · {microphone.phase === 'recording' ? 'on' : 'waiting'}</span>}
             {(source === 'both' || source === 'system') && <span className={styles.channel}><span className={`${styles.channelDot} ${call.phase === 'recording' ? styles.channelDotOn : ''}`} /><Monitor size={12} aria-hidden />System · {call.phase === 'recording' ? 'on' : 'waiting'}</span>}
-            <div className={styles.captureActions}><button type="button" className={styles.darkButton} aria-expanded={transcriptOpen} aria-controls="live-transcript" onClick={() => setTranscriptOpen((open) => !open)}><FileText size={13} aria-hidden />{transcriptOpen ? 'Hide transcript' : 'Transcript'}</button><button type="button" className={styles.darkButton} disabled={!captured} onClick={() => downloadInterview(title, text())}><Download size={13} aria-hidden />Export</button></div>
+            <div className={styles.captureActions}>{audioRetryControls}<button type="button" className={styles.darkButton} aria-expanded={transcriptOpen} aria-controls="live-transcript" onClick={() => setTranscriptOpen((open) => !open)}><FileText size={13} aria-hidden />{transcriptOpen ? 'Hide transcript' : 'Transcript'}</button><button type="button" className={styles.darkButton} disabled={!captured} onClick={() => downloadInterview(title, text())}><Download size={13} aria-hidden />Export</button></div>
           </div>
         </div>
         {transcriptOpen && <aside id="live-transcript" className={styles.transcriptRail}>

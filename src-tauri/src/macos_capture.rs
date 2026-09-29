@@ -29,6 +29,7 @@ pub fn start(
     app: tauri::AppHandle,
     on_frame: Channel<InvokeResponseBody>,
 ) -> Result<(u32, Stopper), String> {
+    native_state(&on_frame, "starting", false, None);
     let cmd = app
         .shell()
         .sidecar("audio-capture")
@@ -37,6 +38,10 @@ pub fn start(
         .set_raw_out(true)
         .spawn()
         .map_err(|e| format!("spawn failed: {e}"))?;
+
+    native_state(&on_frame, "spawned", false, None);
+    let expected_stop = Arc::new(AtomicBool::new(false));
+    let expected_task = expected_stop.clone();
 
     // Rendezvous: the reader task reports Ok(rate) once the sidecar prints
     // READY (rate from the preceding RATE line), or Err if it dies before then.
@@ -53,6 +58,7 @@ pub fn start(
         let mut diagnostics = Vec::new();
         let mut last_error = String::new();
         let mut ready = false;
+        let mut first_frame = false;
         let mut rate = DEFAULT_SAMPLE_RATE;
         let mut frame_samples = (rate / FRAME_MS_DIVISOR) as usize;
         let mut carry: Vec<u8> = Vec::new(); // partial f32 across chunk boundaries
@@ -77,7 +83,9 @@ pub fn start(
                         let c = f.clamp(-1.0, 1.0);
                         samples.push((if c < 0.0 { c * 32768.0 } else { c * 32767.0 }) as i16);
                         if samples.len() >= frame_samples {
+                            if !first_frame { first_frame = true; native_state(&on_frame, "first-frame", false, None); }
                             if send_i16(&on_frame, &samples).is_err() {
+                                native_state(&on_frame, "ipc-failed", false, None);
                                 // Frontend channel gone → kill the sidecar and stop.
                                 if let Some(c) = child_for_task.lock().unwrap().take() {
                                     let _ = c.kill();
@@ -91,6 +99,11 @@ pub fn start(
                 }
                 CommandEvent::Stderr(bytes) => {
                     for text in diagnostic_lines(&mut diagnostics, &bytes) {
+                        if let Some(stage) = native_stage(&text) { native_state(&on_frame, stage, false, None); }
+                        if text.starts_with("AUDIO_FAILURE ") {
+                            let code = text.split_whitespace().find_map(|part| part.strip_prefix("code=").and_then(|value| value.parse::<i32>().ok()));
+                            native_state(&on_frame, "capture-error", false, code);
+                        }
                         if !ready {
                             if let Some(r) = text
                                 .strip_prefix("RATE ")
@@ -104,6 +117,7 @@ pub fn start(
                             }
                             if text == "READY" {
                                 ready = true;
+                                native_state(&on_frame, "ready", false, None);
                                 signalled_task.store(true, Ordering::SeqCst);
                                 let _ = init_tx.send(Ok(rate));
                                 continue;
@@ -117,6 +131,7 @@ pub fn start(
                 _ => {}
             }
         }
+        native_state(&on_frame, "ended", expected_task.load(Ordering::SeqCst), None);
         // Stream ended (killed by the Stopper, EOF, or crash). If we never hit
         // READY, report failure so start() returns Err.
         if !signalled_task.swap(true, Ordering::SeqCst) {
@@ -136,6 +151,7 @@ pub fn start(
             // Kill-driven teardown: dropping/killing the child closes stdout, so
             // the reader task's rx.recv() returns None and it exits cleanly.
             let stopper: Stopper = Box::new(move || {
+                expected_stop.store(true, Ordering::SeqCst);
                 if let Some(c) = child.lock().unwrap().take() {
                     let _ = c.kill();
                 }
@@ -144,11 +160,25 @@ pub fn start(
         }
         Ok(Err(e)) => Err(e),
         Err(_) => {
+            expected_stop.store(true, Ordering::SeqCst);
             if let Some(c) = child.lock().unwrap().take() {
                 let _ = c.kill();
             }
             Err("timed out waiting for audio capture to start".into())
         }
+    }
+}
+
+fn native_state(channel: &Channel<InvokeResponseBody>, stage: &str, expected: bool, code: Option<i32>) {
+    let message = serde_json::json!({"kind":"lt-audio-state", "version":1, "stage":stage, "expected":expected, "code":code});
+    let _ = channel.send(InvokeResponseBody::Json(message.to_string()));
+}
+fn native_stage(line: &str) -> Option<&'static str> {
+    match line {
+        "AUDIO_STAGE picker-requested capacity=2" => Some("picker-requested"),
+        "AUDIO_STAGE selection-received" => Some("selection-received"),
+        "AUDIO_STAGE picker-released" => Some("picker-released"),
+        _ => None,
     }
 }
 
@@ -176,7 +206,12 @@ fn diagnostic_lines(pending: &mut Vec<u8>, bytes: &[u8]) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::diagnostic_lines;
+    use super::{diagnostic_lines, native_stage};
+    #[test]
+    fn native_stage_is_allowlisted() {
+        assert_eq!(native_stage("AUDIO_STAGE selection-received"), Some("selection-received"));
+        assert_eq!(native_stage("AUDIO_STAGE secret-path=/Users/private"), None);
+    }
     #[test]
     fn readiness_survives_split_and_combined_raw_chunks() {
         let mut pending = Vec::new();

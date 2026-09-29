@@ -1,4 +1,4 @@
-import type { TranscriptionProvider, TranscriptionConfig, TranscriptEvent } from './types'
+import type { TranscriptionProvider, TranscriptionConfig, TranscriptEvent, TranscriptionStatus } from './types'
 import { deepgramResult } from './results'
 import { boundedKeyterms } from './recognition'
 
@@ -15,7 +15,7 @@ export class DeepgramProvider implements TranscriptionProvider {
   private removeAbort: (() => void) | null = null
   private partialCb: (e: TranscriptEvent) => void = () => {}
   private finalCb: (e: TranscriptEvent) => void = () => {}
-  private statusCb: (s: { error: string }) => void = () => {}
+  private statusCb: (s: TranscriptionStatus) => void = () => {}
   private keepAlive: ReturnType<typeof setInterval> | null = null
   // Resolves only on terminal acknowledgement, close, abort or bounded timeout.
   private onFinalFlush: (() => void) | null = null
@@ -26,10 +26,10 @@ export class DeepgramProvider implements TranscriptionProvider {
     const res = await fetch('/api/token', {
       method: 'POST',
       signal: config.signal,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...config.diagnosticHeaders },
       body: JSON.stringify({ provider: 'deepgram' }),
     })
-    if (!res.ok) throw new Error('Deepgram token mint failed')
+    if (!res.ok) throw Object.assign(new Error('Deepgram token mint failed'), { status: res.status, retryable: res.headers?.get('x-lt-retryable') !== 'false' })
     const { token } = await res.json()
     config.signal?.throwIfAborted()
 
@@ -98,14 +98,14 @@ export class DeepgramProvider implements TranscriptionProvider {
         }
         this.statusCb({ error: 'Transcription connection lost' })
       }
-      ws.onclose = () => {
+      ws.onclose = (event) => {
         clearTimeout(timeout)
         this.removeAbort?.()
         this.removeAbort = null
         if (!opened) { reject(new Error('Deepgram connection closed before opening')); return }
         this.stopKeepAlive()
         this.onFinalFlush?.() // unblock a pending disconnect flush
-        this.statusCb({ error: 'Transcription connection closed' })
+        this.statusCb({ error: 'Transcription connection closed', closeCode: event?.code, retryable: ![1008, 4001, 4003, 4401, 4403].includes(event?.code ?? 0) })
       }
       ws.onmessage = (msg) => {
         // Bad frames must not crash the recording page or mutate transcript state.
@@ -125,7 +125,8 @@ export class DeepgramProvider implements TranscriptionProvider {
   }
 
   sendAudio(chunk: ArrayBuffer): void {
-    if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(chunk)
+    if (this.ws?.readyState !== WebSocket.OPEN) return
+    this.ws.send(chunk)
   }
   async updateKeyterms(): Promise<void> {}
   onPartial(cb: (e: TranscriptEvent) => void) {
@@ -134,7 +135,7 @@ export class DeepgramProvider implements TranscriptionProvider {
   onFinal(cb: (e: TranscriptEvent) => void) {
     this.finalCb = cb
   }
-  onStatus(cb: (s: { error: string }) => void) {
+  onStatus(cb: (s: TranscriptionStatus) => void) {
     this.statusCb = cb
   }
   async disconnect(): Promise<void> {

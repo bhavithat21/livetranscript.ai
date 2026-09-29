@@ -12,7 +12,7 @@ export interface MicStreamOptions {
   source?: AudioSource
   isMuted?: () => boolean
   // The browser/user ended an audio track (not our own stop()).
-  onEnded?: () => void
+  onEnded?: (reason?: string) => void
 }
 
 type CaptureSession = {

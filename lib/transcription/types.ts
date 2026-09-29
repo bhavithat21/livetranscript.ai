@@ -18,8 +18,11 @@ export type TranscriptionConfig = {
   sampleRate: number
   maxSpeakers: number
   // Optional cancellation covers token minting, connection and the live socket.
+  diagnosticHeaders?: Record<string, string>
   signal?: AbortSignal
 }
+
+export type TranscriptionStatus = { error: string; retryable?: boolean; status?: number; closeCode?: number }
 
 export interface TranscriptionProvider {
   connect(config: TranscriptionConfig): Promise<void>
@@ -29,6 +32,6 @@ export interface TranscriptionProvider {
   onFinal(callback: (e: TranscriptEvent) => void): void
   // Fired when the socket drops AFTER a successful connect (not on graceful
   // disconnect). Lets the UI surface the failure and stop the "recording" illusion.
-  onStatus?(callback: (status: { error: string }) => void): void
+  onStatus?(callback: (status: TranscriptionStatus) => void): void
   disconnect(): Promise<void>
 }
