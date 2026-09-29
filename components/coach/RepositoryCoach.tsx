@@ -114,7 +114,8 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
     } catch (failure) { if (mounted.current && token === generation.current) setError(failure instanceof Error ? failure.message : 'Screen sharing is unavailable.') }
     finally { if (mounted.current && token === generation.current) setSelecting(false) }
   }
-  function answerNow() { const typed=manualQuestion.trim(); const latest=typed || getter.current().trim(); if(latest){ ask(latest); setManualQuestion('') } else if(state.question){ void controller.run('talk',true); void controller.run('guide',true) } else setError('No question detected yet. Type the question, then press Answer.') }\n  function pause() { generation.current++; setSelecting(false); controller.pause(); screen.watch(false) }
+  function answerNow() { const typed=manualQuestion.trim(); const latest=typed || getter.current().trim(); if(latest){ ask(latest); setManualQuestion('') } else if(state.question){ void controller.run('talk',true); void controller.run('guide',true) } else setError('No question detected yet. Type the question, then press Answer.') }
+  function pause() { generation.current++; setSelecting(false); controller.pause(); screen.watch(false) }
   function end() { generation.current++; setSelecting(false); void screen.stop(); controller.end() }
   async function uploadScreens(selected: FileList | null) {
     if (!selected?.length) return
