@@ -70,6 +70,7 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
   const [error, setError] = useState<string | null>(null), [reading, setReading] = useState(false), [exportAllowed, setExportAllowed] = useState(false), [manualQuestion,setManualQuestion]=useState('')
   const [displays, setDisplays] = useState<NativeDisplay[]>([]), [displayId, setDisplayId] = useState(''), [selecting, setSelecting] = useState(false), [loadedReplay, setLoadedReplay] = useState(false)
   const screenshots = useRef<HTMLInputElement>(null), replayInput = useRef<HTMLInputElement>(null)
+  const selection = useRef<AbortController | null>(null)
   const generation = useRef(0), mounted = useRef(true), previousSpeech = useRef('')
   const activity = useRef(onActivity)
   useEffect(() => { activity.current = onActivity }, [onActivity])
@@ -88,7 +89,7 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
     return () => { live = false }
   }, [])
   useEffect(() => { if (!running) controller.configureLessons(lessonPolicy?.state.active ?? []) }, [controller, running, lessonPolicy?.state.active])
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; activity.current?.(false) } }, [])
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; selection.current?.abort(); activity.current?.(false) } }, [])
   useEffect(() => { activity.current?.(running) }, [running])
   useEffect(() => { if (permission && state.status === 'idle') controller.start(permission, presetObjective || 'Follow the interviewer’s task using only observed repository evidence.') }, [permission, presetObjective, controller, state.status])
   const ask = useCallback((question: string) => {
@@ -112,12 +113,13 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
     return () => clearInterval(timer)
   }, [controller, running])
   async function selectScreen(useNative = nativeAvailable()) {
+    selection.current?.abort(); selection.current = new AbortController()
     setError(null); setSelecting(true)
     const token = ++generation.current
     try {
       const selectedDisplay = useNative ? (displayId || (await nativeDisplays())[0]?.id || '') : ''
       if (useNative && !selectedDisplay) throw new Error('No desktop display is available for screen awareness.')
-      const source = useNative ? await nativeFrameSource(selectedDisplay) : await browserFrameSource(() => { if (mounted.current && token === generation.current) void screen.stop() })
+      const source = useNative ? await nativeFrameSource(selectedDisplay, selection.current.signal) : await browserFrameSource(() => { if (mounted.current && token === generation.current) void screen.stop() })
       if (!mounted.current || token !== generation.current || controller.getSnapshot().status !== 'running') { await source.stop(); return }
       await screen.attach(source, useNative ? 'native' : 'browser')
       if (!mounted.current || token !== generation.current || controller.getSnapshot().status !== 'running') { await screen.stop(); return }
@@ -126,8 +128,8 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
     finally { if (mounted.current && token === generation.current) setSelecting(false) }
   }
   function answerNow() { const typed=manualQuestion.trim(); const latest=typed || getter.current().trim(); if(latest){ ask(latest); setManualQuestion('') } else if(state.question){ void controller.run('talk',true); void controller.run('guide',true) } else setError('No question detected yet. Type the question, then press Answer.') }
-  function pause() { generation.current++; setSelecting(false); controller.pause(); screen.watch(false) }
-  function end() { generation.current++; setSelecting(false); void screen.stop(); controller.end() }
+  function pause() { selection.current?.abort(); generation.current++; setSelecting(false); controller.pause(); screen.watch(false) }
+  function end() { selection.current?.abort(); generation.current++; setSelecting(false); void screen.stop(); controller.end() }
   async function uploadScreens(selected: FileList | null) {
     if (!selected?.length) return
     const items = Array.from(selected), token = ++generation.current

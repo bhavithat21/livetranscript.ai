@@ -7,7 +7,10 @@ use tauri::{Manager, WebviewWindow};
 
 const LEASE: Duration = Duration::from_secs(90 * 60);
 #[derive(Clone)]
-struct Session { id: String, display: String, created: Instant, in_flight: Arc<AtomicBool> }
+struct Session { id: String, display: String, created: Instant, in_flight: Arc<AtomicBool>,
+    #[cfg(target_os = "macos")]
+    picker: Option<Arc<crate::screen_picker::PickerCapture>>,
+}
 #[derive(Default)]
 pub struct CoachCaptureState { session: Mutex<Option<Session>> }
 #[derive(Serialize)]
@@ -38,7 +41,13 @@ fn acquire(s: &Session) -> Result<Permit, String> {
     Ok(Permit(s.in_flight.clone()))
 }
 pub fn stop_all(app: &tauri::AppHandle) {
-    if let Some(state) = app.try_state::<CoachCaptureState>() { crate::lock(&state.session).take(); }
+    if let Some(state) = app.try_state::<CoachCaptureState>() {
+        if let Some(session) = crate::lock(&state.session).take() { stop_session(&session); }
+    }
+}
+fn stop_session(_session: &Session) {
+    #[cfg(target_os = "macos")]
+    if let Some(picker) = &_session.picker { picker.stop(); }
 }
 #[tauri::command]
 pub async fn coach_displays(window: WebviewWindow) -> Result<Vec<Display>, String> {
@@ -46,14 +55,36 @@ pub async fn coach_displays(window: WebviewWindow) -> Result<Vec<Display>, Strin
     tauri::async_runtime::spawn_blocking(platform_displays).await.map_err(|_| "Display discovery worker failed".to_string())?
 }
 #[tauri::command]
-pub async fn coach_start(window: WebviewWindow, state: tauri::State<'_, CoachCaptureState>, display_id: String, approved: bool) -> Result<Started, String> {
+pub async fn coach_start(window: WebviewWindow, state: tauri::State<'_, CoachCaptureState>, display_id: String, approved: bool, request_id: Option<String>) -> Result<Started, String> {
     trusted(&window)?;
     if !approved || display_id.len() > 40 || display_id.is_empty() { return Err("Select a display and explicitly approve capture".into()); }
     if !window.is_visible().unwrap_or(false) { return Err("Show the desktop window before approving screen capture".into()); }
-    let id = uuid::Uuid::new_v4().to_string();
-    let next = Session { id: id.clone(), display: display_id.clone(), created: Instant::now(), in_flight: Arc::new(AtomicBool::new(false)) };
+    let id = match request_id { Some(value) => uuid::Uuid::parse_str(&value).map_err(|_| "Invalid screen selection request")?.to_string(), None => uuid::Uuid::new_v4().to_string() };
+    let next = Session { id: id.clone(), display: display_id.clone(), created: Instant::now(), in_flight: Arc::new(AtomicBool::new(false)),
+        #[cfg(target_os = "macos")] picker: None,
+    };
     // A stop or newer start during asynchronous OS permission work invalidates this request.
-    *crate::lock(&state.session) = Some(next);
+    if let Some(previous) = crate::lock(&state.session).replace(next) { stop_session(&previous); }
+    #[cfg(target_os = "macos")]
+    if crate::macos_major_version() >= 14 {
+        let picker = crate::screen_picker::PickerCapture::start(window.app_handle())?;
+        {
+            let mut guard = crate::lock(&state.session);
+            match guard.as_mut().filter(|s| s.id == id) {
+                Some(session) => session.picker = Some(picker.clone()),
+                None => { picker.stop(); return Err("Screen sharing was cancelled.".into()); }
+            }
+        }
+        let result = tauri::async_runtime::spawn_blocking(move || picker.wait_ready()).await
+            .unwrap_or_else(|_| Err("Screen picker worker failed.".into()));
+        if let Err(error) = result {
+            let mut guard = crate::lock(&state.session);
+            if guard.as_ref().is_some_and(|s| s.id == id) { if let Some(s) = guard.take() { stop_session(&s); } }
+            return Err(error);
+        }
+        session(&state, &id)?;
+        return Ok(Started { lease_id: id });
+    }
     let result = tauri::async_runtime::spawn_blocking(move || {
         request_permission()?;
         if !platform_displays()?.iter().any(|d| d.id == display_id) { return Err("Selected display is no longer connected".into()); }
@@ -71,7 +102,7 @@ pub async fn coach_start(window: WebviewWindow, state: tauri::State<'_, CoachCap
 pub fn coach_stop(window: WebviewWindow, state: tauri::State<'_, CoachCaptureState>, lease_id: String) -> Result<(), String> {
     trusted(&window)?;
     let mut guard = crate::lock(&state.session);
-    if guard.as_ref().is_some_and(|s| s.id == lease_id) { guard.take(); }
+    if guard.as_ref().is_some_and(|s| s.id == lease_id) { if let Some(s) = guard.take() { stop_session(&s); } }
     Ok(())
 }
 #[tauri::command]
@@ -80,7 +111,16 @@ pub async fn coach_sample(window: WebviewWindow, state: tauri::State<'_, CoachCa
     let selected = session(&state, &lease_id)?;
     let permit = acquire(&selected)?;
     let display = selected.display.clone();
-    let sample = tauri::async_runtime::spawn_blocking(move || { let _permit = permit; platform_sample(&display) }).await.map_err(|_| "Screen sample worker failed".to_string())??;
+    #[cfg(target_os = "macos")]
+    let picker = selected.picker.clone();
+    let sample = tauri::async_runtime::spawn_blocking(move || { let _permit = permit;
+        #[cfg(target_os = "macos")]
+        if let Some(picker) = picker {
+            let image = image::load_from_memory(&picker.image()?).map_err(|_| "Invalid picker frame")?;
+            let gray = image.resize(640, 640, image::imageops::FilterType::Triangle).to_luma8();
+            return Ok(Sample { width: gray.width(), height: gray.height(), pixels: gray.into_raw().into_iter().map(|p| (p / 8) * 8).collect() });
+        }
+        platform_sample(&display) }).await.map_err(|_| "Screen sample worker failed".to_string())??;
     session(&state, &lease_id)?;
     Ok(sample)
 }
@@ -90,12 +130,21 @@ pub async fn coach_grab(window: WebviewWindow, state: tauri::State<'_, CoachCapt
     let selected = session(&state, &lease_id)?;
     let permit = acquire(&selected)?;
     let display = selected.display.clone();
-    let bytes = tauri::async_runtime::spawn_blocking(move || { let _permit = permit; platform_image(&display) }).await.map_err(|_| "Screen image worker failed".to_string())??;
+    #[cfg(target_os = "macos")]
+    let picker = selected.picker.clone();
+    let bytes = tauri::async_runtime::spawn_blocking(move || { let _permit = permit;
+        #[cfg(target_os = "macos")]
+        if let Some(picker) = picker { return picker.image(); }
+        platform_image(&display) }).await.map_err(|_| "Screen image worker failed".to_string())??;
     session(&state, &lease_id)?;
     Ok(tauri::ipc::Response::new(bytes))
 }
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 fn platform_displays() -> Result<Vec<Display>, String> {
+    #[cfg(target_os = "macos")]
+    if crate::macos_major_version() >= 14 {
+        return Ok(vec![Display { id: "system-picker".into(), name: "Choose a window or display".into(), width: 0, height: 0 }]);
+    }
     xcap::Monitor::all().map_err(|_| "Display discovery failed".to_string())?.iter().map(|m| {
         Ok(Display { id: m.id().map_err(|_| "Display id unavailable")?.to_string(), name: m.friendly_name().or_else(|_| m.name()).map_err(|_| "Display name unavailable")?, width: m.width().map_err(|_| "Display size unavailable")?, height: m.height().map_err(|_| "Display size unavailable")? })
     }).collect()
@@ -142,7 +191,7 @@ fn platform_image(_: &str) -> Result<Vec<u8>, String> { Err("Native screen evide
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn seeded() -> CoachCaptureState { CoachCaptureState { session: Mutex::new(Some(Session { id: "fixture".into(), display: "1".into(), created: Instant::now(), in_flight: Arc::new(AtomicBool::new(false)) })) } }
+    fn seeded() -> CoachCaptureState { CoachCaptureState { session: Mutex::new(Some(Session { id: "fixture".into(), display: "1".into(), created: Instant::now(), in_flight: Arc::new(AtomicBool::new(false)), #[cfg(target_os = "macos")] picker: None })) } }
     #[test] fn rejects_wrong_lease() { assert!(session(&seeded(), "other").is_err()); }
     #[test] fn stop_cannot_revive_session() { let state = seeded(); crate::lock(&state.session).take(); assert!(session(&state, "fixture").is_err()); }
     #[test] fn bounds_concurrent_capture() { let s = session(&seeded(), "fixture").unwrap(); let p = acquire(&s).unwrap(); assert!(acquire(&s).is_err()); drop(p); assert!(acquire(&s).is_ok()); }

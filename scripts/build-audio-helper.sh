@@ -9,7 +9,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/../src-tauri/binaries"
 SRC=audio-capture.swift
-FRAMEWORKS=(-framework ScreenCaptureKit -framework CoreMedia -framework AVFoundation)
+FRAMEWORKS=(-framework ScreenCaptureKit -framework CoreMedia -framework AVFoundation -framework AppKit -framework CoreImage)
 # Embed an Info.plist section: a bare helper binary has no bundle, so without
 # this TCC can't attribute the CoreAudio process-tap permission to it — the tap
 # "starts" (noErr) but silently delivers zero frames when spawned by the app.

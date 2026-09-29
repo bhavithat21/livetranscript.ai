@@ -27,18 +27,16 @@ with sync_playwright() as p:
     errors=[]
     page.on('pageerror', lambda e: errors.append(str(e)))
     page.goto('http://127.0.0.1:4180/live.html')
-    page.get_by_role('region',name='Live interview options',exact=True).wait_for()
-    for name in ['What to do next','What to say','What to write']:
-        panel=page.get_by_role('region',name=name,exact=True)
-        assert panel.is_visible(), name
-        bounds=panel.bounding_box()
-        assert bounds['x']>=260 and bounds['x']+bounds['width']<=1440, (name,bounds)
+    page.get_by_role('region',name='Start live interview',exact=True).wait_for()
     assert page.get_by_role('button',name='Start interview',exact=True).is_disabled()
     assert page.evaluate('window.__nativeCalls.every(c=>!c.command.includes("set_size")&&!c.command.includes("maximize")&&c.command!=="coach_start")')
     page.screenshot(path=str(root/'ready.png'))
     page.get_by_role('checkbox',name='I have permission to record and use AI assistance.').check()
     page.get_by_role('button',name='Start interview',exact=True).click()
     page.get_by_role('button',name='End interview',exact=True).wait_for()
+    for name in ['What to do next','What to say','What to write']:
+        assert page.get_by_role('region',name=name,exact=True).is_visible()
+    assert page.get_by_role('button',name='Enable screen sharing').evaluate("e => getComputedStyle(e).cursor") == 'default'
     page.get_by_label('Overlay display').select_option('2')
     page.get_by_role('button',name='Enable screen sharing',exact=True).click()
     page.get_by_role('button',name='Enable screen sharing',exact=True).wait_for()

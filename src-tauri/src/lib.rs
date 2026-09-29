@@ -19,6 +19,8 @@ use tauri::ipc::{Channel, InvokeResponseBody};
 
 mod remote_assist;
 mod coach_capture;
+#[cfg(target_os = "macos")]
+mod screen_picker;
 
 #[cfg(target_os = "macos")]
 mod macos_capture;

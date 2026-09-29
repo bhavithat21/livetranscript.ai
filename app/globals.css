@@ -647,3 +647,7 @@ html.lt-desktop.lt-overlay-mode .lt-overlay-root,html.lt-desktop.lt-overlay-mode
 /* Confined native app frame: one clean boundary instead of content floating edge-to-edge. */
 html.lt-desktop:not(.lt-overlay-mode) body{padding:10px;background:transparent!important}
 html.lt-desktop:not(.lt-overlay-mode) body>div#__next,html.lt-desktop:not(.lt-overlay-mode) body>main{border:1px solid rgba(130,151,181,.28);border-radius:14px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.28)}
+
+/* Keep the arrow stable throughout the desktop app, including inputs and buttons. */
+html.lt-desktop,html.lt-desktop *,html.lt-desktop *::before,html.lt-desktop *::after,.lt-overlay-root *{cursor:default!important}
+html.lt-desktop textarea{resize:none}
