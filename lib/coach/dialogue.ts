@@ -13,9 +13,9 @@ export function updateDialogue(current: DialogueTurn[], raw: DialogueTurn): Dial
   const turn = parseDialogueTurn(raw)
   const old = current.find(item => item.sourceId === turn.sourceId)
   if (old && old.at === turn.at && old.role === turn.role && old.text === turn.text) return current
-  return [...current.filter(item => item.sourceId !== turn.sourceId), turn].sort((a,b) => a.at-b.at).slice(-24)
+  return [...current.filter(item => item.sourceId !== turn.sourceId), turn].sort((a,b) => a.at-b.at).slice(-120)
 }
 
 export function dialogueContext(turns: DialogueTurn[]): DialogueTurn[] {
-  return turns.slice(-8).map(turn => ({ ...turn, text: turn.text.slice(-400) }))
+  return turns.slice(-40).map(turn => ({ ...turn, text: turn.text.slice(-400) }))
 }
