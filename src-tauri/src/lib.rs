@@ -599,6 +599,18 @@ pub fn run() {
                     })
                     .ok();
 
+                // Easier lock escape: CmdOrCtrl+Shift+Space mirrors the L shortcut.
+                // It is deliberately global because a click-through window cannot receive clicks.
+                let lock_space = Shortcut::new(Some(Modifiers::SHIFT | primary), Code::Space);
+                app.global_shortcut()
+                    .on_shortcut(lock_space, move |app, shortcut, event| {
+                        if event.state == ShortcutState::Pressed && shortcut == &lock_space {
+                            let handle = app.clone();
+                            std::thread::spawn(move || toggle_lock(&handle));
+                        }
+                    })
+                    .ok();
+
                 // Tray-only mode: build the tray FIRST, then hide the Dock icon
                 // (macOS Accessory policy; Windows uses skipTaskbar in the config).
                 // Order matters: if the tray fails to build, we must NOT demote to

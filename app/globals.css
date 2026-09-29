@@ -626,3 +626,16 @@ html:not(.lt-desktop):not(.lt-dark) :is(.text-black\/30, .text-black\/35, .text-
 .live-scroll-resume:hover { background: var(--hover-surface); }
 
 .brand-mark { color: var(--brand-citrus, #dde873); display: inline-flex; flex-shrink: 0; vertical-align: middle; }
+
+/* Native interview overlay mode: the normal workspace remains mounted for session state but is visually removed. The portal is the only visible desktop surface, allowing Chrome/Teams/HackerRank to show through the transparent Tauri window. */
+html.lt-desktop.lt-overlay-mode,html.lt-desktop.lt-overlay-mode body{background:transparent!important;padding-top:0!important;overflow:hidden!important}
+html.lt-desktop.lt-overlay-mode body>*:not(.lt-overlay-root){visibility:hidden!important;pointer-events:none!important}
+html.lt-desktop.lt-overlay-mode .lt-overlay-root{visibility:visible!important;pointer-events:auto!important}
+
+/* Native live-interview overlay mode: the web application shell becomes optically absent.
+   Only the portalled overlay root paints pixels; Chrome/HackerRank remains visible behind it. */
+html.lt-desktop.lt-overlay-mode,html.lt-desktop.lt-overlay-mode body{background:transparent!important;padding:0!important;overflow:hidden!important}
+html.lt-desktop.lt-overlay-mode body>*:not(.lt-overlay-root){visibility:hidden!important;pointer-events:none!important}
+html.lt-desktop.lt-overlay-mode .lt-overlay-root{visibility:visible!important;pointer-events:auto!important;position:fixed!important;inset:0!important;margin:0!important;border:0!important;border-radius:0!important;background:transparent!important;z-index:2147483000!important}
+html.lt-desktop.lt-overlay-mode .lt-overlay-root [class*='canvas']{background:transparent!important;height:calc(100dvh - 44px)!important;min-height:0!important}
+html.lt-desktop.lt-overlay-mode .lt-overlay-root [class*='canvas']::after{display:none!important}
