@@ -2,29 +2,37 @@ import { KeyframeGate, type FrameSignal } from './keyframes'
 import { hashText, parseObservation } from './validation'
 import type { Observation } from './types'
 import { diagnosticSpan, recordDiagnostic, diagnosticCode } from './diagnostics'
+import { failurePolicy, responseFailure, retryRead } from './retry'
+import { retryDisplay } from './retryStatus'
 
 export type ScreenStatus = { sharing: boolean; watching: boolean; reading: boolean; captures: number; localSamples: number; error: string | null; source: 'browser' | 'native' | null; lastSampleAt: number | null; lastCaptureAt: number | null; gateReason: 'initial' | 'changed' | 'unchanged' | 'settling' | 'throttled' | 'busy' | null; changedTiles: number }
 export type FrameSource = { signal: () => Promise<FrameSignal | null>; image: () => Promise<string | null>; stop: () => void | Promise<void>; preview?: MediaStream }
-export type CaptureTransport = (image: string, signal: AbortSignal) => Promise<Observation>
-export const httpCapture: CaptureTransport = async (image, signal) => {
-  const trace = diagnosticSpan('screen_model')
+export type CaptureTransport = (image: string, signal: AbortSignal, options?: { beforeRetry?: () => boolean }) => Promise<Observation>
+export const httpCapture: CaptureTransport = async (image, signal, options) => {
+  const trace = diagnosticSpan('screen_model'), display = retryDisplay('screen_model')
   let status: number | undefined
   try {
-    const response = await fetch('/api/copilot/repo-screen', { method: 'POST', headers: { 'Content-Type': 'application/json', ...trace.headers() }, body: JSON.stringify({ image }), signal })
-    status = response.status
-    if (!response.ok) {
-      const message = response.status === 401 ? 'Sign in again to enable screen analysis.' : response.status === 429 ? 'Screen analysis limit reached. Try again later.' : response.status === 503 ? 'Screen analysis is unavailable. Check the vision provider configuration.' : `Screen analysis failed (${response.status}). Try again.`
-      let detail = message
-      try { const body = await response.json() as { error?: unknown }; if (typeof body.error === 'string' && body.error.length <= 500) detail = body.error } catch { /* proxy HTML */ }
-      throw new Error(detail)
-    }
-    const raw = await response.text()
-    if (raw.length > 400_000) throw new Error('Screenshot response exceeded its budget')
-    const result = JSON.parse(raw)
-    const observation = parseObservation(result.observation)
-    trace.end('success', { httpStatus: status, model: result.model, count: observation.files.length })
-    return observation
-  } catch (error) { trace.failure(error, status); throw error }
+    return await retryRead(async (attemptSignal, attempt) => {
+      status = undefined
+      const response = await fetch('/api/copilot/repo-screen', { method: 'POST', headers: { 'Content-Type': 'application/json', ...trace.headers(), 'x-lt-attempt': String(attempt) }, body: JSON.stringify({ image }), signal: attemptSignal })
+      status = response.status
+      if (!response.ok) {
+        let detail = response.status === 401 ? 'Sign in again to enable screen analysis.' : response.status === 429 ? 'Screen analysis limit reached. Try again later.' : response.status === 503 ? 'Screen analysis is unavailable. Check the vision provider configuration.' : `Screen analysis failed (${response.status}). Try again.`
+        try { const body = await response.json() as { error?: unknown }; if (typeof body.error === 'string' && body.error.length <= 500) detail = body.error } catch { /* proxy HTML */ }
+        throw responseFailure(response, detail)
+      }
+      const raw = await response.text()
+      if (raw.length > 400_000) throw new Error('Screenshot response exceeded its budget')
+      const result = JSON.parse(raw)
+      const observation = parseObservation(result.observation)
+      attemptSignal.throwIfAborted()
+      trace.end('success', { httpStatus: status, model: result.model, count: observation.files.length, retryAttempt: attempt })
+      return observation
+    }, { signal, timeoutMs: 18_000, beforeRetry: options?.beforeRetry,
+      onRetry: notice => { display.retry(notice); trace.event('retry', { attempts: notice.attempt, delayMs: notice.delayMs, httpStatus: notice.status }) },
+    })
+  } catch (error) { trace.failure(error, failurePolicy(error).status ?? status); throw error }
+  finally { display.finish() }
 }
 export class ScreenObserver {
   private source: FrameSource | null = null
@@ -90,18 +98,22 @@ export class ScreenObserver {
     }
     void tick()
   }
+  private reserveRequest(): boolean {
+    const now = Date.now()
+    this.requests = this.requests.filter(at => now - at < 60_000)
+    if (this.totalRequests >= 180 || this.requests.length >= 20) return false
+    this.requests.push(now); this.totalRequests++; return true
+  }
   async capture(image: string, capturedAt = Date.now()): Promise<boolean> {
     if (this.controller) return false
     if (!/^data:image\/(?:png|jpeg|webp);base64,/.test(image) || image.length > 6_000_000) { this.update({ error: 'Use a PNG, JPEG or WebP screenshot under 4.4 MB.', watching: false }); return false }
-    const now = Date.now()
-    this.requests = this.requests.filter(at => now - at < 60_000)
-    if (this.totalRequests >= 180 || this.requests.length >= 20) { this.update({ error: 'Screenshot analysis budget reached. Watch paused; narrow the window and resume when ready.', watching: false }); return false }
+    if (!this.reserveRequest()) { this.update({ error: 'Screenshot analysis budget reached. Watch paused; narrow the window and resume when ready.', watching: false }); return false }
     const controller = new AbortController(), generation = this.generation
-    this.controller = controller; this.requests.push(now); this.totalRequests++
+    this.controller = controller
     this.update({ reading: true, error: null })
     const timeout = setTimeout(() => controller.abort(), 18_000)
     try {
-      const observation = parseObservation(await this.transport(image, controller.signal))
+      const observation = parseObservation(await this.transport(image, controller.signal, { beforeRetry: () => generation === this.generation && !controller.signal.aborted && this.reserveRequest() }))
       if (controller.signal.aborted || generation !== this.generation) return false
       this.onObservation(observation, capturedAt)
       this.update({ captures: this.status.captures + 1, lastCaptureAt: capturedAt })

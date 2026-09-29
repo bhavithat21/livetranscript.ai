@@ -1,7 +1,7 @@
 /** Diagnostics are metadata, never a general-purpose log sink. Both boundaries
  * rebuild from allowlists. Do not add messages, stacks, URLs, paths or content. */
 export const STAGES = ['app', 'audio', 'transcription', 'screen', 'screen_model', 'talk', 'guide', 'review'] as const
-export const EVENTS = ['start', 'ready', 'first_frame', 'first_partial', 'first_final', 'first_token', 'heartbeat', 'success', 'error', 'cancelled', 'stop', 'paused', 'stall', 'feedback', 'offline', 'online', 'upload_test'] as const
+export const EVENTS = ['start', 'ready', 'first_frame', 'first_partial', 'first_final', 'first_token', 'heartbeat', 'success', 'error', 'cancelled', 'stop', 'paused', 'stall', 'feedback', 'offline', 'online', 'upload_test', 'retry'] as const
 export const CODES = ['permission_denied', 'unavailable', 'network', 'timeout', 'cancelled', 'unauthorized', 'rate_limited', 'provider_unavailable', 'invalid_json', 'invalid_path', 'invalid_language', 'invalid_lines', 'invalid_confidence', 'invalid_shape', 'incomplete_stream', 'unknown'] as const
 export type Stage = typeof STAGES[number]
 export type DiagnosticEventName = typeof EVENTS[number]
@@ -9,7 +9,7 @@ export type DiagnosticCode = typeof CODES[number]
 export type Attributes = Record<string, string | number | boolean>
 export type DiagnosticEvent = { v: 1; sessionId: string; operationId: string; seq: number; at: number; stage: Stage; event: DiagnosticEventName; attrs: Attributes }
 export const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i
-const NUMBERS = new Set(['durationMs', 'firstTokenMs', 'frames', 'bytes', 'partials', 'finals', 'count', 'attempts', 'dropped', 'sampleAgeMs', 'captureAgeMs', 'evidenceAgeMs'])
+const NUMBERS = new Set(['durationMs', 'firstTokenMs', 'frames', 'bytes', 'partials', 'finals', 'count', 'attempts', 'dropped', 'sampleAgeMs', 'captureAgeMs', 'evidenceAgeMs', 'retryAttempt', 'delayMs'])
 const ENUMS: Record<string, readonly string[]> = {
   code: CODES, channel: ['mic', 'system'], source: ['browser', 'native'], runtime: ['web', 'desktop'],
   phase: ['idle', 'starting', 'recording', 'stopping'], gate: ['initial', 'changed', 'unchanged', 'settling', 'throttled', 'busy'],
@@ -48,8 +48,6 @@ export function diagnosticCode(error: unknown, status?: number): DiagnosticCode 
   if (status === 401 || status === 403) return 'unauthorized'
   if (status === 429) return 'rate_limited'
   if (status === 404 || status === 503) return 'provider_unavailable'
-  // DOMException and cross-webview errors need not inherit this realm's Error.
-  // Read only bounded name/message for categorization, never serialize either.
   let message = '', name = ''
   try {
     if (typeof error === 'string') message = error.slice(0, 2048)

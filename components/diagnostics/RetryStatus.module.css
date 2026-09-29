@@ -1,0 +1,3 @@
+.notice { position: fixed; right: 16px; bottom: 64px; z-index: 210; max-width: min(360px, calc(100vw - 32px)); padding: 12px 16px; border: 1px solid #d4a65c; border-radius: 10px; background: #fff8eb; color: #493314; box-shadow: 0 4px 18px #0002; pointer-events: none; font-size: 13px; }
+.notice p { margin: 0 0 4px; }
+.notice small { display: block; opacity: .8; }
