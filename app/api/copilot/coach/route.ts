@@ -8,7 +8,7 @@ import { parseContext } from '@/lib/coach/context'
 import { object, parseGuidance } from '@/lib/coach/validation'
 import { lessonIds, lessonPrompt, type LessonId } from '@/lib/coach/learning/policy'
 import { coachPrompt } from '@/lib/coach/prompts'
-import type { ContextPacket, Lane } from '@/lib/coach/types'
+import type { ContextPacket, Lane } from '@/lib/coach/types'\nimport { judgeLiveContext, routeDecision } from '@/lib/coach/typesafe'
 
 export const maxDuration = 40
 export async function POST(req: Request) {
@@ -42,7 +42,7 @@ export async function POST(req: Request) {
     async start(controller) {
       const emit = (value: Record<string, unknown>) => { if (!closed && !signal.aborted) controller.enqueue(encoder.encode(`${JSON.stringify(value)}\n`)) }
       try {
-        emit({ type: 'started', lane, evidenceVersion: context.evidenceVersion })
+        emit({ type: 'started', lane, evidenceVersion: context.evidenceVersion, decision })
         const request = { model, system: coachPrompt(lane) + lessonPrompt(lessons), evidence: JSON.stringify(context), signal, maxTokens: lane === 'talk' ? 512 : lane === 'review' ? 2200 : 3400 }
         if (lane === 'talk') {
           let returned = model, visible = '', firstTextMs: number | null = null
@@ -60,7 +60,7 @@ export async function POST(req: Request) {
           const guidance = parseGuidance(JSON.parse(result.text.trim()), context)
           emit({ type: 'done', model: result.model, guidance, elapsedMs: Math.round(performance.now() - started) })
         }
-        recordUsage('repo-coach', userId, { lane, model, inputTokens: usage?.inputTokens, outputTokens: usage?.outputTokens, elapsedMs: Math.round(performance.now() - started) })
+        recordUsage('repo-coach', userId, { lane, model, inputTokens: usage?.inputTokens, outputTokens: usage?.outputTokens, elapsedMs: Math.round(performance.now() - started), decisionSource: decision.source, decisionModel: decision.model, decisionMs: decision.elapsedMs, decisionTask: decision.task })
       } catch {
         if (!closed && !req.signal.aborted) controller.enqueue(encoder.encode(`${JSON.stringify({ type: 'error', error: 'Assistance stopped, timed out or returned unsupported evidence. Retry explicitly.' })}\n`))
       } finally { if (!closed) { closed = true; controller.close() } }
