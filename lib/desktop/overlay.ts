@@ -3,6 +3,9 @@ export async function setNativeOverlayLock(enabled:boolean):Promise<boolean>{if(
 export async function getNativeOverlayLock():Promise<boolean>{if(!nativeDesktopAvailable())return false;const{invoke}=await import('@tauri-apps/api/core');return Boolean(await invoke('get_lock_mode'))}
 export async function setNativeCaptureProtection(enabled=true):Promise<boolean>{if(!nativeDesktopAvailable())return false;const{invoke}=await import('@tauri-apps/api/core');await invoke('set_content_protection',{enabled});return true}
 
-export async function setNativeOverlayWindowSize(preset:'small'|'medium'|'large'):Promise<boolean>{if(!nativeDesktopAvailable())return false;const[{getCurrentWindow},{PhysicalSize}]=await Promise.all([import('@tauri-apps/api/window'),import('@tauri-apps/api/dpi')]);const sizes={small:[760,520],medium:[1050,700],large:[1360,860]} as const;const[w,h]=sizes[preset];await getCurrentWindow().setSize(new PhysicalSize(w,h));await getCurrentWindow().center();return true}
+export async function setNativeOverlayWindowSize(preset:'small'|'medium'|'large'):Promise<boolean>{if(!nativeDesktopAvailable())return false;const[{getCurrentWindow},{PhysicalSize}]=await Promise.all([import('@tauri-apps/api/window'),import('@tauri-apps/api/dpi')]);const sizes={small:[760,520],medium:[1050,700],large:[1360,860]} as const;const[w,h]=sizes[preset];await getCurrentWindow().unmaximize();await getCurrentWindow().setSize(new PhysicalSize(w,h));await getCurrentWindow().center();return true}
 
 export async function setNativeOverlayVisible(visible:boolean):Promise<boolean>{if(!nativeDesktopAvailable())return false;const{getCurrentWindow}=await import('@tauri-apps/api/window');const w=getCurrentWindow();if(visible){await w.show();await w.setFocus()}else await w.hide();return true}
+
+// Maximize on explicit session start, never on render or subsequent resize.
+export async function maximizeLiveInterviewWindow():Promise<boolean>{if(!nativeDesktopAvailable())return false;const{getCurrentWindow}=await import('@tauri-apps/api/window');await getCurrentWindow().maximize();return true}

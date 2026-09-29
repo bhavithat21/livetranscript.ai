@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 import { useProactive } from '@/lib/copilot/useProactive'
 import { CoachController, httpCoachTransport, type CoachTransport } from '@/lib/coach/controller'
 import { ScreenObserver, browserFrameSource, httpCapture, type CaptureTransport } from '@/lib/coach/screen'
-import { nativeAvailable, nativeDisplays, nativeFrameSource, type NativeDisplay } from '@/lib/coach/native'
+import { nativeAvailable, nativeDisplays, nativeFrameSource, openScreenRecordingSettings, type NativeDisplay } from '@/lib/coach/native'
 import { fileCoverage, resultCurrent } from '@/lib/coach/state'
 import { nextInspection } from '@/lib/coach/context'
 import type { CoachState, Permission, ResultRecord, DialogueTurn } from '@/lib/coach/types'
@@ -16,6 +16,8 @@ import { OverlayWorkspace } from './OverlayWorkspace'
 const EMPTY_TRANSCRIPT = () => ''
 type Resources = { controller: CoachController; screen: ScreenObserver }
 export type RepositoryCoachProps = {
+  overlayControls?: React.ReactNode
+  overlayVisible?: boolean
   getQuestionTranscript?: () => string
   getConversation?: () => DialogueTurn[]
   permission?: Permission
@@ -59,7 +61,7 @@ function ReviewButtons({ result, state, controller }: { result: ResultRecord; st
     {expanded && <><label>What should improve?<select className={styles.input} value={category} onChange={event => setCategory(event.target.value)}><option value="correctness">Correctness</option><option value="directness">Directness / spoken clarity</option><option value="navigation">Wrong file or location</option><option value="stale-context">Stale or missing context</option><option value="latency">Response time</option><option value="verbosity">Too much detail</option></select></label><label>Review note<textarea className={styles.input} maxLength={1500} rows={3} value={note} onChange={event => setNote(event.target.value)} /></label><button className={styles.button} onClick={() => { controller.feedback(result.id, 'needs-work', [category], note); setExpanded(false) }}>Save review</button></>}
   </div>
 }
-function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRANSCRIPT, getConversation, permission, objective: presetObjective, onActivity }: Omit<RepositoryCoachProps, 'onReady' | 'transport' | 'captureTransport'> & Resources) {
+function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRANSCRIPT, getConversation, permission, objective: presetObjective, onActivity, overlayControls, overlayVisible = true }: Omit<RepositoryCoachProps, 'onReady' | 'transport' | 'captureTransport'> & Resources) {
   const lessonPolicy = useLessonPolicy()
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot)
   const capture = useSyncExternalStore(screen.subscribe, screen.getSnapshot, screen.getSnapshot)
@@ -76,6 +78,15 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
   const dialogueGetter = useRef(getConversation)
   useEffect(() => { dialogueGetter.current = getConversation }, [getConversation])
   const running = state.status === 'running'
+  useEffect(() => {
+    if (!nativeAvailable()) return
+    let live = true
+    void nativeDisplays().then(items => {
+      if (!live) return
+      setDisplays(items); setDisplayId(items[0]?.id || '')
+    }).catch(() => { if (live) setError('Could not find displays. Check screen-recording permission, then refresh displays.') })
+    return () => { live = false }
+  }, [])
   useEffect(() => { if (!running) controller.configureLessons(lessonPolicy?.state.active ?? []) }, [controller, running, lessonPolicy?.state.active])
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; activity.current?.(false) } }, [])
   useEffect(() => { activity.current?.(running) }, [running])
@@ -111,7 +122,7 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
       await screen.attach(source, useNative ? 'native' : 'browser')
       if (!mounted.current || token !== generation.current || controller.getSnapshot().status !== 'running') { await screen.stop(); return }
       screen.watch(true)
-    } catch (failure) { if (mounted.current && token === generation.current) setError(failure instanceof Error ? failure.message : 'Screen sharing is unavailable.') }
+    } catch (failure) { if (mounted.current && token === generation.current) setError(failure instanceof Error ? failure.message : typeof failure === 'string' ? failure : 'Screen sharing is unavailable.') }
     finally { if (mounted.current && token === generation.current) setSelecting(false) }
   }
   function answerNow() { const typed=manualQuestion.trim(); const latest=typed || getter.current().trim(); if(latest){ ask(latest); setManualQuestion('') } else if(state.question){ void controller.run('talk',true); void controller.run('guide',true) } else setError('No question detected yet. Type the question, then press Answer.') }
@@ -173,11 +184,22 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
         {replay.references.length > 0 && <details className={styles.details}><summary>Previous responses and saved feedback · reference only</summary><ul className={styles.list}>{replay.references.map((item, index) => <li key={`${item.id}-${index}`}><strong>{item.lane} · {item.model || 'Model not recorded'} · {item.verdict || 'Not reviewed'}</strong><pre className={styles.code}>{item.text || item.summary}</pre>{item.note && <p>Review: {item.note}</p>}</li>)}</ul></details>}
       </section>}
       {state.status === 'paused' && <p className={styles.notice}>Coach paused. No new model calls or screen analysis. The parent interview’s audio capture has separate controls.</p>}
-      <OverlayWorkspace status={<span>{error ? 'Attention needed' : failed ? 'AI error' : talk?.status === 'running' || guiding ? 'Answering…' : state.question ? 'Ready' : 'Listening…'}</span>} next={<div><strong>{error ? 'Fix screen awareness' : failed ? 'Retry the AI response' : next ? `Open ${next.path}${next.startLine ? ` near line ${next.startLine}` : ''}` : state.question ? 'Explain the approach, then implement it.' : 'Listen for the next interviewer question.'}</strong>{error && <p className={styles.muted}>{error}</p>}</div>}
+      {overlayVisible && <OverlayWorkspace controls={native ? <>{overlayControls}<details open><summary>Screen and answer controls</summary><div className={styles.controls}>
+        <input className={styles.input} aria-label="Overlay interview question" placeholder="Type a question" value={manualQuestion} onChange={event => setManualQuestion(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); answerNow() } }} /><button disabled={!running} onClick={answerNow}>Answer</button>
+        <button disabled={!running || selecting} onClick={() => void nativeDisplays().then(items => { setDisplays(items); setDisplayId(items[0]?.id || '') }).catch(() => setError('Could not find displays. Check screen-recording permission.'))}>Refresh displays</button>
+        {displays.length > 0 && <label>Display <select aria-label="Overlay display" value={displayId} onChange={event => setDisplayId(event.target.value)}>{displays.map(display => <option key={display.id} value={display.id}>{display.name} · {display.width} × {display.height}</option>)}</select></label>}
+        <button disabled={!running || selecting || reading || capture.reading} onClick={() => void selectScreen(native)}>{selecting ? 'Connecting…' : capture.sharing ? 'Reconnect screen' : 'Enable screen sharing'}</button>
+        <p>Shares the selected display with AI. Changed views are analyzed automatically until you pause or stop sharing.</p>
+        <span role="status">{capture.error ? 'Screen needs attention' : capture.reading ? 'Reading screen…' : capture.watching ? capture.lastSampleAt ? 'Screen connected · watching changes' : 'Connecting to screen…' : capture.sharing ? 'Screen paused' : 'Screen sharing is off'}</span>
+        {(error || capture.error) && <><p role="alert">{error || capture.error}</p><button onClick={() => void openScreenRecordingSettings().catch(() => setError('Open System Settings → Privacy & Security → Screen & System Audio Recording, enable LiveTranscript, then quit and reopen the app.'))}>Open screen permission settings</button><button disabled={!running || selecting} onClick={() => void selectScreen(native)}>Retry screen sharing</button></>}
+        {capture.sharing && <><button onClick={() => screen.watch(!capture.watching)}>{capture.watching ? 'Pause screen watch' : 'Watch changes'}</button><button onClick={() => void screen.stop()}>Stop sharing</button><span>{capture.watching ? 'Automatic screen analysis is active.' : 'Screen analysis paused.'}</span></>}
+        {running ? <button onClick={pause}>Pause coach</button> : state.status === 'paused' && <button onClick={() => controller.resume()}>Resume coach</button>}
+        {failed && <button disabled={!running} onClick={() => void controller.run(failed.lane, true)}>Retry {failed.lane}</button>}
+      </div></details></> : undefined} status={<span>{error || capture.error ? 'Attention needed' : failed ? 'AI error' : talk?.status === 'running' || guiding ? 'Answering…' : state.question ? 'Ready' : 'Listening…'}</span>} next={<div><strong>{error || capture.error ? 'Fix screen awareness' : failed ? 'Retry the AI response' : next ? `Open ${next.path}${next.startLine ? ` near line ${next.startLine}` : ''}` : state.question ? 'Explain the approach, then implement it.' : 'Listen for the next interviewer question.'}</strong>{(error || capture.error || failed?.error) && <p role="alert" className={styles.muted}>{error || capture.error || failed?.error}</p>}</div>}
         say={<div><div className={styles.talk}>{talk?.text || 'Listening for the next question…'}</div>{talk?.status === 'running' && <div className={styles.status}>Composing…</div>}</div>}
         code={<div>{guiding && <div className={styles.status}>Analyzing visible code…</div>}{guide?.guidance ? <><p className={styles.next}>{guide.guidance.summary}</p>{guide.guidance.patches.map(patch => <div key={patch.id}><p className={styles.codeLabel}>{patch.path} · line {patch.startLine}</p><pre className={styles.code}>{patch.after}</pre><p className={styles.muted}>{patch.reason}</p></div>)}{guide.guidance.findings.slice(0,4).map((finding,index)=><p key={index} className={styles.next}><strong>{finding.severity}</strong> · {finding.text}</p>)}</> : <p className={styles.empty}>Waiting for enough evidence to produce exactly what to write.</p>}</div>}
         writing={<div>{guide?.guidance?.patches?.[0] ? <><strong>{guide.guidance.patches[0].reason}</strong><p className={styles.muted}>Say this while entering the suggested block; explain intent and invariant rather than reading syntax aloud.</p></> : <span className={styles.muted}>When code is ready, this shows the short explanation to say while writing it.</span>}</div>}
-        transcript={<div><strong className={styles.question}>{state.question?.text || 'Waiting for the interviewer’s next question…'}</strong><p className={styles.muted}>The full transcript remains available from the interview controls.</p></div>} />
+        transcript={<div><strong className={styles.question}>{state.question?.text || 'Waiting for the interviewer’s next question…'}</strong><p className={styles.muted}>The full transcript remains available from the interview controls.</p></div>} />}
       <div className={styles.layout}>
         <div className={styles.main} data-testid="coach-main">
           <div className={styles.eyebrow}>Current question</div><h3 className={styles.question}>{state.question?.text || 'Listening for the interviewer’s next question…'}</h3>

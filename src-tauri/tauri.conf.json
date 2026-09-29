@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "LiveTranscript",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "identifier": "ai.livetranscript.desktop",
   "build": {
     "frontendDist": "https://livetranscript.ai"
@@ -19,7 +19,9 @@
         "decorations": false,
         "transparent": true,
         "contentProtected": true,
-        "skipTaskbar": true
+        "skipTaskbar": true,
+        "url": "https://livetranscript.ai/interview#live",
+        "maximized": true
       }
     ],
     "macOSPrivateApi": true,
@@ -31,7 +33,9 @@
     "active": true,
     "targets": "all",
     "createUpdaterArtifacts": true,
-    "externalBin": ["binaries/audio-capture"],
+    "externalBin": [
+      "binaries/audio-capture"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

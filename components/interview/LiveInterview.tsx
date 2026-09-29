@@ -1,5 +1,5 @@
 'use client'
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react'
 import { AudioLines, Download, FileText, Headphones, Mic, Monitor, Play, Settings2, ShieldCheck, Sparkles, Square } from 'lucide-react'
 import { ReadingControls } from '@/components/transcript/ReadingControls'
 import { ListeningIndicator } from '@/components/transcript/ListeningIndicator'
@@ -7,6 +7,9 @@ import { useTextScale } from '@/lib/transcript/useTextScale'
 import { liveTurns, voiceLabel, type ChannelSegment } from '@/lib/interview/liveTurns'
 import { LiveScrollArea } from '@/components/transcript/LiveScrollArea'
 import { LiveAnswerCanvas } from './LiveAnswerCanvas'
+import { openScreenRecordingSettings } from '@/lib/coach/native'
+import { nativeDesktopAvailable, maximizeLiveInterviewWindow } from '@/lib/desktop/overlay'
+import { OverlayWorkspace } from '@/components/coach/OverlayWorkspace'
 import { RepositoryCoach } from '@/components/coach/RepositoryCoach'
 import { useKeytermPrefs } from '@/lib/transcription/useKeytermPrefs'
 import { liveTranscript, useInterviewRecorder } from '@/lib/interview/useInterviewRecorder'
@@ -17,7 +20,9 @@ import type { DialogueTurn } from '@/lib/coach/types'
 import type { InterviewSession } from '@/lib/interview/session'
 import styles from './Interview.module.css'
 
-export function LiveInterview({ blocked, onActivity, onComplete, videoTest = false }: {
+const subscribeDesktop = () => () => {}
+
+export function LiveInterview({ visible, blocked, onActivity, onComplete, videoTest = false }: {
   videoTest?: boolean; visible: boolean; blocked: boolean; onActivity: (active: boolean) => void
   onComplete: (session: InterviewSession) => void
 }) {
@@ -30,7 +35,9 @@ export function LiveInterview({ blocked, onActivity, onComplete, videoTest = fal
   const [source, setSource] = useState<'both' | 'system' | 'mic'>(videoTest ? 'system' : 'both')
   const [title, setTitle] = useState(videoTest ? 'Video coding test' : 'Live interview')
   const [consent, setConsent] = useState(false)
-  const [repositoryMode, setRepositoryMode] = useState(videoTest)
+  const native = useSyncExternalStore(subscribeDesktop, nativeDesktopAvailable, () => false)
+  const [repositoryChoice, setRepositoryMode] = useState<boolean | null>(null)
+  const repositoryMode = repositoryChoice ?? (videoTest || native)
   const [active, setActive] = useState(false)
   const [busy, setBusy] = useState(false)
   const [finishing, setFinishing] = useState(false)
@@ -76,6 +83,7 @@ export function LiveInterview({ blocked, onActivity, onComplete, videoTest = fal
 
   async function begin() {
     if (activity.current || blocked || !consent) return
+    void maximizeLiveInterviewWindow().catch(() => setError('Could not maximize the window. Use Zoom or resize it manually.'))
     const token = ++lifecycle.current
     activity.current = true; ending.current = false; sessionId.current = crypto.randomUUID(); startTime.current = Date.now()
     setInterviewerSpeaker(null); setCaptureStartedAt(startTime.current); setElapsed(0); setError(null); setBusy(true); setActive(true); setTranscriptOpen(true); onActivity(true)
@@ -128,6 +136,15 @@ export function LiveInterview({ blocked, onActivity, onComplete, videoTest = fal
   const callSpeakers = [...new Set((source === 'mic' ? micRows : callRows).flatMap(row => row.speaker == null ? [] : [row.speaker]))].sort((a, b) => a - b)
   const readingStyle = { '--live-text-size': `${18 * scale}px` } as CSSProperties
   const captureStatus = finishing ? 'Saving transcript…' : busy ? 'Connecting audio…' : hasRecording ? 'Listening' : 'Audio paused'
+  if (!active && native && visible && repositoryMode) return <OverlayWorkspace
+    status={<span>Ready to start</span>}
+    controls={<><label><input type="checkbox" checked={consent} onChange={event => setConsent(event.target.checked)} /> I have permission to record and use AI assistance.</label><label>Audio source <select aria-label="Audio source" value={source} onChange={event => setSource(event.target.value as typeof source)}><option value="both">Call audio + my microphone</option><option value="system">Call / system audio only</option><option value="mic">My microphone only</option></select></label><button disabled={blocked || !consent} onClick={() => void begin()}>Start interview</button><button onClick={() => setRepositoryMode(false)}>Session setup</button>{(error || call.error || microphone.error) && <p role="alert">{error || call.error || microphone.error}</p>}{error && <button onClick={() => void openScreenRecordingSettings().catch(() => setError('Open System Settings → Privacy & Security to enable recording permission, then reopen LiveTranscript.'))}>Open recording permissions</button>}</>}
+    next={<><p>Choose your audio source, confirm permission, then start the interview.</p><p>Screen awareness starts when you choose a display during the session.</p>{blocked && <p>End Mock Lab before starting Live.</p>}</>}
+    say={<p>Your spoken answer will appear here.</p>}
+    code={<p>Code, SQL, and implementation guidance will appear here when the task calls for it.</p>}
+    writing={<p>Explanations to use while writing will appear here.</p>}
+    transcript={<p>No audio is being recorded yet.</p>}
+  />
   if (!active) return <div>
     <section className={styles.liveStage} style={readingStyle} aria-labelledby="live-setup-heading">
       <div className={styles.liveTopbar}><span className={styles.liveMark}><AudioLines size={17} aria-hidden /></span><span className={styles.liveTitle}>A clear space for your next conversation</span><span className={styles.sessionTime}>Ready to set up</span></div>
@@ -176,7 +193,7 @@ export function LiveInterview({ blocked, onActivity, onComplete, videoTest = fal
       {videoTest && interviewerSpeaker === null && <p className={styles.activityNotice}>Video test: select the interviewer in Speakers after both voices appear. Automatic answers wait for this assignment; voices are not identities.</p>}
       <div className={`${styles.liveGrid} ${repositoryMode || !transcriptOpen ? styles.liveGridNoRail : ''}`}>
         <div className={styles.answerColumn}>
-          {repositoryMode ? <RepositoryCoach permission={videoTest ? 'practice' : 'external-ai-allowed'} getQuestionTranscript={questionText} getConversation={conversation} /> : <LiveAnswerCanvas getTranscript={text} getQuestionTranscript={questionText} />}
+          {repositoryMode ? <RepositoryCoach overlayVisible={visible} overlayControls={<><span>{captureStatus} · {formatTime(elapsed)}</span><button disabled={finishing} onClick={() => void finish()}>End interview</button>{(error || call.error || microphone.error) && <p role="alert">{error || call.error || microphone.error}</p>}{error && <button onClick={() => void openScreenRecordingSettings().catch(() => setError('Open System Settings → Privacy & Security to enable recording permission, then reopen LiveTranscript.'))}>Open recording permissions</button>}</>} permission={videoTest ? 'practice' : 'external-ai-allowed'} getQuestionTranscript={questionText} getConversation={conversation} /> : <LiveAnswerCanvas getTranscript={text} getQuestionTranscript={questionText} />}
           <div className={styles.captureBar}>
             {source !== 'system' && <span className={styles.channel}><span className={`${styles.channelDot} ${microphone.phase === 'recording' ? styles.channelDotOn : ''}`} /><Mic size={12} aria-hidden />Mic · {microphone.phase === 'recording' ? 'on' : 'waiting'}</span>}
             {source !== 'mic' && <span className={styles.channel}><span className={`${styles.channelDot} ${call.phase === 'recording' ? styles.channelDotOn : ''}`} /><Monitor size={12} aria-hidden />System · {call.phase === 'recording' ? 'on' : 'waiting'}</span>}

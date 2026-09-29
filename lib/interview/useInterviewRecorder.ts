@@ -25,7 +25,7 @@ type RecordingRun = {
  * trailing final before returning the transcript for feedback. */
 export function useInterviewRecorder() {
   const { start: startBrowser, stop: stopBrowser } = useMicStream()
-  const { start: startNative, stop: stopNative } = useNativeCapture()
+  const { start: startNative, stop: stopNative, isNative } = useNativeCapture()
   const [phase, setPhase] = useState<CapturePhase>('idle')
   const [segments, setSegments] = useState<CapturedSegment[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -116,14 +116,18 @@ export function useInterviewRecorder() {
       setLevel(Number.isFinite(rms) ? Math.max(0, Math.min(1, rms)) : 0)
     }
     const onEnded = () => { if (valid()) void stop() }
+    let startupError: Error | null = null
     try {
       let rate = 0
       if (source === 'system') {
         run.nativeAttempted = true
         try { rate = await startNative(onPcm, onLevel, { source, onEnded }) }
-        catch {
+        catch (cause) {
           if (!valid()) return
           await stopNative()
+          // A desktop permission/sidecar failure must not disappear behind a
+          // browser getDisplayMedia error (WKWebView may not support it).
+          if (isNative) throw new Error(typeof cause === 'string' ? cause : cause instanceof Error ? cause.message : 'System audio could not start. Check macOS audio recording permission and reopen the app.')
         }
       }
       if (!valid()) return
@@ -131,12 +135,14 @@ export function useInterviewRecorder() {
       if (!valid()) return
       run.timeout = setTimeout(() => {
         if (!valid()) return
-        setError('Transcription could not connect in time. Check your connection and try again.')
+        startupError = new Error('Transcription could not connect in time. Check your connection and try again.')
+        setError(startupError.message)
         void stop()
       }, 25_000)
       const result = await connectWithFallback({ keyterms, sampleRate: rate, maxSpeakers: Math.max(1, Math.min(10, maxSpeakers)), signal: run.abort.signal })
       if (!valid()) {
         void result.provider.disconnect().catch(() => {})
+        if (startupError) throw startupError
         return
       }
       if (run.timeout) clearTimeout(run.timeout)
@@ -164,12 +170,12 @@ export function useInterviewRecorder() {
       pending.length = 0
       if (valid()) setPhase('recording')
     } catch (cause) {
-      if (!valid()) return
+      if (!valid()) { if (startupError) throw startupError; return }
       setError(cause instanceof Error ? cause.message : 'Audio capture failed.')
       await stop()
       throw cause
     }
-  }, [startNative, stopNative, startBrowser, stop])
+  }, [startNative, stopNative, startBrowser, stop, isNative])
 
   useEffect(() => {
     mounted.current = true
