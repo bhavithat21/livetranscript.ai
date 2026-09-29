@@ -397,7 +397,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let lock_item = CheckMenuItem::with_id(
         app,
         "toggle_lock",
-        "Lock (click-through) mode",
+        if lock_on { "Unlock overlays" } else { "Lock overlays (click-through)" },
         true,
         lock_on,
         None::<&str>,
@@ -601,15 +601,20 @@ pub fn run() {
 
                 // Easier lock escape: CmdOrCtrl+Shift+Space mirrors the L shortcut.
                 // It is deliberately global because a click-through window cannot receive clicks.
-                let lock_space = Shortcut::new(Some(Modifiers::SHIFT | primary), Code::Space);
-                app.global_shortcut()
-                    .on_shortcut(lock_space, move |app, shortcut, event| {
+                let lock_space = Shortcut::new(Some(Modifiers::SHIFT | primary), Code::Space);\n                let unlock_u = Shortcut::new(Some(Modifiers::SHIFT | primary), Code::KeyU);
+                let space_registered = app.global_shortcut().on_shortcut(lock_space, move |app, shortcut, event| {
                         if event.state == ShortcutState::Pressed && shortcut == &lock_space {
-                            let handle = app.clone();
-                            std::thread::spawn(move || toggle_lock(&handle));
+                            let handle = app.clone(); std::thread::spawn(move || toggle_lock(&handle));
                         }
-                    })
-                    .ok();
+                    }).is_ok();
+                // Guaranteed fallback candidate when macOS/another app owns Cmd+Shift+Space.
+                // Register independently so one conflict never removes all recovery paths.
+                let _unlock_u_registered = app.global_shortcut().on_shortcut(unlock_u, move |app, shortcut, event| {
+                    if event.state == ShortcutState::Pressed && shortcut == &unlock_u {
+                        let handle = app.clone(); std::thread::spawn(move || { let _ = apply_lock(&handle, false); });
+                    }
+                }).is_ok();
+                if !space_registered { eprintln!("[shortcuts] Cmd/Ctrl+Shift+Space unavailable; use Cmd/Ctrl+Shift+U or tray Unlock overlays"); }
 
                 // Tray-only mode: build the tray FIRST, then hide the Dock icon
                 // (macOS Accessory policy; Windows uses skipTaskbar in the config).
