@@ -125,7 +125,7 @@ fn request_permission() -> Result<(), String> {
     #[link(name = "CoreGraphics", kind = "framework")]
     extern "C" { fn CGPreflightScreenCaptureAccess() -> bool; }
     // SAFETY: stable zero-argument macOS Screen Recording permission APIs.
-    if unsafe { CGPreflightScreenCaptureAccess() } { Ok(()) } else { Err("Screen Recording is enabled in System Settings but this running app has not picked it up yet. Quit LiveTranscript completely and reopen it once.") }
+    if unsafe { CGPreflightScreenCaptureAccess() } { Ok(()) } else { Err("Screen Recording is enabled in System Settings but this running app has not picked it up yet. Quit LiveTranscript completely and reopen it once.".to_string()) }
 }
 #[cfg(target_os = "windows")]
 fn request_permission() -> Result<(), String> { Ok(()) }
