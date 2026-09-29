@@ -9,6 +9,7 @@ script = """
 window.__nativeCalls=[];window.__nativeLocked=false;window.__denyCapture=true;
 window.__TAURI_INTERNALS__={metadata:{currentWindow:{label:'main'},currentWebview:{label:'main'}},invoke:async(command,args)=>{
  window.__nativeCalls.push({command,args});
+ if(command==='plugin:app|version')return '0.1.10';
  if(command==='get_lock_mode')return window.__nativeLocked;
  if(command==='set_lock_mode'){window.__nativeLocked=args.enabled;return;}
  if(command==='coach_displays')return [{id:'1',name:'Built-in display',width:1440,height:900},{id:'2',name:'External display',width:1920,height:1080}];
@@ -48,11 +49,27 @@ with sync_playwright() as p:
     page.get_by_role('button',name='Enable screen sharing',exact=True).click()
     page.get_by_role('button',name='Stop sharing',exact=True).wait_for()
     page.wait_for_function('window.__nativeCalls.some(c=>c.command==="coach_start"&&c.args.displayId==="2")')
+    page.wait_for_function('window.__liveQA.calls().some(c=>c.lane==="talk")')
+    page.get_by_role('region',name='What to say',exact=True).get_by_text('I would trace',exact=False).wait_for()
     page.get_by_text('More options',exact=True).click()
     page.get_by_role('button',name='Pause screen watch',exact=True).click()
     page.get_by_role('button',name='Watch changes',exact=True).wait_for()
     page.get_by_role('button',name='Stop sharing',exact=True).click()
     page.get_by_role('button',name='Enable screen sharing',exact=True).wait_for()
+    page.get_by_text('More options',exact=True).click()
+    assert not page.get_by_role('button',name='Refresh displays',exact=True).is_visible()
+    shell=page.locator('.lt-overlay-root').first
+    assert shell.evaluate("e => getComputedStyle(e).boxShadow") == 'none'
+    panel=page.get_by_role('region',name='What to say',exact=True)
+    before=panel.bounding_box()
+    header=panel.locator('header').bounding_box()
+    page.mouse.move(header['x']+60,header['y']+15)
+    page.mouse.down()
+    page.mouse.move(header['x']+110,header['y']+35,steps=5)
+    page.mouse.up()
+    after=panel.bounding_box()
+    assert abs(after['x']-before['x']-50)<2 and abs(after['y']-before['y']-20)<2
+    assert abs(after['width']-before['width'])<2 and abs(after['height']-before['height'])<2
     page.screenshot(path=str(root/'active.png'))
     page.get_by_role('button',name='Move & resize',exact=True).click()
     page.wait_for_function('window.__nativeLocked')

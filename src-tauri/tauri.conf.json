@@ -18,6 +18,7 @@
         "fullscreen": false,
         "decorations": false,
         "transparent": true,
+        "shadow": false,
         "contentProtected": true,
         "skipTaskbar": true,
         "url": "https://livetranscript.ai/interview#live",
