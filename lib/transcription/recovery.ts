@@ -37,6 +37,9 @@ function wait(ms: number, signal: AbortSignal) {
   })
 }
 
+/** Deepgram permits 1.25x recovery; AssemblyAI requires real-time pacing.
+ * Unknown adapters use the conservative real-time policy. */
+export function recoveryDrainSpeed(provider: string): number { return provider.toLowerCase() === 'deepgram' ? 1.25 : 1 }
 type Frame = { data: ArrayBuffer; at: number; duration: number }
 type Timeline = { providerMs: number; sessionMs: number }
 type Connection = ConnectedTranscription & { generation: number; sentMs: number; timeline: Timeline[]; speakerBase: number }
@@ -132,11 +135,12 @@ export class RecoveringTranscription implements TranscriptionProvider {
   }
   private pump() {
     if (this.pumpTimer || !this.connection || this.recovering || this.stopped || this.closing || !this.pending.length) return
+    const speed = recoveryDrainSpeed(this.connection.name)
     const frame = this.pending.shift()!; this.pendingBytes -= frame.data.byteLength
     // A send exception is ambiguous: do NOT replay the same PCM into a new socket.
     if (!this.send(frame)) return
-    // Drain at 1.25x realtime, not as an unbounded reconnect burst.
-    this.pumpTimer = setTimeout(() => { this.pumpTimer = null; this.pump() }, Math.max(1, frame.duration / 1.25))
+    // Respect each provider's documented ingest limit; never burst a backlog.
+    this.pumpTimer = setTimeout(() => { this.pumpTimer = null; this.pump() }, Math.max(1, frame.duration / speed))
   }
   private detach(connection: Connection) {
     connection.provider.onPartial(() => {}); connection.provider.onFinal(() => {}); connection.provider.onStatus?.(() => {})
@@ -200,6 +204,8 @@ export class RecoveringTranscription implements TranscriptionProvider {
     this.stopped = true; this.episode?.abort(); this.episode = null
     this.config.signal?.removeEventListener('abort', this.onAbort)
     if (this.pumpTimer) clearTimeout(this.pumpTimer); this.pumpTimer = null
+    this.droppedMs += this.pending.reduce((sum, frame) => sum + frame.duration, 0)
+    this.flushLoss()
     this.pending = []; this.pendingBytes = 0
     const current = this.connection; this.connection = null
     if (current) void this.detach(current)
