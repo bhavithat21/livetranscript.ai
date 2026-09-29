@@ -46,7 +46,7 @@ export async function extractScreenEvidence(input: {
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, maxRetries: 0, timeout: 18_000 })
   const result = await client.chat.completions.create({ model: input.model, max_completion_tokens: 6000, messages: [
     { role: 'system', content: SCREEN_EXTRACTION_PROMPT },
-    { role: 'user', content: [{ type: 'text', text: 'Transcribe the visible code, paths, requirements and terminal evidence.' }, { type: 'image_url', image_url: { url: input.image.dataUrl } }] },
+    { role: 'user', content: [{ type: 'text', text: 'Transcribe the visible code, paths, requirements and terminal evidence.' }, { type: 'image_url', image_url: { url: `data:${input.image.mediaType};base64,${input.image.data}` } }] },
   ] }, { signal })
   const usage = result.usage && Number.isSafeInteger(result.usage.prompt_tokens) && Number.isSafeInteger(result.usage.completion_tokens) ? { inputTokens: result.usage.prompt_tokens, outputTokens: result.usage.completion_tokens } : undefined
   if (result.choices[0]?.finish_reason === 'length') throw new ScreenExtractionError('Screenshot contains too much text. Capture a smaller visible region.', 422, result.model, usage)
