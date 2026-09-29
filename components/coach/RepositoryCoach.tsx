@@ -66,7 +66,7 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
   const [objective, setObjective] = useState(presetObjective || 'Investigate the current task and identify the smallest safe implementation change.')
   const [error, setError] = useState<string | null>(null), [reading, setReading] = useState(false), [exportAllowed, setExportAllowed] = useState(false)
   const [displays, setDisplays] = useState<NativeDisplay[]>([]), [displayId, setDisplayId] = useState(''), [selecting, setSelecting] = useState(false), [loadedReplay, setLoadedReplay] = useState(false)
-  const screenshots = useRef<HTMLInputElement>(null), replayInput = useRef<HTMLInputElement>(null), preview = useRef<HTMLVideoElement>(null)
+  const screenshots = useRef<HTMLInputElement>(null), replayInput = useRef<HTMLInputElement>(null)
   const generation = useRef(0), mounted = useRef(true), previousSpeech = useRef('')
   const activity = useRef(onActivity)
   useEffect(() => { activity.current = onActivity }, [onActivity])
@@ -75,14 +75,6 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
   const dialogueGetter = useRef(getConversation)
   useEffect(() => { dialogueGetter.current = getConversation }, [getConversation])
   const running = state.status === 'running'
-  useEffect(() => {
-    const video = preview.current
-    if (!video) return
-    const stream = screen.getPreviewStream()
-    if (video.srcObject !== stream) video.srcObject = stream
-    if (stream) void video.play().catch(() => {})
-    return () => { if (video.srcObject === stream) video.srcObject = null }
-  }, [screen, capture.sharing, capture.source])
   useEffect(() => { if (!running) controller.configureLessons(lessonPolicy?.state.active ?? []) }, [controller, running, lessonPolicy?.state.active])
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; activity.current?.(false) } }, [])
   useEffect(() => { activity.current?.(running) }, [running])
