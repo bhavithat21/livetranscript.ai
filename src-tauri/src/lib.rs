@@ -102,26 +102,11 @@ fn request_screen_capture_access() -> bool {
     if macos_major_version() >= 15 {
         return true;
     }
-    // Linked from the OS; the standard TCC entry points for Screen Recording.
+    // Preflight only. Never request TCC from the running interview app: repeated
+    // CGRequestScreenCaptureAccess calls are what produced the blocking modal.
     #[link(name = "CoreGraphics", kind = "framework")]
-    extern "C" {
-        fn CGPreflightScreenCaptureAccess() -> bool;
-        fn CGRequestScreenCaptureAccess() -> bool;
-    }
-    // SAFETY: Both symbols are stable CoreGraphics C functions present on macOS
-    // 10.15+ (this app targets far newer). They take no arguments, return a plain
-    // BOOL, have no preconditions, and are safe to call from any thread. We only
-    // reach here on macOS (cfg above), so the framework is always linked.
-    unsafe {
-        // Already granted? Don't re-prompt.
-        if CGPreflightScreenCaptureAccess() {
-            return true;
-        }
-        // Not granted → show the prompt. Note: macOS only applies a fresh grant
-        // after the app is restarted, so the very first capture may still need one
-        // relaunch — but the user is asked here, at launch, not mid-recording.
-        CGRequestScreenCaptureAccess()
-    }
+    extern "C" { fn CGPreflightScreenCaptureAccess() -> bool; }
+    unsafe { CGPreflightScreenCaptureAccess() }
 }
 
 #[cfg(not(target_os = "macos"))]
