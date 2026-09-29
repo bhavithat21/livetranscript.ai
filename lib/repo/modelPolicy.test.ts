@@ -50,7 +50,7 @@ describe('measured repository model policy', () => {
     visionValue.measurements[0].purpose = 'vision'; vision.roles.vision = visionValue; delete vision.roles.debugger
     expect(repoModelFor('vision', { COPILOT_REPO_BENCHMARK_POLICY: JSON.stringify(vision) })).toMatchObject({ source: 'measured' })
     visionValue.model = 'gpt-5.6-sol'
-    expect(() => repoModelFor('vision', { COPILOT_REPO_BENCHMARK_POLICY: JSON.stringify(vision) })).toThrow('Incomplete measured')
+    expect(repoModelFor('vision', { COPILOT_REPO_BENCHMARK_POLICY: JSON.stringify(vision) })).toMatchObject({ source: 'measured', model: 'gpt-5.6-sol' })
   })
   it('rejects invalid model ids and invented one-sample policies', () => {
     expect(() => repoModelFor('vision', { COPILOT_REPO_MODEL_VISION: 'https://host?key=bad' })).toThrow()
