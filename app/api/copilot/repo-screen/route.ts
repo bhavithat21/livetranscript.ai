@@ -25,13 +25,14 @@ export async function POST(req: Request) {
     const { observation, model: actualModel, attempts = 1 } = await extractScreenEvidence({ model, image, signal: req.signal })
     recordUsage('repo-screen', userId, { model: actualModel, files: observation.files.length })
     if (attempts > 1) console.info('[repo-screen/recovered]', { model: actualModel, attempts, elapsedMs: Date.now() - started })
-    return Response.json({ observation, model: actualModel, attempts }, { headers: { 'Cache-Control': 'no-store' } })
+    // Diagnostics stay server-side; preserve the client response contract.
+    return Response.json({ observation, model: actualModel }, { headers: { 'Cache-Control': 'no-store' } })
   } catch (error) {
     // Metadata only: never log screenshot data, model responses or SDK messages.
     const providerStatus = error && typeof error === 'object' && 'status' in error && typeof error.status === 'number' ? error.status : undefined
     console.warn('[repo-screen]', { model, elapsedMs: Date.now() - started, kind: error instanceof ScreenExtractionError ? error.message : error instanceof Error ? error.name : 'unknown', status: providerStatus, cancelled: req.signal.aborted, validationCode: error instanceof ScreenExtractionError ? error.validationCode : undefined, attempts: error instanceof ScreenExtractionError ? error.attempts : undefined })
     if (error instanceof ScreenExtractionError && !req.signal.aborted) {
-      return Response.json({ error: error.message, validationCode: error.validationCode, attempts: error.attempts }, { status: error.status, headers: { 'Cache-Control': 'no-store' } })
+      return Response.json({ error: error.message }, { status: error.status, headers: { 'Cache-Control': 'no-store' } })
     }
     return Response.json({ error: req.signal.aborted ? 'Screenshot capture cancelled' : 'Screenshot extraction failed or timed out. Existing evidence is unchanged.' }, { status: req.signal.aborted ? 499 : 502, headers: { 'Cache-Control': 'no-store' } })
   }
