@@ -21,7 +21,7 @@ describe.skipIf(!['plan', 'review-template', 'select'].includes(action ?? ''))('
       const schedule = trialSchedule(config)
       const availability = config.models.map((model) => {
         const provider = repoProvider(model)
-        const key = { anthropic: 'ANTHROPIC_API_KEY', openai: 'OPENAI_API_KEY', groq: 'GROQ_API_KEY' }[provider]
+        const key = { anthropic: 'ANTHROPIC_API_KEY', openai: 'OPENAI_API_KEY', groq: 'GROQ_API_KEY', gemini: 'GEMINI_API_KEY' }[provider]
         return { model, provider, keyPresent: !!process.env[key] }
       })
       await save(process.env.REPO_BENCHMARK_PLAN ?? 'benchmark-results/repo-plan.json', { mode: 'plan-only', config, totalCalls: schedule.length, availability, suite: suiteManifest(), schedule, qualityGates: DEFAULT_GATES, paidCallsMade: 0 })
