@@ -29,6 +29,8 @@ export type DialogueTurn = { sourceId: string; at: number; role: 'interviewer' |
 export type Question = { id: string; original: string; text: string; at: number }
 export type Guidance = {
   summary: string
+  nextAction?: string
+  draft?: { language: string; code: string; explanation: string } | null
   look: Array<Omit<Navigation, 'status' | 'requestedAfter'>>
   patches: Patch[]; findings: Finding[]
   verify: Array<{ command: string; scope: string; reason: string }>
