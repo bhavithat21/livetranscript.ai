@@ -48,9 +48,17 @@ export function diagnosticCode(error: unknown, status?: number): DiagnosticCode 
   if (status === 401 || status === 403) return 'unauthorized'
   if (status === 429) return 'rate_limited'
   if (status === 404 || status === 503) return 'provider_unavailable'
-  // Inspect locally, but NEVER return or serialize the message or stack.
+  // DOMException and cross-webview errors need not inherit this realm's Error.
+  // Read only bounded name/message for categorization, never serialize either.
   let message = '', name = ''
-  try { if (error instanceof Error) { message = error.message; name = error.name } else if (typeof error === 'string') message = error } catch { return 'unknown' }
+  try {
+    if (typeof error === 'string') message = error.slice(0, 2048)
+    else if (error && typeof error === 'object') {
+      const value = error as { name?: unknown; message?: unknown }
+      if (typeof value.name === 'string') name = value.name.slice(0, 80)
+      if (typeof value.message === 'string') message = value.message.slice(0, 2048)
+    }
+  } catch { return 'unknown' }
   if (/denied|notallowed|permission/i.test(name + ' ' + message)) return 'permission_denied'
   if (/timed?\s*out|timeout/i.test(name + ' ' + message)) return 'timeout'
   if (name === 'AbortError' || /cancelled|canceled/i.test(message)) return 'cancelled'
