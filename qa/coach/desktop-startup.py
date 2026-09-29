@@ -37,6 +37,11 @@ with sync_playwright() as p:
     for name in ['What to do next','What to say','What to write']:
         assert page.get_by_role('region',name=name,exact=True).is_visible()
     assert page.get_by_role('button',name='Enable screen sharing').evaluate("e => getComputedStyle(e).cursor") == 'default'
+    page.get_by_text('Interview brief',exact=True).click()
+    page.get_by_role('button',name='Use QXO brief',exact=True).click()
+    page.get_by_label('Coding language',exact=True).select_option('Java')
+    page.get_by_role('button',name='Save brief',exact=True).click()
+    page.get_by_text('Interview brief',exact=True).click()
     page.get_by_label('Overlay display').select_option('2')
     page.get_by_role('button',name='Enable screen sharing',exact=True).click()
     page.get_by_role('button',name='Enable screen sharing',exact=True).wait_for()
@@ -48,6 +53,7 @@ with sync_playwright() as p:
     page.get_by_role('button',name='Stop sharing',exact=True).wait_for()
     page.wait_for_function('window.__nativeCalls.some(c=>c.command==="coach_start"&&c.args.displayId==="2")')
     page.wait_for_function('window.__liveQA.calls().some(c=>c.lane==="talk")')
+    assert page.evaluate('window.__liveQA.calls().some(c=>c.instructions?.includes("Coding language: Java")&&c.instructions?.includes("QXO HackerRank"))')
     page.get_by_role('region',name='What to say',exact=True).get_by_text('I would trace',exact=False).wait_for()
     page.get_by_text('More options',exact=True).click()
     page.get_by_role('button',name='Pause screen watch',exact=True).click()
@@ -69,10 +75,12 @@ with sync_playwright() as p:
     assert abs(after['x']-before['x']-50)<2 and abs(after['y']-before['y']-20)<2
     assert abs(after['width']-before['width'])<2 and abs(after['height']-before['height'])<2
     page.screenshot(path=str(root/'active.png'))
-    page.get_by_role('button',name='Move & resize',exact=True).click()
+    assert page.get_by_role('button',name='Smaller overlay').count()==0
+    assert page.get_by_role('button',name='Compact',exact=True).count()==0
+    page.get_by_role('button',name='Click-through off',exact=True).click()
     page.wait_for_function('window.__nativeLocked')
     page.evaluate('window.__nativeLocked=false')
-    page.get_by_role('button',name='Move & resize',exact=True).wait_for()
+    page.get_by_role('button',name='Click-through off',exact=True).wait_for()
     page.get_by_role('button',name='Hide',exact=True).click()
     page.wait_for_function('window.__nativeCalls.some(c=>c.command==="plugin:window|hide")')
     # Renders and manual viewport changes must never maximize or shrink the native window.

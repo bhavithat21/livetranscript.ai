@@ -16,6 +16,7 @@ import { OverlayWorkspace } from './OverlayWorkspace'
 const EMPTY_TRANSCRIPT = () => ''
 type Resources = { controller: CoachController; screen: ScreenObserver }
 export type RepositoryCoachProps = {
+  instructions?: string
   overlayControls?: React.ReactNode
   overlayVisible?: boolean
   getQuestionTranscript?: () => string
@@ -34,6 +35,8 @@ function saveFile(name: string, content: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 export function RepositoryCoach({ transport = httpCoachTransport, captureTransport = httpCapture, onReady, ...props }: RepositoryCoachProps) {
+  const instructionRef = useRef(props.instructions ?? '')
+  instructionRef.current = props.instructions ?? ''
   const lessonPolicy = useLessonPolicy()
   const lessonRef = useRef(lessonPolicy?.state.active ?? [])
   useEffect(() => { lessonRef.current = lessonPolicy?.state.active ?? [] }, [lessonPolicy?.state.active])
@@ -41,7 +44,7 @@ export function RepositoryCoach({ transport = httpCoachTransport, captureTranspo
   const readyRef = useRef(onReady)
   useEffect(() => { readyRef.current = onReady }, [onReady])
   useEffect(() => {
-    const controller = new CoachController(transport)
+    const controller = new CoachController((lane, packet, options) => transport(lane, packet, { ...options, instructions: instructionRef.current }))
     controller.configureLessons(lessonRef.current)
     const screen = new ScreenObserver((observation, at) => controller.observeScreen(observation, at), captureTransport)
     const resource = { controller, screen }
@@ -127,7 +130,7 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
     } catch (failure) { if (mounted.current && token === generation.current) setError(failure instanceof Error ? failure.message : typeof failure === 'string' ? failure : 'Screen sharing is unavailable.') }
     finally { if (mounted.current && token === generation.current) setSelecting(false) }
   }
-  function answerNow() { const typed=manualQuestion.trim(); const latest=typed || getter.current().trim(); if(latest){ ask(latest); setManualQuestion('') } else if(state.question){ void controller.run('talk',true); void controller.run('guide',true) } else setError('No question detected yet. Type the question, then press Answer.') }
+  function answerNow() { setError(null); const typed=manualQuestion.trim(); const latest=typed || getter.current().trim(); if(latest){ ask(latest); setManualQuestion('') } else if(state.question){ void controller.run('talk',true); void controller.run('guide',true) } else setError('No question detected yet. Type the question, then press Answer.') }
   function pause() { selection.current?.abort(); generation.current++; setSelecting(false); controller.pause(); screen.watch(false) }
   function end() { selection.current?.abort(); generation.current++; setSelecting(false); void screen.stop(); controller.end() }
   async function uploadScreens(selected: FileList | null) {
@@ -190,7 +193,7 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
         {displays.length > 1 && <label>Display <select aria-label="Overlay display" value={displayId} onChange={event => setDisplayId(event.target.value)}>{displays.map(display => <option key={display.id} value={display.id}>{display.name}</option>)}</select></label>}
         <button disabled={!running || selecting} onClick={() => capture.sharing ? void screen.stop() : void selectScreen(native)}>{selecting ? 'Connecting…' : capture.sharing ? 'Stop sharing' : 'Enable screen sharing'}</button>
         <span role="status">{capture.error ? 'Screen needs attention' : capture.reading ? 'Reading screen…' : capture.watching ? 'Screen connected · auto-answer on' : 'Screen sharing is off'}</span>
-        <p>Shared screen changes and detected questions are answered automatically.</p>
+
         {(error || capture.error) && <><p role="alert">{error || capture.error}</p><button onClick={() => void openScreenRecordingSettings().catch(() => setError('Open System Settings → Privacy & Security → Screen & System Audio Recording, enable LiveTranscript, then quit and reopen the app.'))}>Open screen permission settings</button></>}
         {failed && <button disabled={!running} onClick={() => void controller.run(failed.lane, true)}>Retry answer</button>}
         <details><summary>More options</summary>

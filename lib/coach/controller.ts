@@ -6,7 +6,7 @@ import { lessonIds, type LessonId } from './learning/policy'
 import { LIMITS, list, object, parseGuidance, redactSecrets, text } from './validation'
 
 export type ReplayReference = { id: string; lane: string; model: string; text: string; summary: string; note: string; verdict: string }
-export type CoachTransport = (lane: Lane, packet: ContextPacket, options: { signal: AbortSignal; lessons?: LessonId[]; delta: (text: string, model: string) => void }) => Promise<{ model: string; guidance: Guidance | null }>
+export type CoachTransport = (lane: Lane, packet: ContextPacket, options: { signal: AbortSignal; instructions?: string; lessons?: LessonId[]; delta: (text: string, model: string) => void }) => Promise<{ model: string; guidance: Guidance | null }>
 type Flight = { controller: AbortController; key: string; requestId: string }
 export class CoachController {
   private lessons: LessonId[] = []
@@ -235,7 +235,7 @@ export class CoachController {
   getMetrics() { return { modelRequests: this.calls, activeRequests: this.flights.size, journalEvents: this.journal.length, journalTruncated: this.journalTruncated } }
 }
 export const httpCoachTransport: CoachTransport = async (lane, context, options) => {
-  const response = await fetch('/api/copilot/coach', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lane, context, lessons: options.lessons ?? [] }), signal: options.signal })
+  const response = await fetch('/api/copilot/coach', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lane, context, instructions: options.instructions ?? '', lessons: options.lessons ?? [] }), signal: options.signal })
   if (!response.ok || !response.body) throw new Error(`Coach unavailable (${response.status})`)
   const reader = response.body.getReader(), decoder = new TextDecoder()
   let buffer = '', received = 0, done = false, model = '', guidance: Guidance | null = null

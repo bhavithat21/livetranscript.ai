@@ -9,6 +9,7 @@ import { LiveScrollArea } from '@/components/transcript/LiveScrollArea'
 import { LiveAnswerCanvas } from './LiveAnswerCanvas'
 import { openScreenRecordingSettings } from '@/lib/coach/native'
 import { nativeDesktopAvailable, maximizeLiveInterviewWindow } from '@/lib/desktop/overlay'
+import { InterviewBrief } from './InterviewBrief'
 import { NativeWindowControls } from '@/components/NativeWindowControls'
 import { createPortal } from 'react-dom'
 import { RepositoryCoach } from '@/components/coach/RepositoryCoach'
@@ -91,7 +92,7 @@ export function LiveInterview({ visible, blocked, onActivity, onComplete, videoT
 
   async function begin() {
     if (activity.current || blocked || !consent) return
-    void maximizeLiveInterviewWindow().catch(() => setError('Could not maximize the window. Use Zoom or resize it manually.'))
+    void maximizeLiveInterviewWindow().catch(() => setError('Could not maximize the window. Reopen LiveTranscript to restore the startup layout.'))
     const token = ++lifecycle.current
     activity.current = true; ending.current = false; sessionId.current = crypto.randomUUID(); startTime.current = Date.now()
     setInterviewerSpeaker(null); setCaptureStartedAt(startTime.current); setElapsed(0); setError(null); setBusy(true); setActive(true); setTranscriptOpen(true); onActivity(true)
@@ -207,7 +208,7 @@ export function LiveInterview({ visible, blocked, onActivity, onComplete, videoT
       {videoTest && interviewerSpeaker === null && <p className={styles.activityNotice}>Video test: select the interviewer in Speakers after both voices appear. Automatic answers wait for this assignment; voices are not identities.</p>}
       <div className={`${styles.liveGrid} ${repositoryMode || !transcriptOpen ? styles.liveGridNoRail : ''}`}>
         <div className={styles.answerColumn}>
-          {repositoryMode ? <RepositoryCoach overlayVisible={visible} overlayControls={<><span>{captureStatus} · {formatTime(elapsed)}</span><button disabled={finishing} onClick={() => void finish()}>End interview</button>{(error || call.error || microphone.error) && <p role="alert">{error || call.error || microphone.error}</p>}{error && <button onClick={() => void openScreenRecordingSettings().catch(() => setError('Open System Settings → Privacy & Security to enable recording permission, then reopen LiveTranscript.'))}>Open recording permissions</button>}</>} permission={videoTest ? 'practice' : 'external-ai-allowed'} getQuestionTranscript={questionText} getConversation={conversation} /> : <LiveAnswerCanvas getTranscript={text} getQuestionTranscript={questionText} />}
+          {repositoryMode ? <RepositoryCoach instructions={tuning.state.active.instructions} overlayVisible={visible} overlayControls={<><InterviewBrief /><span>{captureStatus} · {formatTime(elapsed)}</span><button disabled={finishing} onClick={() => void finish()}>End interview</button>{(error || call.error || microphone.error) && <p role="alert">{error || call.error || microphone.error}</p>}{error && <button onClick={() => void openScreenRecordingSettings().catch(() => setError('Open System Settings → Privacy & Security to enable recording permission, then reopen LiveTranscript.'))}>Open recording permissions</button>}</>} permission={videoTest ? 'practice' : 'external-ai-allowed'} getQuestionTranscript={questionText} getConversation={conversation} /> : <LiveAnswerCanvas getTranscript={text} getQuestionTranscript={questionText} />}
           <div className={styles.captureBar}>
             {(source === 'both' || source === 'mic') && <span className={styles.channel}><span className={`${styles.channelDot} ${microphone.phase === 'recording' ? styles.channelDotOn : ''}`} /><Mic size={12} aria-hidden />Mic · {microphone.phase === 'recording' ? 'on' : 'waiting'}</span>}
             {(source === 'both' || source === 'system') && <span className={styles.channel}><span className={`${styles.channelDot} ${call.phase === 'recording' ? styles.channelDotOn : ''}`} /><Monitor size={12} aria-hidden />System · {call.phase === 'recording' ? 'on' : 'waiting'}</span>}

@@ -69,11 +69,13 @@ impl Default for ProtectionState {
 // checkmark and the hotkey toggle agree. Starts unlocked.
 pub struct LockState {
     click_through: Mutex<bool>,
+    unlock_registered: std::sync::atomic::AtomicBool,
 }
 impl Default for LockState {
     fn default() -> Self {
         Self {
             click_through: Mutex::new(false),
+            unlock_registered: std::sync::atomic::AtomicBool::new(false),
         }
     }
 }
@@ -209,15 +211,21 @@ fn get_lock_mode(app: tauri::AppHandle) -> bool {
 fn apply_lock(app: &tauri::AppHandle, enabled: bool) -> Result<(), String> {
     use tauri::Manager;
     let state = app.state::<LockState>();
-    // Hold the flag lock across the whole read-modify-write so a concurrent toggle
-    // (tray vs hotkey vs webview IPC) can't leave window state and flag disagreeing.
-    let mut guard = lock(&state.click_through);
-    if let Some(win) = app.get_webview_window("main") {
-        win.set_ignore_cursor_events(enabled)
-            .map_err(|e| e.to_string())?;
-        win.set_always_on_top(enabled).map_err(|e| e.to_string())?;
+    if enabled && !state.unlock_registered.load(std::sync::atomic::Ordering::Relaxed) {
+        return Err("Click-through is unavailable because Command/Control+Shift+U could not register. Close the other app using that shortcut, then reopen LiveTranscript.".into());
     }
-    *guard = enabled;
+    // Never hold a state mutex across native window calls: those may dispatch
+    // to the UI thread, which also reads the state for shortcut events.
+    if let Some(win) = app.get_webview_window("main") {
+        if enabled { win.set_always_on_top(true).map_err(|e| e.to_string())?; }
+        if let Err(error) = win.set_ignore_cursor_events(enabled) {
+            if enabled { let _ = win.set_always_on_top(false); }
+            return Err(error.to_string());
+        }
+        // Unlocking cursor input must succeed even if restoring stacking fails.
+        if !enabled { let _ = win.set_always_on_top(false); }
+    }
+    *lock(&state.click_through) = enabled;
     if let Some(item) = lock(&app.state::<TrayHandles>().lock_item).as_ref() {
         let _ = item.set_checked(enabled);
     }
@@ -598,11 +606,12 @@ pub fn run() {
                     }).is_ok();
                 // Guaranteed fallback candidate when macOS/another app owns Cmd+Shift+Space.
                 // Register independently so one conflict never removes all recovery paths.
-                let _unlock_u_registered = app.global_shortcut().on_shortcut(unlock_u, move |app, shortcut, event| {
+                let unlock_u_registered = app.global_shortcut().on_shortcut(unlock_u, move |app, shortcut, event| {
                     if event.state == ShortcutState::Pressed && shortcut == &unlock_u {
                         let handle = app.clone(); std::thread::spawn(move || { let _ = apply_lock(&handle, false); });
                     }
                 }).is_ok();
+                tauri::Manager::state::<LockState>(app).unlock_registered.store(unlock_u_registered, std::sync::atomic::Ordering::Relaxed);
                 if !space_registered { eprintln!("[shortcuts] Cmd/Ctrl+Shift+Space unavailable; use Cmd/Ctrl+Shift+U or tray Unlock overlays"); }
 
                 // Tray-only mode: build the tray FIRST, then hide the Dock icon
