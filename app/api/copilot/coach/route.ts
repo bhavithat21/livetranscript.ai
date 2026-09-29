@@ -7,7 +7,8 @@ import { assertRepoModelConfigured, repoModelFor, validRepoModel } from '@/lib/r
 import { parseContext } from '@/lib/coach/context'
 import { object, parseGuidance } from '@/lib/coach/validation'
 import { lessonIds, lessonPrompt, type LessonId } from '@/lib/coach/learning/policy'
-import { coachPrompt } from '@/lib/coach/prompts'\nimport { compileInterviewPrompt } from '@/lib/coach/interviewContext'
+import { coachPrompt } from '@/lib/coach/prompts'
+import { compileInterviewPrompt } from '@/lib/coach/interviewContext'
 import type { ContextPacket, Lane } from '@/lib/coach/types'
 import { judgeLiveContext, routeDecision } from '@/lib/coach/typesafe'
 
@@ -48,7 +49,8 @@ export async function POST(req: Request) {
       const emit = (value: Record<string, unknown>) => { if (!closed && !signal.aborted) controller.enqueue(encoder.encode(`${JSON.stringify(value)}\n`)) }
       try {
         emit({ type: 'started', lane, evidenceVersion: context.evidenceVersion, decision })
-        const compiled = compileInterviewPrompt(context, lane)\n        const request = { model, system: compiled.system + '\\n' + coachPrompt(lane) + lessonPrompt(lessons), evidence: compiled.evidence, signal, maxTokens: lane === 'talk' ? 384 : lane === 'review' ? 2200 : 3400 }
+        const compiled = compileInterviewPrompt(context, lane)
+        const request = { model, system: compiled.system + '\\n' + coachPrompt(lane) + lessonPrompt(lessons), evidence: compiled.evidence, signal, maxTokens: lane === 'talk' ? 384 : lane === 'review' ? 2200 : 3400 }
         if (lane === 'talk') {
           let returned = model, visible = '', firstTextMs: number | null = null
           for await (const part of streamRepoModel({ ...request, onUsage: value => { usage = value } })) {
