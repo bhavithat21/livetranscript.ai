@@ -202,11 +202,8 @@ fn get_lock_mode(app: tauri::AppHandle) -> bool {
     *lock(&app.state::<LockState>().click_through)
 }
 
-// Single source of truth for lock mode: sets ignore-cursor-events + always-on-top
-// on the window, records the flag, and syncs the tray checkmark — so the webview
-// button, tray item, and hotkey never drift. Always-on-top is only ADDED with
-// lock (so the view-only overlay stays visible over other apps) and removed on
-// unlock, restoring normal stacking.
+// Click-through controls input only. The interview remains above other apps in
+// either mode, including after the global unlock shortcut restores interaction.
 #[cfg(desktop)]
 fn apply_lock(app: &tauri::AppHandle, enabled: bool) -> Result<(), String> {
     use tauri::Manager;
@@ -217,13 +214,12 @@ fn apply_lock(app: &tauri::AppHandle, enabled: bool) -> Result<(), String> {
     // Never hold a state mutex across native window calls: those may dispatch
     // to the UI thread, which also reads the state for shortcut events.
     if let Some(win) = app.get_webview_window("main") {
-        if enabled { win.set_always_on_top(true).map_err(|e| e.to_string())?; }
-        if let Err(error) = win.set_ignore_cursor_events(enabled) {
-            if enabled { let _ = win.set_always_on_top(false); }
-            return Err(error.to_string());
+        // Restore input first on unlock; a stacking error must not strand the
+        // user in click-through. Always-on-top is independent of this flag.
+        win.set_ignore_cursor_events(enabled).map_err(|e| e.to_string())?;
+        if let Err(error) = win.set_always_on_top(true) {
+            eprintln!("[window] Could not keep interview on top: {error}");
         }
-        // Unlocking cursor input must succeed even if restoring stacking fails.
-        if !enabled { let _ = win.set_always_on_top(false); }
     }
     *lock(&state.click_through) = enabled;
     if let Some(item) = lock(&app.state::<TrayHandles>().lock_item).as_ref() {
@@ -355,6 +351,7 @@ fn toggle_main_window(app: &tauri::AppHandle) {
             }
             _ => {
                 let _ = win.unminimize();
+                let _ = win.set_always_on_top(true);
                 let _ = win.show();
                 let _ = win.set_focus();
             }
