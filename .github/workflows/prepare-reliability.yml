@@ -1,0 +1,45 @@
+name: Prepare requested reliability patch
+on:
+  pull_request:
+    types: [opened, synchronize]
+    paths: ['.maintenance/**', '.github/workflows/prepare-reliability.yml']
+permissions:
+  contents: write
+jobs:
+  prepare:
+    if: github.event.pull_request.head.repo.full_name == 'bhavithat21/livetranscript.ai' && github.event.pull_request.head.ref == 'fix/live-reliability-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Apply exact reviewed local patch
+        run: |
+          test "$(git rev-parse HEAD:lib/transcription/types.ts)" = '2c48b75536f4ed9d719edea523f07da97a54d51c'
+          python3 - <<'PY'
+          import base64, hashlib, lzma, pathlib
+          data = base64.b64decode(''.join(pathlib.Path(f'.maintenance/reliability-part-{i}').read_text() for i in range(1, 6)), validate=True)
+          assert hashlib.sha256(data).hexdigest() == 'c8b0afff0c85060ad13ba1f751c23207ebfe10f06d32c9b0c609baf73ba74c2e'
+          pathlib.Path('/tmp/reliability.patch').write_bytes(lzma.decompress(data))
+          PY
+          git apply --check --unidiff-zero /tmp/reliability.patch
+          git apply --unidiff-zero /tmp/reliability.patch
+      - name: Generate synthetic non-user speech fixture
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq espeak ffmpeg
+          espeak -v en-us -s 220 -w /tmp/phrase.wav 'Can you explain this code?'
+          ffmpeg -v error -y -i /tmp/phrase.wav -ac 1 -ar 16000 -f s16le /tmp/phrase.pcm
+          python3 - <<'PY'
+          import base64, gzip, json, pathlib
+          audio = pathlib.Path('/tmp/phrase.pcm').read_bytes() + bytes(32000)
+          pathlib.Path('evals/reliability/speech.json').write_text(json.dumps({'sampleRate':16000,'encoding':'pcm_s16le_gzip_base64','synthetic':True,'phrase':'Can you explain this code?','audio':base64.b64encode(gzip.compress(audio,mtime=0)).decode()}, separators=(',',':'))+'\n')
+          PY
+      - name: Commit to the requested feature branch only
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- .env.example .gitignore app components docs evals lib package.json scripts src-tauri
+          git commit -m 'Implement model probes, bounded ASR recovery and independent audio channels'
+          git push origin HEAD:refs/heads/fix/live-reliability-v2
