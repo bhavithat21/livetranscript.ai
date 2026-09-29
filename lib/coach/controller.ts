@@ -126,7 +126,7 @@ export class CoachController {
     let packet: ContextPacket
     try { packet = buildContext(this.state, lane === 'talk' ? 10_000 : LIMITS.context, this.index) }
     catch (error) { this.publish({ ...this.state, warning: error instanceof Error ? error.message : 'Context unavailable' }); return }
-    const stable = lane === 'talk' ? `${packet.question.id}:${packet.codeVersion}:${packet.task.version}` : `${packet.question.id}:${packet.contextKey}`
+    const stable = `${packet.question.id}:${packet.evidenceVersion}:${packet.codeVersion}:${packet.task.version}:${packet.contextKey}`
     const key = `${lane}:${stable}${explicitRetry ? `:retry:${++this.retrySerial}` : ''}`
     if (this.attempted.has(key)) return
     const now = this.now()
