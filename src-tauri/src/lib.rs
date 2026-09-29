@@ -622,17 +622,13 @@ pub fn run() {
                 // Order matters: if the tray fails to build, we must NOT demote to
                 // Accessory — otherwise the app would have neither a Dock icon nor a
                 // tray, leaving it headless with no way to show or quit it.
-                match build_tray(app.handle()) {
-                    Ok(()) => {
-                        #[cfg(target_os = "macos")]
-                        app.set_activation_policy(tauri::ActivationPolicy::Accessory);
-                    }
-                    Err(e) => {
-                        // Keep the Dock icon (default Regular policy) so the app is
-                        // still reachable and quittable despite the missing tray.
-                        eprintln!("[tray] failed to build tray icon, keeping Dock icon: {e}");
-                    }
+                if let Err(e) = build_tray(app.handle()) {
+                    eprintln!("[tray] failed to build tray icon: {e}");
                 }
+                // LiveTranscript is a companion overlay, not a normal document app.
+                // Keep it out of the macOS Dock; native global recovery shortcuts remain registered.
+                #[cfg(target_os = "macos")]
+                app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
                 // Windows 11: real desktop blur behind the transparent window.
                 // CSS backdrop-filter only blurs in-page content, never the OS
