@@ -1,5 +1,5 @@
 import type { DiagnosticEvent } from '../diagnostics/schema'
-export function mockReadiness(events: DiagnosticEvent[], since: number) {
+export function mockReadiness(events: readonly DiagnosticEvent[], since: number) {
   const current = events.filter(event => event.at >= since)
   const has = (stage: string, event: string, channel?: string) => current.some(item => item.stage === stage && item.event === event && (!channel || item.attrs.channel === channel))
   const recovered = current.some(item => item.stage === 'transcription' && item.event === 'retry' && current.some(next => next.operationId === item.operationId && next.event === 'first_final' && next.at > item.at))
