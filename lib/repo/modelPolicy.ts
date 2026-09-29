@@ -2,7 +2,11 @@ import type { RepoAgentRole } from './agentTypes'
 
 // Defaults are operational choices, NOT measured benchmark winners. Current ID
 // verified against https://platform.claude.com/docs/en/models/overview (2026-09-22).
-export const DEFAULT_REPO_MODEL = 'gpt-6-sol'\nexport const DEFAULT_IMPLEMENTATION_MODEL = 'gemini-3.1-pro-preview'\nexport const DEFAULT_DEBUG_MODEL = 'claude-sonnet-5-5'\nexport const DEFAULT_REVIEW_MODEL = 'claude-sonnet-5-5'\nexport const DEFAULT_SYNTHESIS_MODEL = 'gpt-6-sol'
+export const DEFAULT_REPO_MODEL = 'gpt-6-sol'
+export const DEFAULT_IMPLEMENTATION_MODEL = 'gemini-3.1-pro-preview'
+export const DEFAULT_DEBUG_MODEL = 'claude-sonnet-5-5'
+export const DEFAULT_REVIEW_MODEL = 'claude-sonnet-5-5'
+export const DEFAULT_SYNTHESIS_MODEL = 'gpt-6-sol'
 export const DEFAULT_LIVE_MODEL = 'gpt-6-luna'
 export const DEFAULT_VISION_MODEL = 'claude-sonnet-5-5'
 export const REPO_AGENT_ROLES: RepoAgentRole[] = ['requirements', 'implementation', 'debugger', 'reviewer', 'synthesis']
@@ -82,7 +86,8 @@ export function repoModelFor(role: RepoAgentRole | 'vision', env: Record<string,
 }
 
 export function repoProvider(model: string): 'anthropic' | 'openai' | 'groq' | 'gemini' {
-  if (model.startsWith('claude-')) return 'anthropic'\n  if (model.startsWith('gemini-')) return 'gemini'
+  if (model.startsWith('claude-')) return 'anthropic'
+  if (model.startsWith('gemini-')) return 'gemini'
   if (/^(?:llama|qwen|moonshotai|meta-llama|openai\/)/.test(model)) return 'groq'
   return 'openai'
 }
