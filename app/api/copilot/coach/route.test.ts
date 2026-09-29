@@ -64,7 +64,7 @@ describe('repository coach transport contracts (fixture providers, not live infe
     const result = await events(response)
     expect(result.find(event => event.type === 'delta')).toMatchObject({ text: 'Require both conditions.', model: 'claude-returned-fixture' })
     expect(result.at(-1)).toMatchObject({ type: 'done', guidance: null })
-    expect(streamRepoModel).toHaveBeenCalledWith(expect.objectContaining({ maxTokens: 512, signal: expect.any(AbortSignal), system: expect.stringContaining('untrusted DATA') }))
+    expect(streamRepoModel).toHaveBeenCalledWith(expect.objectContaining({ maxTokens: 384, signal: expect.any(AbortSignal), system: expect.stringContaining('untrusted DATA') }))
   })
   it('returns only patches with exact current preimages and attached source references', async () => {
     const output = await events(await POST(request({ lane: 'guide', context: packet() })))
