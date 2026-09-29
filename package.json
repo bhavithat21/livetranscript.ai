@@ -2,6 +2,7 @@
   "name": "app",
   "version": "0.1.14",
   "private": true,
+  "engines": { "node": "22.x" },
   "scripts": {
     "dev": "next dev",
     "build": "node scripts/check-production-readiness.mjs && next build",
@@ -27,7 +28,7 @@
     "@anthropic-ai/sdk": "^0.114.0",
     "@clerk/nextjs": "^7.5.20",
     "@neondatabase/serverless": "^1.1.0",
-    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/api": "2.11.1",
     "ably": "^2.25.0",
     "drizzle-orm": "^0.45.2",
     "framer-motion": "^12.42.2",
