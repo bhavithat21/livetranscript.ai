@@ -72,7 +72,7 @@ final class AudioCapturer: NSObject, SCStreamOutput, SCStreamDelegate {
         try await start(filter: filter)
     }
 
-    func start(filter: SCContentFilter) async throws {
+    func start(filter: SCContentFilter, signalReady: Bool = true) async throws {
         if let current = stream { try await current.updateContentFilter(filter); return }
         let config = SCStreamConfiguration()
         config.capturesAudio = true
@@ -89,8 +89,7 @@ final class AudioCapturer: NSObject, SCStreamOutput, SCStreamDelegate {
         self.stream = stream
         // Readiness sentinel: capture is live. A denied Screen-Recording
         // permission throws above (no READY) → the parent reports the failure.
-        diag("RATE 48000")
-        diag("READY")
+        if signalReady { diag("RATE 48000"); diag("READY") }
     }
 
     func stream(_ stream: SCStream,
@@ -147,7 +146,20 @@ final class AudioPickerCapturer: NSObject, SCContentSharingPickerObserver {
     func contentSharingPicker(_ picker: SCContentSharingPicker, didUpdateWith filter: SCContentFilter, for stream: SCStream?) {
         selected = true
         Task {
-            do { try await capture.start(filter: filter) }
+            do {
+                diag("AUDIO_STAGE selection-received")
+                try await capture.start(filter: filter, signalReady: false)
+                // Both helpers are attributed to the same parent picker ID.
+                // Retaining audio's picker registration routes later screen
+                // selections to this process instead of the visual helper.
+                await MainActor.run {
+                    picker.remove(self)
+                    picker.isActive = false
+                }
+                diag("AUDIO_STAGE picker-released")
+                diag("RATE 48000")
+                diag("READY")
+            }
             catch { diag("Audio capture failed: \(error.localizedDescription)"); exit(1) }
         }
     }
@@ -200,6 +212,11 @@ final class ScreenPickerCapturer: NSObject, SCContentSharingPickerObserver, SCSt
                 self.stream = capture
                 try capture.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
                 try await capture.startCapture()
+                await MainActor.run {
+                    picker.remove(self)
+                    picker.isActive = false
+                }
+                diag("SCREEN_STAGE picker-released")
                 diag("SCREEN_STAGE capture-started")
             } catch { self.contentSharingPickerStartDidFailWithError(error) }
         }

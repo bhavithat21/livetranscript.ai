@@ -19,6 +19,7 @@ export type RepositoryCoachProps = {
   instructions?: string
   overlayControls?: React.ReactNode
   overlayVisible?: boolean
+  screenSelectionBlocked?: boolean
   getQuestionTranscript?: () => string
   getConversation?: () => DialogueTurn[]
   permission?: Permission
@@ -64,7 +65,7 @@ function ReviewButtons({ result, state, controller }: { result: ResultRecord; st
     {expanded && <><label>What should improve?<select className={styles.input} value={category} onChange={event => setCategory(event.target.value)}><option value="correctness">Correctness</option><option value="directness">Directness / spoken clarity</option><option value="navigation">Wrong file or location</option><option value="stale-context">Stale or missing context</option><option value="latency">Response time</option><option value="verbosity">Too much detail</option></select></label><label>Review note<textarea className={styles.input} maxLength={1500} rows={3} value={note} onChange={event => setNote(event.target.value)} /></label><button className={styles.button} onClick={() => { controller.feedback(result.id, 'needs-work', [category], note); setExpanded(false) }}>Save review</button></>}
   </div>
 }
-function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRANSCRIPT, getConversation, permission, objective: presetObjective, onActivity, overlayControls, overlayVisible = true }: Omit<RepositoryCoachProps, 'onReady' | 'transport' | 'captureTransport'> & Resources) {
+function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRANSCRIPT, getConversation, permission, objective: presetObjective, onActivity, overlayControls, overlayVisible = true, screenSelectionBlocked = false }: Omit<RepositoryCoachProps, 'onReady' | 'transport' | 'captureTransport'> & Resources) {
   const lessonPolicy = useLessonPolicy()
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot)
   const capture = useSyncExternalStore(screen.subscribe, screen.getSnapshot, screen.getSnapshot)
@@ -116,6 +117,7 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
     return () => clearInterval(timer)
   }, [controller, running])
   async function selectScreen(useNative = nativeAvailable()) {
+    if (screenSelectionBlocked) return
     selection.current?.abort(); selection.current = new AbortController()
     setError(null); setSelecting(true)
     const token = ++generation.current
@@ -179,7 +181,7 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
         {running ? <button className={styles.button} onClick={pause}>Pause coach</button> : state.status === 'paused' && <button className={styles.button} disabled={loadedReplay && !state.question} onClick={() => loadedReplay ? controller.analyzeReplay() : controller.resume()}>{loadedReplay ? 'Analyze replay with AI' : 'Resume coach'}</button>}
         {state.status !== 'ended' && <button className={styles.button} onClick={end}>End coach</button>}
       </div>
-      {native && <details className={`${styles.details} ${styles.main}`}><summary>Desktop display capture</summary><p>Use a selected display through the native app. This does not grant remote control. Screen-recording permission is required.</p><button className={styles.button} disabled={!running || selecting} onClick={() => { void nativeDisplays().then(items => { setDisplays(items); setDisplayId(items[0]?.id || '') }).catch(() => setError('Native capture requires the updated desktop installer and screen-recording permission.')) }}>Find displays</button>{displays.length > 0 && <label className={styles.label}>Display<select className={styles.input} value={displayId} onChange={event => setDisplayId(event.target.value)}>{displays.map(display => <option key={display.id} value={display.id}>{display.name} · {display.width} × {display.height}</option>)}</select><button className={styles.button} disabled={!running || !displayId || selecting} onClick={() => void selectScreen(true)}>Share selected display</button></label>}</details>}
+      {native && <details className={`${styles.details} ${styles.main}`}><summary>Desktop display capture</summary><p>Use a selected display through the native app. This does not grant remote control. Screen-recording permission is required.</p><button className={styles.button} disabled={!running || selecting || screenSelectionBlocked} onClick={() => { void nativeDisplays().then(items => { setDisplays(items); setDisplayId(items[0]?.id || '') }).catch(() => setError('Native capture requires the updated desktop installer and screen-recording permission.')) }}>Find displays</button>{displays.length > 0 && <label className={styles.label}>Display<select className={styles.input} value={displayId} onChange={event => setDisplayId(event.target.value)}>{displays.map(display => <option key={display.id} value={display.id}>{display.name} · {display.width} × {display.height}</option>)}</select><button className={styles.button} disabled={!running || !displayId || selecting} onClick={() => void selectScreen(true)}>Share selected display</button></label>}</details>}
       {(capture.sharing || capture.reading || reading) && <p className={styles.notice} role="status">{capture.reading ? 'Reading a changed view…' : reading ? 'Reading selected screen evidence…' : capture.watching ? 'Watching the selected screen continuously. Only stable semantic keyframes are sent to your configured vision provider.' : 'Screen selected; automatic visual analysis paused.'}</p>}
       {loadedReplay && <section className={styles.main} aria-label="Replay timeline">
         <label className={styles.label} htmlFor="coach-replay-checkpoint">Observation {replay.position} of {replay.total} · {replay.event}</label>
@@ -191,14 +193,14 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
       {state.status === 'paused' && <p className={styles.notice}>Coach paused. No new model calls or screen analysis. The parent interview’s audio capture has separate controls.</p>}
       {overlayVisible && <OverlayWorkspace controls={native ? <>{overlayControls}<div className={styles.controls}>
         {displays.length > 1 && <label>Display <select aria-label="Overlay display" value={displayId} onChange={event => setDisplayId(event.target.value)}>{displays.map(display => <option key={display.id} value={display.id}>{display.name}</option>)}</select></label>}
-        <button disabled={!running || selecting} onClick={() => capture.sharing ? void screen.stop() : void selectScreen(native)}>{selecting ? 'Connecting…' : capture.sharing ? 'Stop sharing' : 'Enable screen sharing'}</button>
+        <button disabled={!running || selecting || screenSelectionBlocked} onClick={() => capture.sharing ? void screen.stop() : void selectScreen(native)}>{selecting ? 'Connecting…' : capture.sharing ? 'Stop sharing' : 'Enable screen sharing'}</button>
         <span role="status">{capture.error ? 'Screen needs attention' : capture.reading ? 'Reading screen…' : capture.watching ? 'Screen connected · auto-answer on' : 'Screen sharing is off'}</span>
 
         {(error || capture.error) && <><p role="alert">{error || capture.error}</p>{capture.sharing ? <button disabled={capture.reading} onClick={() => screen.watch(true)}>Retry analysis</button> : <button onClick={() => void openScreenRecordingSettings().catch(() => setError('Open System Settings → Privacy & Security → Screen & System Audio Recording, enable LiveTranscript, then quit and reopen the app.'))}>Open screen permission settings</button>}</>}
         {failed && <button disabled={!running} onClick={() => void controller.run(failed.lane, true)}>Retry answer</button>}
         <details><summary>More options</summary>
         <input className={styles.input} aria-label="Overlay interview question" placeholder="Type a question" value={manualQuestion} onChange={event => setManualQuestion(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); answerNow() } }} /><button disabled={!running} onClick={answerNow}>Answer</button>
-        <button disabled={!running || selecting} onClick={() => void nativeDisplays().then(items => { setDisplays(items); setDisplayId(items[0]?.id || '') }).catch(() => setError('Could not find displays. Check screen-recording permission.'))}>Refresh displays</button>
+        <button disabled={!running || selecting || screenSelectionBlocked} onClick={() => void nativeDisplays().then(items => { setDisplays(items); setDisplayId(items[0]?.id || '') }).catch(() => setError('Could not find displays. Check screen-recording permission.'))}>Refresh displays</button>
         {capture.sharing && <button onClick={() => screen.watch(!capture.watching)}>{capture.watching ? 'Pause screen watch' : 'Watch changes'}</button>}
         {running ? <button onClick={pause}>Pause coach</button> : state.status === 'paused' && <button onClick={() => controller.resume()}>Resume coach</button>}
         </details>
