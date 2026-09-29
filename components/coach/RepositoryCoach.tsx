@@ -10,7 +10,8 @@ import { nextInspection } from '@/lib/coach/context'
 import type { CoachState, Permission, ResultRecord, DialogueTurn } from '@/lib/coach/types'
 import { LearningPanel } from './LearningPanel'
 import { useLessonPolicy } from '@/lib/coach/learning/LearningContext'
-import styles from './RepositoryCoach.module.css'\nimport { OverlayWorkspace } from './OverlayWorkspace'
+import styles from './RepositoryCoach.module.css'
+import { OverlayWorkspace } from './OverlayWorkspace'
 
 const EMPTY_TRANSCRIPT = () => ''
 type Resources = { controller: CoachController; screen: ScreenObserver }
