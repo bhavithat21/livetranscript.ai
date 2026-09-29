@@ -1,4 +1,3 @@
 'use client'
-import { useEffect,useState } from 'react'
 import styles from './NativeWindowControls.module.css'
 export function NativeWindowControls(){const native=typeof window!=='undefined'&&'__TAURI_INTERNALS__' in window;if(!native)return null;async function action(kind:'close'|'minimize'|'maximize'){const{getCurrentWindow}=await import('@tauri-apps/api/window');const w=getCurrentWindow();if(kind==='close')await w.close();else if(kind==='minimize')await w.minimize();else await w.toggleMaximize()}return <div className={styles.controls} aria-label="Window controls" data-tauri-drag-region><button aria-label="Close" className={styles.close} onClick={()=>void action('close')} >×</button><button aria-label="Minimize" className={styles.minimize} onClick={()=>void action('minimize')} >−</button><button aria-label="Zoom" className={styles.zoom} onClick={()=>void action('maximize')} >+</button></div>}
