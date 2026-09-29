@@ -207,7 +207,7 @@ export function parseContext(raw: unknown): ContextPacket {
       }),
     }
   }
-  const conversation = root.conversation === undefined ? [] : list(root.conversation, 8).map(parseDialogueTurn)
+  const conversation = root.conversation === undefined ? [] : list(root.conversation, 40).map(parseDialogueTurn)
   const budget = object(root.budget, ['maxCharacters', 'usedCharacters', 'omittedPaths'])
   return { schema: 1, sessionId: text(root.sessionId, 100, true), permission: permission(root.permission), question: { id: text(question.id, 100, true), original: text(question.original, 4000, true), text: text(question.text, 2000, true), at: integer(question.at) }, task: parsedTask,
     evidenceVersion: integer(root.evidenceVersion), codeVersion: integer(root.codeVersion), contextKey: text(root.contextKey, 100, true), files, knownPaths, relations, visibleView, conversation, tests, patches, patchReviews,
