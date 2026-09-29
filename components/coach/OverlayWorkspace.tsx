@@ -1,5 +1,5 @@
 'use client'
-import { useCallback,useState } from 'react'
+import { useCallback,useEffect,useState } from 'react'
 import { Eye,EyeOff,Lock,Unlock,LayoutTemplate } from 'lucide-react'
 import { OverlayPanel,type OverlayRect } from './OverlayPanel'
 import styles from './OverlayWorkspace.module.css'
