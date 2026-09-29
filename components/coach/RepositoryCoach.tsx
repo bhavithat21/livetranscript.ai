@@ -85,7 +85,7 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
     void nativeDisplays().then(items => {
       if (!live) return
       setDisplays(items); setDisplayId(items[0]?.id || '')
-    }).catch(() => { if (live) setError('Could not find displays. Check screen-recording permission, then refresh displays.') })
+    }).catch(failure => { if (live) setError(failure instanceof Error ? failure.message : 'Could not find displays. Reopen LiveTranscript and try again.') })
     return () => { live = false }
   }, [])
   useEffect(() => { if (!running) controller.configureLessons(lessonPolicy?.state.active ?? []) }, [controller, running, lessonPolicy?.state.active])

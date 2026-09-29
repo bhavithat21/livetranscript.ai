@@ -24,16 +24,10 @@ impl PickerCapture {
             while let Some(event) = events.recv().await {
                 match event {
                     CommandEvent::Stdout(bytes) => {
-                        buffer.extend_from_slice(&bytes);
-                        while buffer.len() >= 4 {
-                            let length = u32::from_le_bytes(buffer[..4].try_into().unwrap()) as usize;
-                            if !(4..=4_400_000).contains(&length) {
-                                *crate::lock(&frame) = Err("The screen helper returned an invalid frame.".into()); return;
-                            }
-                            if buffer.len() < length + 4 { break; }
-                            let jpeg = buffer[4..length + 4].to_vec();
-                            buffer.drain(..length + 4);
-                            *crate::lock(&frame) = Ok(Some(jpeg));
+                        match decode_frames(&mut buffer, &bytes) {
+                            Ok(Some(jpeg)) => *crate::lock(&frame) = Ok(Some(jpeg)),
+                            Ok(None) => {},
+                            Err(error) => { *crate::lock(&frame) = Err(error); return; }
                         }
                     }
                     CommandEvent::Stderr(bytes) => {
@@ -69,3 +63,40 @@ impl PickerCapture {
     }
 }
 impl Drop for PickerCapture { fn drop(&mut self) { self.stop(); } }
+
+// A raw pipe read need not coincide with a frame boundary.
+fn decode_frames(buffer: &mut Vec<u8>, bytes: &[u8]) -> Result<Option<Vec<u8>>, String> {
+    buffer.extend_from_slice(bytes);
+    let mut latest = None;
+    while buffer.len() >= 4 {
+        let length = u32::from_le_bytes(buffer[..4].try_into().unwrap()) as usize;
+        if !(4..=4_400_000).contains(&length) { return Err("The screen helper returned an invalid frame.".into()); }
+        if buffer.len() < length + 4 { break; }
+        latest = Some(buffer[4..length + 4].to_vec());
+        buffer.drain(..length + 4);
+    }
+    Ok(latest)
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn accepts_fragmented_headers_and_frames() {
+        let mut buffer = Vec::new();
+        assert_eq!(decode_frames(&mut buffer, &[4, 0]).unwrap(), None);
+        assert_eq!(decode_frames(&mut buffer, &[0, 0, 255]).unwrap(), None);
+        assert_eq!(decode_frames(&mut buffer, &[216, 255, 217]).unwrap(), Some(vec![255, 216, 255, 217]));
+        assert!(buffer.is_empty());
+    }
+    #[test]
+    fn keeps_only_latest_complete_frame() {
+        let mut buffer = Vec::new();
+        assert_eq!(decode_frames(&mut buffer, &[4,0,0,0,1,2,3,4,4,0,0,0,5,6,7,8]).unwrap(), Some(vec![5,6,7,8]));
+        assert!(buffer.is_empty());
+    }
+    #[test]
+    fn rejects_unbounded_or_empty_frames() {
+        assert!(decode_frames(&mut Vec::new(), &u32::MAX.to_le_bytes()).is_err());
+        assert!(decode_frames(&mut Vec::new(), &[0,0,0,0]).is_err());
+    }
+}

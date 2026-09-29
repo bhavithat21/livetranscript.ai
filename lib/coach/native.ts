@@ -7,7 +7,12 @@ export function nativeAvailable(): boolean {
 }
 async function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   const { invoke } = await import('@tauri-apps/api/core')
-  return invoke<T>(command, args)
+  try { return await invoke<T>(command, args) }
+  catch (failure) {
+    const message = failure instanceof Error ? failure.message : String(failure)
+    if (/not found|unknown command/i.test(message)) throw new Error('This installed desktop app is too old for screen sharing. Install LiveTranscript 0.1.10 or newer, then quit and reopen the app.')
+    throw new Error(message)
+  }
 }
 export async function nativeDisplays(): Promise<NativeDisplay[]> {
   if (!nativeAvailable()) return []
