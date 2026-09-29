@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_REPO_MODEL, repoModelFor, type RepoBenchmarkPolicy } from './modelPolicy'
+import { DEFAULT_LIVE_MODEL, DEFAULT_REPO_MODEL, DEFAULT_VISION_MODEL, repoModelFor, type RepoBenchmarkPolicy } from './modelPolicy'
 
 function measured(): RepoBenchmarkPolicy {
   return { version: 2, reviewed: true, reviewer: 'test-reviewer', reviewedAt: '2026-09-22T00:00:00.000Z', roles: { debugger: {
@@ -12,7 +12,7 @@ function measured(): RepoBenchmarkPolicy {
 
 describe('measured repository model policy', () => {
   it('labels defaults honestly and gives explicit role config priority', () => {
-    expect(repoModelFor('debugger', {})).toEqual({ model: DEFAULT_REPO_MODEL, source: 'default' })
+    expect(repoModelFor('debugger', {})).toEqual({ model: DEFAULT_REPO_MODEL, source: 'default' })\n    expect(repoModelFor('requirements', {})).toEqual({ model: DEFAULT_LIVE_MODEL, source: 'default' })\n    expect(repoModelFor('vision', {})).toEqual({ model: DEFAULT_VISION_MODEL, source: 'default' })
     expect(repoModelFor('debugger', { COPILOT_REPO_MODEL_DEBUGGER: 'gpt-4.1' })).toEqual({ model: 'gpt-4.1', source: 'configured' })
   })
   it('keeps legacy administrator routing but does not mislabel it a measured winner', () => {
@@ -39,7 +39,7 @@ describe('measured repository model policy', () => {
     const weakGate = measured(); weakGate.roles.debugger!.qualityGates.minPassRate = 0.5
     expect(() => repoModelFor('debugger', { COPILOT_REPO_BENCHMARK_POLICY: JSON.stringify(weakGate) })).toThrow('Incomplete measured')
   })
-  it('requires navigation evidence for requirements and restricts vision to Claude', () => {
+  it('requires navigation evidence for requirements and permits benchmarked multimodal vision models', () => {
     const policy = measured(); const value = policy.roles.debugger!
     value.measurements[0].purpose = 'requirements'
     policy.roles.requirements = value; delete policy.roles.debugger
