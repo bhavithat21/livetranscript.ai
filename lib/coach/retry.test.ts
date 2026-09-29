@@ -57,7 +57,7 @@ describe('bounded read retries', () => {
     const abort = new AbortController(), fn = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'))
     const promise = retryRead(fn, { ...options(), signal: abort.signal }).catch(error => error)
     await vi.advanceTimersByTimeAsync(100); abort.abort()
-    expect((await promise).name).toBe('AbortError')
+    expect(await promise).toHaveProperty('name', 'AbortError')
     await vi.advanceTimersByTimeAsync(20_000)
     expect(fn).toHaveBeenCalledTimes(1); expect(vi.getTimerCount()).toBe(0)
   })
@@ -71,7 +71,7 @@ describe('bounded read retries', () => {
     const fn = vi.fn((signal: AbortSignal) => { seen.push(signal); return new Promise(() => {}) })
     const promise = retryRead(fn, { ...options(), timeoutMs: 1000 }).catch(error => error)
     await vi.advanceTimersByTimeAsync(1000)
-    expect((await promise).name).toBe('TimeoutError'); expect(fn).toHaveBeenCalledTimes(1)
+    expect(await promise).toHaveProperty('name', 'TimeoutError'); expect(fn).toHaveBeenCalledTimes(1)
     expect(seen[0].aborted).toBe(true); expect(vi.getTimerCount()).toBe(0)
   })
   it('honors Retry-After rather than sending early', async () => {
