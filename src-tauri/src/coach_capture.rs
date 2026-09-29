@@ -123,9 +123,9 @@ fn platform_image(display: &str) -> Result<Vec<u8>, String> {
 #[cfg(target_os = "macos")]
 fn request_permission() -> Result<(), String> {
     #[link(name = "CoreGraphics", kind = "framework")]
-    extern "C" { fn CGPreflightScreenCaptureAccess() -> bool; fn CGRequestScreenCaptureAccess() -> bool; }
+    extern "C" { fn CGPreflightScreenCaptureAccess() -> bool; }
     // SAFETY: stable zero-argument macOS Screen Recording permission APIs.
-    if unsafe { CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess() } { Ok(()) } else { Err("Allow Screen Recording in System Settings before sharing".into()) }
+    if unsafe { CGPreflightScreenCaptureAccess() } { Ok(()) } else { Err("Screen Recording is enabled in System Settings but this running app has not picked it up yet. Quit LiveTranscript completely and reopen it once.") }
 }
 #[cfg(target_os = "windows")]
 fn request_permission() -> Result<(), String> { Ok(()) }
