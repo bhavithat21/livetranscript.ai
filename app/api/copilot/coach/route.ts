@@ -26,6 +26,10 @@ export async function POST(req: Request) {
   } catch (error) {
     return Response.json({ error: 'Invalid or oversized repository context' }, { status: error instanceof RepoRequestError ? error.status : 400 })
   }
+  const decision = await judgeLiveContext(context, lane, req.signal)
+  const routed = routeDecision(decision, lane)
+  if (routed.suppress) return new Response(`${JSON.stringify({ type: 'started', lane, evidenceVersion: context.evidenceVersion, decision })}\n${JSON.stringify({ type: 'done', model: decision.model, guidance: null })}\n`, { headers: { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store' } })
+  lane = routed.lane
   let model: string
   try {
     const role = lane === 'talk' ? 'requirements' : lane === 'review' ? 'reviewer' : 'implementation'
