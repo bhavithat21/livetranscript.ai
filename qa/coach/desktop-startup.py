@@ -9,7 +9,7 @@ script = """
 window.__nativeCalls=[];window.__nativeLocked=false;window.__denyCapture=true;
 window.__TAURI_INTERNALS__={metadata:{currentWindow:{label:'main'},currentWebview:{label:'main'}},invoke:async(command,args)=>{
  window.__nativeCalls.push({command,args});
- if(command==='plugin:app|version')return '0.1.10';
+ if(command==='plugin:app|version')return '0.1.11';
  if(command==='get_lock_mode')return window.__nativeLocked;
  if(command==='set_lock_mode'){window.__nativeLocked=args.enabled;return;}
  if(command==='coach_displays')return [{id:'1',name:'Built-in display',width:1440,height:900},{id:'2',name:'External display',width:1920,height:1080}];
@@ -74,11 +74,26 @@ with sync_playwright() as p:
     after=panel.bounding_box()
     assert abs(after['x']-before['x']-50)<2 and abs(after['y']-before['y']-20)<2
     assert abs(after['width']-before['width'])<2 and abs(after['height']-before['height'])<2
+    handle=panel.get_by_role('button',name='Resize What to say',exact=True)
+    assert handle.evaluate("e=>getComputedStyle(e).cursor")=='default'
+    corner=handle.bounding_box()
+    page.mouse.move(corner['x']+12,corner['y']+12)
+    page.mouse.down()
+    page.mouse.move(corner['x']-48,corner['y']-28,steps=5)
+    page.mouse.up()
+    resized=panel.bounding_box()
+    assert abs(resized['width']-(after['width']-60))<3, (after,resized)
+    assert abs(resized['height']-(after['height']-40))<3, (after,resized)
+    assert resized['x']==after['x'] and resized['y']==after['y']
+    handle.focus()
+    page.keyboard.press('ArrowRight')
+    assert abs(panel.bounding_box()['width']-resized['width']-10)<3
     page.screenshot(path=str(root/'active.png'))
     assert page.get_by_role('button',name='Smaller overlay').count()==0
     assert page.get_by_role('button',name='Compact',exact=True).count()==0
     page.get_by_role('button',name='Click-through off',exact=True).click()
     page.wait_for_function('window.__nativeLocked')
+    assert panel.get_by_role('button',name='Resize What to say',exact=True).count()==0
     page.evaluate('window.__nativeLocked=false')
     page.get_by_role('button',name='Click-through off',exact=True).wait_for()
     page.get_by_role('button',name='Hide',exact=True).click()

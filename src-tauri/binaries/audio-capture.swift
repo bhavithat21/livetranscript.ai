@@ -247,27 +247,34 @@ final class AudioCapturer: NSObject, SCStreamOutput, SCStreamDelegate {
 final class ScreenPickerCapturer: NSObject, SCContentSharingPickerObserver, SCStreamOutput, SCStreamDelegate {
     private var stream: SCStream?
     private let context = CIContext()
+    private var deliveredFirstFrame = false
     private let queue = DispatchQueue(label: "ai.livetranscript.screen-frames")
     func start() {
         let picker = SCContentSharingPicker.shared
         var configuration = SCContentSharingPickerConfiguration()
         configuration.allowedPickerModes = [.singleWindow, .singleDisplay]
         configuration.excludedBundleIDs = ["ai.livetranscript.desktop"]
+        // Control Center attributes both helpers to the parent application.
+        // Its default limit of one counts the system-audio fallback SCStream,
+        // so a running interview otherwise silently suppresses this picker.
+        picker.maximumStreamCount = 2
         picker.defaultConfiguration = configuration
         picker.add(self)
         picker.isActive = true
+        diag("SCREEN_STAGE picker-requested capacity=2")
         picker.present()
     }
     func contentSharingPicker(_ picker: SCContentSharingPicker, didCancelFor stream: SCStream?) {
-        if self.stream == nil { FileHandle.standardError.write(Data("Screen selection cancelled.\n".utf8)); exit(1) }
+        if self.stream == nil { diag("Screen selection cancelled."); exit(1) }
     }
     func contentSharingPickerStartDidFailWithError(_ error: Error) {
-        FileHandle.standardError.write(Data("Screen picker failed: \(error.localizedDescription)\n".utf8)); exit(1)
+        diag("Screen picker failed: \(error.localizedDescription)"); exit(1)
     }
     func contentSharingPicker(_ picker: SCContentSharingPicker, didUpdateWith filter: SCContentFilter, for stream: SCStream?) {
         Task {
             do {
                 if let current = self.stream { try await current.updateContentFilter(filter); return }
+                diag("SCREEN_STAGE selection-received")
                 let config = SCStreamConfiguration()
                 let size = filter.contentRect.size
                 let scale = min(1, 2400 / max(1, max(size.width, size.height)))
@@ -281,6 +288,7 @@ final class ScreenPickerCapturer: NSObject, SCContentSharingPickerObserver, SCSt
                 self.stream = capture
                 try capture.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
                 try await capture.startCapture()
+                diag("SCREEN_STAGE capture-started")
             } catch { self.contentSharingPickerStartDidFailWithError(error) }
         }
     }
@@ -293,6 +301,10 @@ final class ScreenPickerCapturer: NSObject, SCContentSharingPickerObserver, SCSt
             let image = CIImage(cvPixelBuffer: buffer)
             guard let jpeg = context.jpegRepresentation(of: image, colorSpace: CGColorSpaceCreateDeviceRGB(), options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: 0.8]),
                   jpeg.count <= 4_400_000 else { return }
+            if !deliveredFirstFrame {
+                deliveredFirstFrame = true
+                diag("SCREEN_STAGE first-frame-delivered")
+            }
             var length = UInt32(jpeg.count).littleEndian
             var packet = withUnsafeBytes(of: &length) { Data($0) }
             packet.append(jpeg)
