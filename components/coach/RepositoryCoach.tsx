@@ -104,7 +104,9 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
     setError(null); setSelecting(true)
     const token = ++generation.current
     try {
-      const selectedDisplay = useNative ? (displayId || (await nativeDisplays())[0]?.id || '') : ''\n      if (useNative && !selectedDisplay) throw new Error('No desktop display is available for screen awareness.')\n      const source = useNative ? await nativeFrameSource(selectedDisplay) : await browserFrameSource(() => { if (mounted.current && token === generation.current) void screen.stop() })
+      const selectedDisplay = useNative ? (displayId || (await nativeDisplays())[0]?.id || '') : ''
+      if (useNative && !selectedDisplay) throw new Error('No desktop display is available for screen awareness.')
+      const source = useNative ? await nativeFrameSource(selectedDisplay) : await browserFrameSource(() => { if (mounted.current && token === generation.current) void screen.stop() })
       if (!mounted.current || token !== generation.current || controller.getSnapshot().status !== 'running') { await source.stop(); return }
       await screen.attach(source, useNative ? 'native' : 'browser')
       if (!mounted.current || token !== generation.current || controller.getSnapshot().status !== 'running') { await screen.stop(); return }
