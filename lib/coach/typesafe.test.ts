@@ -1,6 +1,6 @@
 import { describe,expect,it,vi,afterEach } from 'vitest'
 import { judgeLiveContext,routeDecision } from './typesafe'
-const context:any={question:{text:'Why is this failing?'},task:{},visibleView:null,knownPaths:[],files:[],tests:[],patchReviews:[],conversation:[],evidenceVersion:1,codeVersion:1}
+const context={question:{text:'Why is this failing?'},task:{},visibleView:null,knownPaths:[],files:[],tests:[],patchReviews:[],conversation:[],evidenceVersion:1,codeVersion:1}
 afterEach(()=>{vi.unstubAllGlobals();vi.unstubAllEnvs()})
 describe('TypeSafe decision fabric',()=>{
  it('falls back without a server key and keeps the live path available',async()=>{vi.stubEnv('TYPESAFE_API_KEY','');const d=await judgeLiveContext(context,'talk',new AbortController().signal);expect(d.source).toBe('fallback');expect(routeDecision(d,'talk').suppress).toBe(false)})
