@@ -10,22 +10,41 @@ export function ReadinessPanel() {
   const [report, setReport] = useState<PreflightReport | null>(null)
   const [busy, setBusy] = useState(false), [error, setError] = useState('')
   const [since, setSince] = useState<number | null>(null), [mock, setMock] = useState(false)
+  const [checkSession, setCheckSession] = useState(''), [observed, setObserved] = useState<string[]>([])
   const [reviewed, setReviewed] = useState(false), [stopVerified, setStopVerified] = useState(false)
   const request = useRef<AbortController | null>(null)
-  useEffect(() => () => request.current?.abort(), [])
-  const checklist = since === null ? null : mockReadiness(diagnostics.events, since)
+  useEffect(() => () => { const active = request.current; request.current = null; active?.abort() }, [])
+  // Latch observed milestones, not raw content, while this checklist is active.
+  // A 45-minute mock must not lose its startup evidence when the ring buffer rolls.
+  useEffect(() => {
+    if (since === null) return
+    return subscribeDiagnostics(() => {
+      const current = getDiagnostics()
+      if (!current.enabled || current.sessionId !== checkSession) { setObserved(previous => previous.length ? [] : previous); return }
+      const passed = mockReadiness(current.events, since).checks.filter(check => check.passed).map(check => check.label)
+      setObserved(previous => passed.every(label => previous.includes(label)) ? previous : [...new Set([...previous, ...passed])])
+    })
+  }, [since, checkSession])
+  const validChecklist = diagnostics.enabled && diagnostics.sessionId === checkSession
+  const checks = since === null ? null : mockReadiness(diagnostics.events, since).checks.map(check => ({ ...check, passed: validChecklist && (check.passed || observed.includes(check.label)) }))
   async function checkModels() {
     request.current?.abort(); const controller = new AbortController(); request.current = controller
     const trace = diagnosticSpan('app'); setBusy(true); setError(''); setReport(null)
-    const timeout = setTimeout(() => controller.abort(), 55_000)
+    let timedOut = false
+    const timeout = setTimeout(() => { timedOut = true; controller.abort() }, 55_000)
     try {
       const response = await fetch('/api/diagnostics/preflight', { method: 'POST', headers: trace.headers(), signal: controller.signal })
       if (!response.ok) throw new Error(response.status === 401 ? 'Sign in to check providers.' : response.status === 429 ? 'Wait one minute before checking again.' : 'Provider checks could not complete.')
       const data = await response.json() as PreflightReport
-      if (data.version !== 1 || !Array.isArray(data.checks)) throw new Error('Invalid readiness report')
-      if (!controller.signal.aborted) { setReport(data); trace.end(data.passed ? 'success' : 'error') }
-    } catch (cause) { if (!controller.signal.aborted) { setError(cause instanceof Error ? cause.message : 'Checks failed'); trace.failure(cause) } }
-    finally { clearTimeout(timeout); if (request.current === controller) { setBusy(false); request.current = null } }
+      if (data.version !== 1 || data.scope !== 'synthetic-server-probes' || data.deviceVerified !== false || typeof data.passed !== 'boolean' || !Array.isArray(data.checks) || !data.checks.length || data.checks.some(check => !check || !['passed', 'failed', 'disabled'].includes(check.status))) throw new Error('Invalid readiness report')
+      if (data.passed !== data.checks.every(check => check.status !== 'failed')) throw new Error('Inconsistent readiness report')
+      if (!controller.signal.aborted && request.current === controller) { setReport(data); trace.end(data.passed ? 'success' : 'error') }
+    } catch (cause) {
+      if (request.current === controller && (!controller.signal.aborted || timedOut)) {
+        setError(timedOut ? 'Provider checks timed out. No successful readiness result was recorded.' : cause instanceof Error ? cause.message : 'Checks failed')
+        trace.end('error', { code: timedOut ? 'timeout' : 'unavailable' })
+      } else trace.end('cancelled')
+    } finally { clearTimeout(timeout); if (request.current === controller) { setBusy(false); request.current = null } }
   }
   return <section aria-label="Readiness and recovery checks">
     <h3>Readiness and recovery checks</h3>
@@ -36,9 +55,9 @@ export function ReadinessPanel() {
     <h4>Device mock checklist</h4>
     <label><input type="checkbox" checked={mock} onChange={event => setMock(event.target.checked)} />This is a mock session, not a real interview. I permit an intentional transcription disconnect.</label>
     <p>Start the checklist before your mock, speak on each enabled input, share a coding window, and request guidance. Then test reconnection and verify newly spoken words. Screen-only/microphone-only sessions deliberately do not pass the full dual-input checklist.</p>
-    <button type="button" disabled={!mock || !diagnostics.enabled} onClick={() => { setSince(Date.now()); setReviewed(false); setStopVerified(false) }}>Begin a new device checklist</button>
+    <button type="button" disabled={!mock || !diagnostics.enabled} onClick={() => { setSince(Date.now()); setCheckSession(diagnostics.sessionId); setObserved([]); setReviewed(false); setStopVerified(false) }}>Begin a new device checklist</button>
     <button type="button" disabled={!mock || since === null} onClick={() => { const count = testAsrRecovery(); setError(count ? `${count} transcription connection(s) interrupted for the mock. Physical capture is not restarted; verify new words after reconnection.` : 'No active transcription connection is available to test.') }}>Test transcription reconnection</button>
     {!diagnostics.enabled && <p>Device event checks are unavailable while diagnostics are disabled. No results will be inferred.</p>}
-    {checklist && <><ul>{checklist.checks.map(check => <li key={check.label}>{check.passed ? 'Observed' : 'Not yet observed'} — {check.label}</li>)}</ul><label><input type="checkbox" checked={reviewed} onChange={event => setReviewed(event.target.checked)} />I reviewed transcript accuracy and answer usefulness during a full 45-minute mock.</label><label><input type="checkbox" checked={stopVerified} onChange={event => setStopVerified(event.target.checked)} />I tested Stop, permission denial, and channel retry; capture did not unexpectedly restart.</label><p role="status">{checklist.passed && reviewed && stopVerified ? 'Device checklist complete based on events and your attestations—not independent verification.' : 'Device acceptance incomplete.'}</p></>}
+    {checks && <><ul>{checks.map(check => <li key={check.label}>{check.passed ? 'Observed' : 'Not yet observed'} — {check.label}</li>)}</ul><label><input type="checkbox" checked={reviewed} onChange={event => setReviewed(event.target.checked)} />I reviewed transcript accuracy and answer usefulness during a full 45-minute mock.</label><label><input type="checkbox" checked={stopVerified} onChange={event => setStopVerified(event.target.checked)} />I tested Stop, permission denial, and channel retry; capture did not unexpectedly restart.</label><p role="status">{checks.every(check => check.passed) && reviewed && stopVerified ? 'Device checklist complete based on events and your attestations—not independent verification.' : 'Device acceptance incomplete.'}</p></>}
   </section>
 }
