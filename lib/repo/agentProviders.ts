@@ -46,6 +46,18 @@ export async function callRepoModel(p: ModelRequest): Promise<ModelResult> {
   const settings = repoGenerationSettings(p.model)
   const signal = AbortSignal.any([p.signal, AbortSignal.timeout(28_000)])
   signal.throwIfAborted()
+  if (repoProvider(p.model) === 'gemini') {
+    const key = process.env.GEMINI_API_KEY!
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(p.model)}:generateContent`, { method: 'POST', signal, headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' }, body: JSON.stringify({ systemInstruction: { parts: [{ text: p.system }] }, contents: [{ role: 'user', parts: [{ text: p.evidence }] }], generationConfig: { maxOutputTokens: p.maxTokens ?? settings.maxTokens, thinkingConfig: { thinkingLevel: settings.effort === 'low' ? 'LOW' : settings.effort === 'medium' ? 'MEDIUM' : 'HIGH' } } }) })
+    if (!response.ok) throw new RepoModelResponseError(`Gemini request failed (${response.status})`, p.model)
+    const result = await response.json() as { modelVersion?: string; candidates?: Array<{ finishReason?: string; content?: { parts?: Array<{ text?: string }> } }>; usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number } }
+    const usage = readUsage(result.usageMetadata?.promptTokenCount, result.usageMetadata?.candidatesTokenCount), candidate = result.candidates?.[0]
+    if (!candidate || !['STOP','MAX_TOKENS'].includes(candidate.finishReason || '')) throw new RepoModelResponseError('Gemini did not complete its analysis', result.modelVersion || p.model, usage)
+    if (candidate.finishReason === 'MAX_TOKENS') throw new RepoModelResponseError('Answer reached its output limit; narrow the question', result.modelVersion || p.model, usage)
+    const text = candidate.content?.parts?.map(part => part.text || '').join('') || ''
+    if (!text.trim()) throw new RepoModelResponseError('Model returned no analysis', result.modelVersion || p.model, usage)
+    return { text, model: result.modelVersion || p.model, usage }
+  }
   if (repoProvider(p.model) === 'anthropic') {
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 0, timeout: 28_000 })
     const result = await client.messages.create({ model: p.model, max_tokens: p.maxTokens ?? settings.maxTokens, ...(settings.effort ? { output_config: { effort: settings.effort } } : {}), system: p.system, messages: [{ role: 'user', content: p.evidence }] }, { signal })
@@ -70,6 +82,12 @@ export async function* streamRepoModel(p: ModelRequest): AsyncGenerator<{ text: 
   const settings = repoGenerationSettings(p.model, true)
   const signal = AbortSignal.any([p.signal, AbortSignal.timeout(50_000)])
   signal.throwIfAborted()
+  if (repoProvider(p.model) === 'gemini') {
+    const result = await callRepoModel(p)
+    p.onUsage?.(result.usage || { inputTokens: 0, outputTokens: 0 })
+    yield { text: result.text, model: result.model }
+    return
+  }
   if (repoProvider(p.model) === 'anthropic') {
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 0, timeout: 50_000 })
     const stream = client.messages.stream({ model: p.model, max_tokens: p.maxTokens ?? settings.maxTokens, ...(settings.effort ? { output_config: { effort: settings.effort } } : {}), system: p.system, messages: [{ role: 'user', content: p.evidence }] }, { signal })
