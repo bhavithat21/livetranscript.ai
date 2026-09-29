@@ -24,3 +24,11 @@
 
 /* All session actions live above the reading panels. */
 .sessionControls{max-height:38vh;align-items:center;font-size:12px;padding:8px 12px;gap:8px}.sessionControls>div{padding:0;border:0;flex:1}.sessionControls p{margin:0}.sessionControls details[open]{flex-basis:100%}.sessionControls textarea{width:100%;min-height:130px;background:#142842;color:white;border:1px solid #57708e;padding:8px}.sessionControls small{margin-left:auto}
+
+/* Light control bars remain legible above a transparent native workspace. */
+:global(html.lt-desktop.lt-overlay-mode) .toolbar,.sessionControls{background:rgba(244,248,253,.96);color:#253b55;border:1px solid rgba(46,78,120,.2);color-scheme:light;backdrop-filter:none}
+:global(html.lt-desktop.lt-overlay-mode) .toolbar strong{color:#17263b}
+:global(html.lt-desktop.lt-overlay-mode) .toolbar button,.sessionControls button,.sessionControls select,.sessionControls textarea,.sessionControls input{background:#fff;color:#253b55;border:1px solid #a8b8cd}
+:global(html.lt-desktop.lt-overlay-mode) .toolbar button:hover,.sessionControls button:hover{background:#e5effd;color:#142238}
+
+:global(html.lt-desktop.lt-overlay-mode) .sessionControls select,:global(html.lt-desktop.lt-overlay-mode) .sessionControls input,:global(html.lt-desktop.lt-overlay-mode) .sessionControls textarea{background:#fff;color:#253b55;color-scheme:light}

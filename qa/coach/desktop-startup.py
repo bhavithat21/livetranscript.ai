@@ -48,6 +48,7 @@ with sync_playwright() as p:
     page.get_by_label('Overlay interview question').press('Enter')
     page.get_by_role('region',name='What to do next',exact=True).get_by_text('Compare the two input values.',exact=True).wait_for()
     page.get_by_role('region',name='What to write',exact=True).get_by_text('int max(int a, int b) { return Math.max(a, b); }',exact=True).wait_for()
+    assert page.get_by_role('region',name='What to write',exact=True).locator('pre').evaluate('e=>parseFloat(getComputedStyle(e).fontSize)') >= 19
     page.get_by_text('More options',exact=True).click()
     page.get_by_label('Overlay display').select_option('2')
     page.get_by_role('button',name='Enable screen sharing',exact=True).click()

@@ -20,10 +20,10 @@ function initialLayout(): Layout {
  const left = narrow ? width : Math.floor((width - 16) * .44)
  const right = narrow ? width : width - left - 16
  return {
-  next:{x:0,y:0,width:left,height:150,opacity:78},
-  say:{x:0,y:166,width:left,height:Math.max(160,height-340),opacity:78},
-  writing:{x:0,y:Math.max(342,height-158),width:left,height:150,opacity:72},
-  code:{x:narrow?0:left+16,y:narrow?height+16:0,width:right,height,opacity:78},
+  next:{x:0,y:0,width:left,height:150,opacity:94},
+  say:{x:0,y:166,width:left,height:Math.max(160,height-340),opacity:94},
+  writing:{x:0,y:Math.max(342,height-158),width:left,height:150,opacity:92},
+  code:{x:narrow?0:left+16,y:narrow?height+16:0,width:right,height,opacity:94},
   transcript:{x:0,y:narrow?height*2+32:height+16,width:left,height:150,opacity:58},
  }
 }
