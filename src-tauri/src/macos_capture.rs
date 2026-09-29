@@ -1,15 +1,9 @@
 // macOS system-audio capture: spawns the Swift sidecar
 // (src-tauri/binaries/audio-capture.swift) and forwards its raw Float32 mono
-// PCM to the frontend as 16-bit little-endian PCM frames. The sidecar picks its
-// engine: CoreAudio process tap on macOS 15+ (one-time "System Audio Recording
-// Only" grant, no recurring re-confirmation), ScreenCaptureKit on 13/14.
-//
-// Called by: src-tauri/src/lib.rs::start_native_audio (macOS only).
-// Contract: the sidecar prints "RATE <hz>" then "READY" to stderr once capture
-// is live, then streams contiguous f32 LE mono samples at that rate on stdout
-// (no header). start() BLOCKS until READY (or failure), so a returned Ok means
-// audio is really flowing — a denied permission returns Err and the caller
-// falls back to the browser instead of silently recording nothing.
+// PCM to the frontend as 16-bit little-endian PCM frames. macOS 14+ uses
+// the system content picker; macOS 13 uses the legacy recording grant.
+// Contract: RATE <hz> then READY on stderr, contiguous f32 LE on stdout.
+// start() blocks on a background thread until READY, failure, or timeout.
 //
 // Teardown is kill-driven: start() returns a Stopper that kills the sidecar.
 // Killing it closes stdout, so the reader task's rx.recv() returns None and the
@@ -39,7 +33,10 @@ pub fn start(
         .shell()
         .sidecar("audio-capture")
         .map_err(|e| format!("sidecar resolve failed: {e}"))?;
-    let (mut rx, child) = cmd.spawn().map_err(|e| format!("spawn failed: {e}"))?;
+    let (mut rx, child) = cmd
+        .set_raw_out(true)
+        .spawn()
+        .map_err(|e| format!("spawn failed: {e}"))?;
 
     // Rendezvous: the reader task reports Ok(rate) once the sidecar prints
     // READY (rate from the preceding RATE line), or Err if it dies before then.
@@ -53,6 +50,8 @@ pub fn start(
     let signalled_task = signalled.clone();
 
     async_runtime::spawn(async move {
+        let mut diagnostics = Vec::new();
+        let mut last_error = String::new();
         let mut ready = false;
         let mut rate = DEFAULT_SAMPLE_RATE;
         let mut frame_samples = (rate / FRAME_MS_DIVISOR) as usize;
@@ -61,10 +60,16 @@ pub fn start(
         while let Some(ev) = rx.recv().await {
             match ev {
                 CommandEvent::Stdout(bytes) => {
-                    if !ready {
-                        continue; // ignore audio until READY confirmed
-                    }
                     carry.extend_from_slice(&bytes);
+                    if !ready {
+                        // Keep byte alignment when stdout races the stderr READY
+                        // sentinel. Bound startup buffering to one second of f32.
+                        if carry.len() > 768_000 {
+                            let discard = ((carry.len() - 768_000) / 4) * 4;
+                            carry.drain(..discard);
+                        }
+                        continue;
+                    }
                     let n = carry.len() / 4;
                     for i in 0..n {
                         let b = &carry[i * 4..i * 4 + 4];
@@ -84,30 +89,29 @@ pub fn start(
                     }
                     carry.drain(..n * 4);
                 }
-                CommandEvent::Stderr(line) => {
-                    let text = String::from_utf8_lossy(&line);
-                    if !ready {
-                        // "RATE <hz>" precedes READY (process tap runs at the output
-                        // device's native rate — 44.1k on some setups, not always 48k).
-                        if let Some(r) = text
-                            .trim()
-                            .strip_prefix("RATE ")
-                            .and_then(|v| v.trim().parse::<u32>().ok())
-                        {
-                            if r > 0 {
-                                rate = r;
-                                frame_samples = (rate / FRAME_MS_DIVISOR) as usize;
+                CommandEvent::Stderr(bytes) => {
+                    for text in diagnostic_lines(&mut diagnostics, &bytes) {
+                        if !ready {
+                            if let Some(r) = text
+                                .strip_prefix("RATE ")
+                                .and_then(|v| v.parse::<u32>().ok())
+                            {
+                                if (8_000..=192_000).contains(&r) {
+                                    rate = r;
+                                    frame_samples = (rate / FRAME_MS_DIVISOR) as usize;
+                                }
+                                continue;
                             }
-                            continue;
+                            if text == "READY" {
+                                ready = true;
+                                signalled_task.store(true, Ordering::SeqCst);
+                                let _ = init_tx.send(Ok(rate));
+                                continue;
+                            }
+                            last_error = text.clone();
                         }
-                        if text.contains("READY") {
-                            ready = true;
-                            signalled_task.store(true, Ordering::SeqCst);
-                            let _ = init_tx.send(Ok(rate));
-                            continue;
-                        }
+                        eprintln!("[audio-capture] {text}");
                     }
-                    eprintln!("[audio-capture] {}", text.trim_end());
                 }
                 CommandEvent::Terminated(_) => break,
                 _ => {}
@@ -116,7 +120,11 @@ pub fn start(
         // Stream ended (killed by the Stopper, EOF, or crash). If we never hit
         // READY, report failure so start() returns Err.
         if !signalled_task.swap(true, Ordering::SeqCst) {
-            let _ = init_tx.send(Err("sidecar exited before ready (permission denied?)".into()));
+            let _ = init_tx.send(Err(if last_error.is_empty() {
+                "Audio capture ended before it was ready. Try selecting call audio again.".into()
+            } else {
+                last_error
+            }));
         }
         child_for_task.lock().unwrap().take(); // drop our child handle
     });
@@ -150,4 +158,43 @@ fn send_i16(ch: &Channel<InvokeResponseBody>, samples: &[i16]) -> Result<(), ()>
         bytes.extend_from_slice(&s.to_le_bytes());
     }
     ch.send(InvokeResponseBody::Raw(bytes)).map_err(|_| ())
+}
+
+// Raw shell output can split or combine stderr lines independently of stdout.
+fn diagnostic_lines(pending: &mut Vec<u8>, bytes: &[u8]) -> Vec<String> {
+    let mut lines = Vec::new();
+    for byte in bytes {
+        if *byte == b'\n' {
+            lines.push(String::from_utf8_lossy(pending).trim().to_owned());
+            pending.clear();
+        } else if pending.len() < 8192 {
+            pending.push(*byte);
+        }
+    }
+    lines
+}
+
+#[cfg(test)]
+mod tests {
+    use super::diagnostic_lines;
+    #[test]
+    fn readiness_survives_split_and_combined_raw_chunks() {
+        let mut pending = Vec::new();
+        assert!(diagnostic_lines(&mut pending, b"RA").is_empty());
+        assert_eq!(
+            diagnostic_lines(&mut pending, b"TE 48000\nREA"),
+            vec!["RATE 48000"]
+        );
+        assert_eq!(
+            diagnostic_lines(&mut pending, b"DY\nFailure message\n"),
+            vec!["READY", "Failure message"]
+        );
+        assert!(pending.is_empty());
+    }
+    #[test]
+    fn malformed_diagnostics_are_bounded() {
+        let mut pending = Vec::new();
+        diagnostic_lines(&mut pending, &vec![b'x'; 100_000]);
+        assert_eq!(pending.len(), 8192);
+    }
 }

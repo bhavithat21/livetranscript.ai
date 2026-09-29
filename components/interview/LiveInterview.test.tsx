@@ -43,14 +43,15 @@ describe('live startup lifecycle', () => {
     await act(async () => resolveOld())
     expect(stubs.start).toHaveBeenCalledTimes(1)
   })
-  it('returns to setup with an actionable error when initial capture fails', async () => {
+  it('keeps the interview open with an actionable error when audio permission fails', async () => {
     stubs.start.mockRejectedValue(new Error('Microphone access denied'))
     const activity = vi.fn()
     render(<LiveInterview visible blocked={false} onActivity={activity} onComplete={vi.fn()} />)
     start()
-    await screen.findByRole('button', { name: 'Start interview' })
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('Microphone access denied'))
+    expect(screen.getByRole('button', { name: 'End' })).toBeTruthy()
     expect(screen.getByRole('alert').textContent).toContain('Microphone access denied')
-    expect(activity).toHaveBeenLastCalledWith(false)
+    expect(activity).toHaveBeenLastCalledWith(true)
   })
 })
 it('mounts the shared repository coach only when selected before starting', async () => {

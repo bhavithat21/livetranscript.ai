@@ -103,8 +103,8 @@ export function LiveInterview({ visible, blocked, onActivity, onComplete, videoT
       if (token !== lifecycle.current) return
       await Promise.all([call.stop(), microphone.stop()])
       if (token !== lifecycle.current) return
-      activity.current = false; setActive(false); onActivity(false)
-      if (!ending.current) setError(e instanceof Error ? e.message : 'Could not start audio capture.')
+      // Keep the screen session and answer panels mounted after denied audio.
+      if (!ending.current) setError(`${e instanceof Error ? e.message : 'Could not start audio capture.'} Audio is paused; you can continue with screen sharing or end the interview to retry audio.`)
     } finally { if (token === lifecycle.current && !ending.current) setBusy(false) }
   }
 
@@ -145,7 +145,7 @@ export function LiveInterview({ visible, blocked, onActivity, onComplete, videoT
   const turns = liveTurns(transcriptRows)
   const callSpeakers = [...new Set((source === 'mic' ? micRows : callRows).flatMap(row => row.speaker == null ? [] : [row.speaker]))].sort((a, b) => a - b)
   const readingStyle = { '--live-text-size': `${18 * scale}px` } as CSSProperties
-  const captureStatus = finishing ? 'Saving transcript…' : busy ? 'Connecting audio…' : hasRecording ? 'Listening' : source === 'screen' ? 'Screen-only session' : 'Audio paused'
+  const captureStatus = finishing ? 'Saving transcript…' : busy ? native && (source === 'both' || source === 'system') ? 'Choose your call app or display in the macOS picker…' : 'Connecting audio…' : hasRecording ? 'Listening' : source === 'screen' ? 'Screen-only session' : 'Audio paused'
   if (!active && native && visible && repositoryMode) return createPortal(<div className={`${styles.desktopStart} lt-overlay-root`}>
     <NativeWindowControls />
     <section aria-label="Start live interview">
