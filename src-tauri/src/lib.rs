@@ -711,3 +711,5 @@ async fn run_update_check(app: tauri::AppHandle, manual: bool) {
         }
     }
 }
+                let lock_space = Shortcut::new(Some(Modifiers::SHIFT | primary), Code::Space);
+                let unlock_u = Shortcut::new(Some(Modifiers::SHIFT | primary), Code::KeyU);
