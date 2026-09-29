@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { usePathname } from 'next/navigation'
 import { clearDiagnostics, exportDiagnostics, flushDiagnostics, getDiagnostics, getServerDiagnostics, initializeDiagnostics, recordDiagnostic, setDiagnosticsEnabled, subscribeDiagnostics } from '@/lib/diagnostics/client'
 import { diagnosticCode } from '@/lib/diagnostics/schema'
+import { RetryStatus } from './RetryStatus'
 import styles from './Diagnostics.module.css'
 
 /** Independent of capture state: even a failed startup leaves this available. */
@@ -42,6 +43,7 @@ export function DiagnosticsRuntime({ release }: { release?: string }) {
     setNotice(await flushDiagnostics() ? 'Cloud receipt confirmed for the sent batch.' : 'No cloud receipt. Sign in and check your connection; local diagnostics remain available.')
   }
   return <div className="lt-overlay-root">
+    <RetryStatus />
     <button type="button" className={styles.launcher} onClick={() => dialog.current?.showModal()}>Diagnostics{state.delivery === 'failed' ? ' · local' : ''}</button>
     <dialog ref={dialog} className={styles.dialog} aria-labelledby="diagnostics-heading">
       <header><h2 id="diagnostics-heading">Session diagnostics</h2><button type="button" onClick={() => dialog.current?.close()}>Close</button></header>

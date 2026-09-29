@@ -13,6 +13,7 @@ import type { ContextPacket, Lane } from '@/lib/coach/types'
 import { judgeLiveContext, routeDecision } from '@/lib/coach/typesafe'
 import { serverDiagnostic } from '@/lib/diagnostics/server'
 import { diagnosticCode } from '@/lib/diagnostics/schema'
+import { failurePolicy } from '@/lib/coach/retry'
 
 export const maxDuration = 40
 export async function POST(req: Request) {
@@ -30,7 +31,7 @@ export async function POST(req: Request) {
     serverDiagnostic(req, 'app', 'error', { code: 'invalid_shape', httpStatus: error instanceof RepoRequestError ? error.status : 400 })
     return Response.json({ error: 'Invalid or oversized repository context' }, { status: error instanceof RepoRequestError ? error.status : 400 })
   }
-  serverDiagnostic(req, lane, 'start')
+  serverDiagnostic(req, lane, 'start', { retryAttempt: Number(req.headers.get('x-lt-attempt') || 1) })
   const decision = await judgeLiveContext(context, lane, req.signal)
   const routed = routeDecision(decision, lane)
   if (routed.suppress) {
@@ -46,15 +47,15 @@ export async function POST(req: Request) {
     assertRepoModelConfigured(model)
   } catch {
     serverDiagnostic(req, lane, 'error', { httpStatus: 503, code: 'provider_unavailable', durationMs: Date.now() - requestStarted })
-    return Response.json({ error: 'Configure an available model and provider key for this assistance role.' }, { status: 503 })
+    return Response.json({ error: 'Configure an available model and provider key for this assistance role.' }, { status: 503, headers: { 'x-lt-retryable': 'false' } })
   }
   const cancellation = new AbortController(), deadline = AbortSignal.timeout(lane === 'talk' ? 8500 : 28_000)
   const signal = AbortSignal.any([req.signal, cancellation.signal, deadline])
   const encoder = new TextEncoder(), started = performance.now()
-  let closed = false, usage: ModelUsage | undefined
+  let closed = false, usage: ModelUsage | undefined, visibleOutput = false
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
-      const emit = (value: Record<string, unknown>) => { if (!closed && !signal.aborted) controller.enqueue(encoder.encode(`${JSON.stringify(value)}\n`)) }
+      const emit = (value: Record<string, unknown>) => { if (!closed && !signal.aborted) { if (value.type === 'delta' || value.type === 'done') visibleOutput = true; controller.enqueue(encoder.encode(`${JSON.stringify(value)}\n`)) } }
       try {
         emit({ type: 'started', lane, evidenceVersion: context.evidenceVersion, decision })
         const compiled = compileInterviewPrompt(context, lane, instructions)
@@ -78,9 +79,10 @@ export async function POST(req: Request) {
         serverDiagnostic(req, lane, signal.aborted ? 'cancelled' : 'success', { model, durationMs: Date.now() - requestStarted })
         recordUsage('repo-coach', userId, { lane, model, inputTokens: usage?.inputTokens, outputTokens: usage?.outputTokens, elapsedMs: Math.round(performance.now() - started), decisionSource: decision.source, decisionModel: decision.model, decisionMs: decision.elapsedMs, decisionTask: decision.task })
       } catch (error) {
-        const status = error && typeof error === 'object' && 'status' in error && typeof error.status === 'number' ? error.status : undefined
+        const policy = failurePolicy(error), status = policy.status
         serverDiagnostic(req, lane, req.signal.aborted || cancellation.signal.aborted ? 'cancelled' : 'error', { model, durationMs: Date.now() - requestStarted, httpStatus: status, code: deadline.aborted ? 'timeout' : diagnosticCode(error, status) })
-        if (!closed && !req.signal.aborted) controller.enqueue(encoder.encode(`${JSON.stringify({ type: 'error', error: 'Assistance stopped, timed out or returned unsupported evidence. Retry explicitly.' })}\n`))
+        if (!closed && !req.signal.aborted) controller.enqueue(encoder.encode(`${JSON.stringify({ type: 'error', error: 'Assistance stopped, timed out or returned unsupported evidence. Retry explicitly if needed.',
+          retryable: !visibleOutput && !signal.aborted && policy.retryable, status, retryAfterMs: policy.retryAfterMs })}\n`))
       } finally { if (!closed) { closed = true; controller.close() } }
     },
     cancel() { closed = true; cancellation.abort() },

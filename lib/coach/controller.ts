@@ -5,9 +5,10 @@ import { emptyCoach, normalizeQuestion, parseReplayEvent, reduceCoach, resultCur
 import { lessonIds, type LessonId } from './learning/policy'
 import { LIMITS, list, object, parseGuidance, redactSecrets, text } from './validation'
 import { diagnosticSpan, recordDiagnostic } from './diagnostics'
+import type { RetryNotice } from './retry'
 
 export type ReplayReference = { id: string; lane: string; model: string; text: string; summary: string; note: string; verdict: string }
-export type CoachTransport = (lane: Lane, packet: ContextPacket, options: { signal: AbortSignal; instructions?: string; lessons?: LessonId[]; diagnosticHeaders?: Record<string, string>; delta: (text: string, model: string) => void }) => Promise<{ model: string; guidance: Guidance | null }>
+export type CoachTransport = (lane: Lane, packet: ContextPacket, options: { signal: AbortSignal; instructions?: string; lessons?: LessonId[]; diagnosticHeaders?: Record<string, string>; onRetry?: (notice: RetryNotice) => void; beforeRetry?: () => boolean; delta: (text: string, model: string) => void }) => Promise<{ model: string; guidance: Guidance | null }>
 type Flight = { controller: AbortController; key: string; requestId: string }
 export class CoachController {
   private lessons: LessonId[] = []
@@ -144,12 +145,22 @@ export class CoachController {
     this.emit({ type: 'result.start', lane, requestId, questionId: packet.question.id, evidenceVersion: packet.evidenceVersion, contextKey: packet.contextKey }, false)
     const timeout = this.clock.setTimeout(() => { timedOut = true; controller.abort() }, lane === 'talk' ? 9000 : 30_000)
     try {
-      const result = await abortable(this.transport(lane, packet, { signal: controller.signal, lessons: [...this.lessons], diagnosticHeaders: trace.headers(), delta: (value, model) => {
-        if (!this.disposed && !controller.signal.aborted) {
-          if (!firstToken && value.trim()) { firstToken = true; trace.event('first_token', { model, firstTokenMs: this.now() - now }) }
-          this.emit({ type: 'result.delta', requestId, text: value, model }, false)
-        }
-      } }), controller.signal)
+      const result = await abortable(this.transport(lane, packet, {
+        signal: controller.signal, lessons: [...this.lessons], diagnosticHeaders: trace.headers(),
+        onRetry: notice => trace.event('retry', { attempts: notice.attempt, delayMs: notice.delayMs, httpStatus: notice.status }),
+        beforeRetry: () => {
+          if (this.disposed || this.state.status !== 'running' || controller.signal.aborted) return false
+          const at = this.now(); this.requestTimes = this.requestTimes.filter(time => at - time < 60_000)
+          if (this.calls >= 120 || this.requestTimes.length >= 12) { trace.event('paused', { code: 'rate_limited', count: this.calls }); return false }
+          this.calls++; this.requestTimes.push(at); return true
+        },
+        delta: (value, model) => {
+          if (!this.disposed && !controller.signal.aborted) {
+            if (!firstToken && value.trim()) { firstToken = true; trace.event('first_token', { model, firstTokenMs: this.now() - now }) }
+            this.emit({ type: 'result.delta', requestId, text: value, model }, false)
+          }
+        },
+      }), controller.signal)
       if (controller.signal.aborted) throw new Error('Cancelled')
       if (this.disposed) { trace.end('cancelled'); return }
       const guidance = result.guidance ? parseGuidance({ ...result.guidance, patches: result.guidance.patches.map(({ path, fileVersion, startLine, before, after, reason }) => ({ path, fileVersion, startLine, before, after, reason })) }, packet) : null
@@ -160,7 +171,7 @@ export class CoachController {
       else if (controller.signal.aborted) trace.end('cancelled', { code: 'cancelled' })
       else trace.failure(error, error && typeof error === 'object' && 'status' in error && typeof error.status === 'number' ? error.status : undefined)
       if (!this.disposed) this.emit({ type: 'result.fail', requestId, cancelled: controller.signal.aborted,
-        error: controller.signal.aborted ? 'Stopped or timed out. Retry explicitly when ready.' : 'The model request failed or returned unsupported evidence. Retry explicitly; no automatic retries are billed.' }, false)
+        error: controller.signal.aborted ? 'Stopped or timed out. Retry explicitly when ready.' : 'Assistance could not complete after any eligible automatic retries. Check the error in Diagnostics, then retry explicitly. Partial answers are not automatically replayed.' }, false)
     } finally {
       this.clock.clearTimeout(timeout)
       if (this.flights.get(lane)?.requestId === requestId) this.flights.delete(lane)
@@ -190,7 +201,7 @@ export class CoachController {
     return JSON.stringify({ format: 'livetranscript-repo-replay-v1', sessionId: this.sessionId, truncated: this.journalTruncated, events: this.journal,
       evaluations: [...this.replayReferences.map(item => ({ ...item, referenceOnly: true })), ...this.state.results.filter(item => item.status !== 'running').map(item => ({ ...item }))], feedback: this.state.feedback,
       note: 'Contains selected source text and transcript fragments; no raw audio or screen images. Observed terminal output is not independent proof of test execution. Imported evaluations never become observed code.' },
-    (_key, value) => typeof value === 'string' ? redactSecrets(value) : value, 2)
+    (_key, value) => typeof value === 'string' ? redactSecrets(value.slice(0)) : value, 2)
   }
   loadReplay(raw: string) {
     if (this.state.status === 'running') throw new Error('Pause or end before replacing this session with a replay')
@@ -237,31 +248,4 @@ export class CoachController {
   analyzeReplay() { this.replay = false; this.resume(); void this.run('talk', true); void this.run('guide', true) }
   getMetrics() { return { modelRequests: this.calls, activeRequests: this.flights.size, journalEvents: this.journal.length, journalTruncated: this.journalTruncated } }
 }
-export const httpCoachTransport: CoachTransport = async (lane, context, options) => {
-  const response = await fetch('/api/copilot/coach', { method: 'POST', headers: { 'Content-Type': 'application/json', ...options.diagnosticHeaders }, body: JSON.stringify({ lane, context, instructions: options.instructions ?? '', lessons: options.lessons ?? [] }), signal: options.signal })
-  if (!response.ok || !response.body) throw Object.assign(new Error(`Coach unavailable (${response.status})`), { status: response.status })
-  const reader = response.body.getReader(), decoder = new TextDecoder()
-  let buffer = '', received = 0, done = false, model = '', guidance: Guidance | null = null
-  try {
-    for (;;) {
-      const chunk = await reader.read()
-      received += chunk.value?.byteLength ?? 0
-      if (received > 250_000) throw new Error('Response budget exceeded')
-      buffer += chunk.done ? decoder.decode() : decoder.decode(chunk.value, { stream: true })
-      const lines = buffer.split('\n'); buffer = lines.pop() ?? ''
-      if (chunk.done && buffer.trim()) { lines.push(buffer); buffer = '' }
-      for (const line of lines) {
-        if (!line.trim()) continue
-        const event = object(JSON.parse(line))
-        if (event.type === 'error') throw new Error('Model request failed')
-        if (event.type === 'delta') options.delta(text(event.text, 8000), text(event.model, 180, true))
-        else if (event.type === 'done') { model = text(event.model, 180, true); guidance = event.guidance === null ? null : event.guidance as Guidance; done = true }
-        else if (event.type !== 'started') throw new Error('Unsupported stream event')
-      }
-      if (buffer.length > 120_000) throw new Error('Oversized stream event')
-      if (chunk.done || done) break
-    }
-    if (!done) throw new Error('Incomplete response stream')
-    return { model, guidance }
-  } finally { void reader.cancel().catch(() => {}); reader.releaseLock() }
-}
+export { httpCoachTransport } from './transport'

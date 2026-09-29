@@ -5,6 +5,7 @@ import { repoModelFor } from '@/lib/repo/modelPolicy'
 import { extractScreenEvidence, ScreenExtractionError } from '@/lib/repo/screenProvider'
 import { serverDiagnostic } from '@/lib/diagnostics/server'
 import { diagnosticCode } from '@/lib/diagnostics/schema'
+import { retryHeaders } from '@/lib/coach/retry'
 
 export const maxDuration = 60
 export async function POST(req: Request) {
@@ -19,10 +20,10 @@ export async function POST(req: Request) {
   let model: string
   try { model = repoModelFor('vision').model } catch {
     serverDiagnostic(req, 'screen_model', 'error', { code: 'provider_unavailable', httpStatus: 503 })
-    return Response.json({ error: 'Invalid repository vision model configuration' }, { status: 503 })
+    return Response.json({ error: 'Invalid repository vision model configuration' }, { status: 503, headers: { 'x-lt-retryable': 'false' } })
   }
   const started = Date.now()
-  serverDiagnostic(req, 'screen_model', 'start', { model })
+  serverDiagnostic(req, 'screen_model', 'start', { model, retryAttempt: Number(req.headers.get('x-lt-attempt') || 1) })
   try {
     const { observation, model: actualModel, attempts = 1 } = await extractScreenEvidence({ model, image, signal: req.signal })
     recordUsage('repo-screen', userId, { model: actualModel, files: observation.files.length })
@@ -35,7 +36,10 @@ export async function POST(req: Request) {
       code: error instanceof ScreenExtractionError && error.validationCode ? error.validationCode : diagnosticCode(error, status),
       attempts: error instanceof ScreenExtractionError ? error.attempts : undefined,
     })
-    if (error instanceof ScreenExtractionError && !req.signal.aborted) return Response.json({ error: error.message }, { status: error.status, headers: { 'Cache-Control': 'no-store' } })
-    return Response.json({ error: req.signal.aborted ? 'Screenshot capture cancelled' : 'Screenshot extraction failed or timed out. Existing evidence is unchanged.' }, { status: req.signal.aborted ? 499 : 502, headers: { 'Cache-Control': 'no-store' } })
+    // Semantic recovery already happens inside extraction. Never stack client retries
+    // on refusals, truncation, invalid evidence or missing provider configuration.
+    const headers = { 'Cache-Control': 'no-store', ...retryHeaders(error, req.signal.aborted || error instanceof ScreenExtractionError) }
+    if (error instanceof ScreenExtractionError && !req.signal.aborted) return Response.json({ error: error.message }, { status: error.status, headers })
+    return Response.json({ error: req.signal.aborted ? 'Screenshot capture cancelled' : 'Screenshot extraction failed or timed out. Existing evidence is unchanged.' }, { status: req.signal.aborted ? 499 : 502, headers })
   }
 }
