@@ -1,0 +1,38 @@
+name: Explicit paid live-provider acceptance
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Real synthetic model, screen, speech and reconnection probes
+        run: pnpm run test:live-acceptance
+        env:
+          LT_RUN_LIVE_ACCEPTANCE: '1'
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          DEEPGRAM_API_KEY: ${{ secrets.DEEPGRAM_API_KEY }}
+          ASSEMBLYAI_API_KEY: ${{ secrets.ASSEMBLYAI_API_KEY }}
+          COPILOT_DRAFT_MODEL: ${{ vars.COPILOT_DRAFT_MODEL }}
+          COPILOT_MODEL_SMART: ${{ vars.COPILOT_MODEL_SMART }}
+          COPILOT_MODEL_FAST: ${{ vars.COPILOT_MODEL_FAST }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-acceptance-${{ github.run_id }}
+          path: public/release-readiness.json
+          retention-days: 14
