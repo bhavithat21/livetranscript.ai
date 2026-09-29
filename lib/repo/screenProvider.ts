@@ -55,7 +55,7 @@ export async function extractScreenEvidence(input: {
 }
 
 function parseResult(raw: string, model: string, usage?: ScreenTokenUsage): ScreenExtractionResult {
-  const json = raw.replace(/^\`\`\`(?:json)?\\s*\\n?/, '').replace(/\\n?\`\`\`\\s*$/, '')
+  const json = raw.replace(/^```(?:json)?\\s*\\n?/, '').replace(/\\n?```\\s*$/, '')
   let observation: ScreenObservation
   try { observation = parseScreenObservation(JSON.parse(json)) } catch { throw new ScreenExtractionError('Screenshot extraction returned invalid evidence. Try a clearer capture.', 502, model, usage) }
   return { observation, model, raw, ...(usage ? { usage } : {}) }
