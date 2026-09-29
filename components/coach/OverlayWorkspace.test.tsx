@@ -14,5 +14,5 @@ it.each([
 ])('renders the live panels with an older or invalid saved layout: %s', raw => {
   localStorage.setItem('lt-overlay-layout-v2', raw)
   render(<OverlayWorkspace next="Next action" say="Spoken answer" code="Implementation" writing="Explanation" transcript="Question" />)
-  for (const name of ['What to do next', 'What to say', 'What to write']) expect(screen.getByRole('region', { name, exact: true })).toBeTruthy()
+  for (const name of ['What to do next', 'What to say', 'What to write']) expect(screen.getByRole('region', { name })).toBeTruthy()
 })
