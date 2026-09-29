@@ -1,44 +1,26 @@
-import { NextRequest, NextResponse } from 'next/server'
 import { currentUserId } from '@/lib/auth'
+import { rateLimit } from '@/lib/rateLimit'
+import { mintTranscriptionToken, TranscriptionTokenError } from '@/lib/transcription/token'
+import { serverDiagnostic } from '@/lib/diagnostics/server'
 
-// Mints short-lived, scoped tokens so the real provider API keys never reach the browser.
-export async function POST(req: NextRequest) {
-  // Require a signed-in user so anonymous callers can't burn our ASR quota.
+export async function POST(req: Request) {
   const userId = await currentUserId()
-  if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
-  let body: { provider?: string }
+  if (!userId) return Response.json({ error: 'Unauthorized' }, { status: 401, headers: { 'Cache-Control': 'no-store', 'x-lt-retryable': 'false' } })
+  if (req.headers.get('origin') && req.headers.get('origin') !== new URL(req.url).origin) return Response.json({ error: 'Same-origin required' }, { status: 403 })
+  if (!rateLimit(`asr-token:${userId}`, 30, 60_000)) return Response.json({ error: 'Pause before reconnecting' }, { status: 429, headers: { 'Retry-After': '5' } })
+  let provider: unknown
+  try { const raw = await req.text(); if (raw.length > 200) throw new Error(); provider = JSON.parse(raw).provider }
+  catch { return Response.json({ error: 'Invalid request' }, { status: 400 }) }
+  if (provider !== 'deepgram' && provider !== 'assemblyai') return Response.json({ error: 'Unknown provider' }, { status: 400 })
+  const started = Date.now()
+  serverDiagnostic(req, 'transcription', 'start', { provider })
   try {
-    body = await req.json()
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
+    const token = await mintTranscriptionToken(provider, req.signal)
+    serverDiagnostic(req, 'transcription', 'success', { provider, durationMs: Date.now() - started })
+    return Response.json(token, { headers: { 'Cache-Control': 'no-store' } })
+  } catch (error) {
+    const status = error instanceof TranscriptionTokenError ? error.status : 502
+    serverDiagnostic(req, 'transcription', 'error', { provider, httpStatus: status, code: error instanceof TranscriptionTokenError && !error.retryable ? 'provider_unavailable' : 'network' })
+    return Response.json({ error: 'Transcription service could not connect. Check its access or try again.' }, { status, headers: { 'Cache-Control': 'no-store', 'x-lt-retryable': String(error instanceof TranscriptionTokenError ? error.retryable : !req.signal.aborted) } })
   }
-  const provider = body.provider
-
-  if (provider === 'assemblyai') {
-    const key = process.env.ASSEMBLYAI_API_KEY
-    if (!key) return NextResponse.json({ error: 'Engine unavailable' }, { status: 500 })
-    // AssemblyAI streaming temp token (v3). Raw key in Authorization, NO Bearer prefix.
-    const r = await fetch('https://streaming.assemblyai.com/v3/token?expires_in_seconds=300', {
-      headers: { Authorization: key },
-    })
-    if (!r.ok) return NextResponse.json({ error: 'Token mint failed' }, { status: 502 })
-    const j = await r.json()
-    return NextResponse.json({ token: j.token, expiresAt: Date.now() + 300_000 })
-  }
-
-  if (provider === 'deepgram') {
-    const key = process.env.DEEPGRAM_API_KEY
-    if (!key) return NextResponse.json({ error: 'Engine unavailable' }, { status: 500 })
-    const r = await fetch('https://api.deepgram.com/v1/auth/grant', {
-      method: 'POST',
-      headers: { Authorization: `Token ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ttl_seconds: 300 }),
-    })
-    if (!r.ok) return NextResponse.json({ error: 'Token mint failed' }, { status: 502 })
-    const j = await r.json()
-    return NextResponse.json({ token: j.access_token, expiresAt: Date.now() + 300_000 })
-  }
-
-  return NextResponse.json({ error: 'Unknown provider' }, { status: 400 })
 }

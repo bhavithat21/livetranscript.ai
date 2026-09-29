@@ -1,18 +1,19 @@
 /** Diagnostics are metadata, never a general-purpose log sink. Both boundaries
  * rebuild from allowlists. Do not add messages, stacks, URLs, paths or content. */
 export const STAGES = ['app', 'audio', 'transcription', 'screen', 'screen_model', 'talk', 'guide', 'review'] as const
-export const EVENTS = ['start', 'ready', 'first_frame', 'first_partial', 'first_final', 'first_token', 'heartbeat', 'success', 'error', 'cancelled', 'stop', 'paused', 'stall', 'feedback', 'offline', 'online', 'upload_test', 'retry'] as const
-export const CODES = ['permission_denied', 'unavailable', 'network', 'timeout', 'cancelled', 'unauthorized', 'rate_limited', 'provider_unavailable', 'invalid_json', 'invalid_path', 'invalid_language', 'invalid_lines', 'invalid_confidence', 'invalid_shape', 'incomplete_stream', 'unknown'] as const
+export const EVENTS = ['start', 'ready', 'first_frame', 'first_partial', 'first_final', 'first_token', 'heartbeat', 'success', 'error', 'cancelled', 'stop', 'paused', 'stall', 'feedback', 'offline', 'online', 'upload_test', 'gap', 'native_stage', 'retry'] as const
+export const CODES = ['permission_denied', 'unavailable', 'network', 'timeout', 'cancelled', 'unauthorized', 'rate_limited', 'provider_unavailable', 'invalid_json', 'invalid_path', 'invalid_language', 'invalid_lines', 'invalid_confidence', 'invalid_shape', 'incomplete_stream', 'unknown', 'native_ended'] as const
 export type Stage = typeof STAGES[number]
 export type DiagnosticEventName = typeof EVENTS[number]
 export type DiagnosticCode = typeof CODES[number]
 export type Attributes = Record<string, string | number | boolean>
 export type DiagnosticEvent = { v: 1; sessionId: string; operationId: string; seq: number; at: number; stage: Stage; event: DiagnosticEventName; attrs: Attributes }
 export const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i
-const NUMBERS = new Set(['durationMs', 'firstTokenMs', 'frames', 'bytes', 'partials', 'finals', 'count', 'attempts', 'dropped', 'sampleAgeMs', 'captureAgeMs', 'evidenceAgeMs', 'retryAttempt', 'delayMs'])
+const NUMBERS = new Set(['durationMs', 'firstTokenMs', 'frames', 'bytes', 'partials', 'finals', 'count', 'attempts', 'dropped', 'sampleAgeMs', 'captureAgeMs', 'evidenceAgeMs', 'retryAttempt', 'delayMs', 'droppedMs'])
 const ENUMS: Record<string, readonly string[]> = {
+  nativeStage: ['starting', 'spawned', 'picker-requested', 'selection-received', 'picker-released', 'ready', 'first-frame', 'capture-error', 'ipc-failed', 'ended'],
   code: CODES, channel: ['mic', 'system'], source: ['browser', 'native'], runtime: ['web', 'desktop'],
-  phase: ['idle', 'starting', 'recording', 'stopping'], gate: ['initial', 'changed', 'unchanged', 'settling', 'throttled', 'busy'],
+  phase: ['idle', 'starting', 'recording', 'reconnecting', 'stopping'], gate: ['initial', 'changed', 'unchanged', 'settling', 'throttled', 'busy'],
   category: ['correctness', 'directness', 'navigation', 'stale-context', 'latency', 'verbosity'], verdict: ['pass', 'needs-work'],
   provider: ['openai', 'anthropic', 'groq', 'gemini', 'deepgram', 'assemblyai'],
 }
@@ -21,6 +22,7 @@ export function sanitizeAttributes(input: unknown): Attributes {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return result
   for (const [key, value] of Object.entries(input)) {
     if (NUMBERS.has(key) && typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1_000_000_000) result[key] = Math.round(value)
+    else if (key === 'nativeCode' && Number.isSafeInteger(value) && Math.abs(Number(value)) <= 2147483647) result[key] = Number(value)
     else if (key === 'httpStatus' && Number.isInteger(value) && Number(value) >= 100 && Number(value) <= 599) result[key] = Number(value)
     else if ((key === 'speechDetected' || key === 'hasFrames') && typeof value === 'boolean') result[key] = value
     else if (Object.hasOwn(ENUMS, key) && typeof value === 'string' && ENUMS[key].includes(value)) result[key] = value

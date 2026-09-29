@@ -69,3 +69,15 @@ describe('native audio ownership', () => {
     expect(mocks.invoke.mock.calls.filter(([command]) => command === 'stop_native_audio')).toHaveLength(1)
   })
 })
+
+it('reports an unexpected helper exit without treating control metadata as PCM', async () => {
+  const { result } = renderHook(() => useNativeCapture())
+  const ended = vi.fn(), pcm = vi.fn()
+  await result.current.start(pcm, vi.fn(), { onEnded: ended })
+  mocks.channels[0].onmessage({ kind: 'lt-audio-state', stage: 'selection-received' })
+  expect(pcm).not.toHaveBeenCalled(); expect(ended).not.toHaveBeenCalled()
+  mocks.channels[0].onmessage({ kind: 'lt-audio-state', stage: 'ended', expected: false })
+  expect(ended).toHaveBeenCalledTimes(1)
+  expect(ended).toHaveBeenCalledWith(expect.stringContaining('helper stopped unexpectedly'))
+  await result.current.stop()
+})

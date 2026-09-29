@@ -2,23 +2,25 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useMicStream, type AudioSource } from '@/lib/audio/useMicStream'
 import { useNativeCapture } from '@/lib/audio/useNativeCapture'
-import { connectWithFallback } from '@/lib/transcription'
+import { connectWithFallback, type ProviderChoice } from '@/lib/transcription'
+import { registerRecoveryTest } from '@/lib/reliability/mockControls'
+import { RecoveringTranscription } from '@/lib/transcription/recovery'
 import type { TranscriptEvent, TranscriptionProvider } from '@/lib/transcription/types'
 import { mergeSegments, type Segment } from '@/lib/transcript/store'
 import { diagnosticSpan } from '@/lib/diagnostics/client'
 
 export type CapturedSegment = Segment & { capturedAt: number }
-export type CapturePhase = 'idle' | 'starting' | 'recording' | 'stopping'
+export type CapturePhase = 'idle' | 'starting' | 'recording' | 'reconnecting' | 'stopping'
 type Trace = ReturnType<typeof diagnosticSpan>
 type RecordingRun = {
   cancelled: boolean; acceptFinals: boolean; abort: AbortController
-  nativeAttempted: boolean; captureReleased: boolean; connected: TranscriptionProvider | null
+  unregisterTest?: () => void; nativeAttempted: boolean; captureReleased: boolean; connected: TranscriptionProvider | null
   stop: Promise<CapturedSegment[]> | null; timeout: ReturnType<typeof setTimeout> | null
   captureTrace: Trace; asrTrace: Trace | null; watchdog: ReturnType<typeof setInterval> | null
 }
 
-/** Independent ASR channel. Diagnostic timers report metadata only; they never
- * change capture, provider selection, cancellation or transcript contents. */
+/** Independent audio channel. ASR recovery replaces only its network connection;
+ * diagnostic timers never fabricate speech or restart physical capture. */
 export function useInterviewRecorder() {
   const { start: startBrowser, stop: stopBrowser } = useMicStream()
   const { start: startNative, stop: stopNative, isNative } = useNativeCapture()
@@ -26,6 +28,8 @@ export function useInterviewRecorder() {
   const [segments, setSegments] = useState<CapturedSegment[]>([])
   const [error, setError] = useState<string | null>(null)
   const [level, setLevel] = useState(0)
+  const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null)
+  const [connectionGeneration, setConnectionGeneration] = useState(0)
   const rows = useRef<CapturedSegment[]>([])
   const runRef = useRef<RecordingRun | null>(null)
   const mounted = useRef(true)
@@ -49,6 +53,7 @@ export function useInterviewRecorder() {
     if (!run) return Promise.resolve(rows.current.slice())
     if (run.stop) return run.stop
     run.cancelled = true
+    run.unregisterTest?.()
     if (run.timeout) clearTimeout(run.timeout)
     releaseCapture(run)
     if (!run.connected) run.abort.abort()
@@ -73,7 +78,7 @@ export function useInterviewRecorder() {
     return run.stop
   }, [releaseCapture])
 
-  const start = useCallback(async (source: AudioSource, keyterms: string[] = [], maxSpeakers = source === 'mic' ? 1 : 5) => {
+  const start = useCallback(async (source: AudioSource, keyterms: string[] = [], maxSpeakers = source === 'mic' ? 1 : 5, preserveSegments = false) => {
     if (runRef.current) throw new Error('Audio capture is already active or stopping.')
     if (!mounted.current) return
     const run: RecordingRun = {
@@ -81,7 +86,7 @@ export function useInterviewRecorder() {
       connected: null, stop: null, timeout: null, watchdog: null, asrTrace: null,
       captureTrace: diagnosticSpan('audio', { channel: source, source: source === 'system' && isNative ? 'native' : 'browser', phase: 'starting' }),
     }
-    runRef.current = run; rows.current = []; setSegments([]); setError(null); setPhase('starting')
+    runRef.current = run; if (!preserveSegments) { rows.current = []; setSegments([]); setRecoveryNotice(null) }; setError(null); setPhase('starting')
     const valid = () => mounted.current && runRef.current === run && !run.cancelled
     const pending: ArrayBuffer[] = []
     let bufferedBytes = 0, frames = 0, bytes = 0, partials = 0, finals = 0, lastFrameAt = 0, speechDetected = false, stallReported = false
@@ -114,7 +119,7 @@ export function useInterviewRecorder() {
       if (Number.isFinite(rms) && rms > 0.02) speechDetected = true
       lastLevelAt = performance.now(); setLevel(Number.isFinite(rms) ? Math.max(0, Math.min(1, rms)) : 0)
     }
-    const onEnded = () => { if (valid()) { run.captureTrace.event('stop'); void stop() } }
+    const onEnded = (reason?: string) => { if (valid()) { if (reason) { startupError = new Error(reason); setError(reason); run.captureTrace.event('error', { code: 'native_ended' }) } else run.captureTrace.event('stop'); void stop() } }
     let startupError: Error | null = null
     try {
       let rate = 0
@@ -122,12 +127,12 @@ export function useInterviewRecorder() {
         run.nativeAttempted = true
         try { rate = await startNative(onPcm, onLevel, { source, onEnded }) }
         catch (cause) {
-          if (!valid()) return
+          if (!valid()) { if (startupError) throw startupError; return }
           await stopNative()
           if (isNative) throw new Error(typeof cause === 'string' ? cause : cause instanceof Error ? cause.message : 'System audio could not start. Check macOS audio recording permission and reopen the app.')
         }
       }
-      if (!valid()) return
+      if (!valid()) { if (startupError) throw startupError; return }
       if (!rate) rate = await startBrowser(onPcm, onLevel, { source, onEnded })
       if (!valid()) return
       run.captureTrace.event('ready')
@@ -137,10 +142,22 @@ export function useInterviewRecorder() {
         startupError = new Error('Transcription could not connect in time. Check your connection and try again.')
         run.asrTrace?.end('error', { code: 'timeout' }); setError(startupError.message); void stop()
       }, 25_000)
-      const result = await connectWithFallback({ keyterms, sampleRate: rate, maxSpeakers: Math.max(1, Math.min(10, maxSpeakers)), signal: run.abort.signal })
+      const result = await connectWithFallback({ keyterms, sampleRate: rate, maxSpeakers: Math.max(1, Math.min(10, maxSpeakers)), signal: run.abort.signal, diagnosticHeaders: run.asrTrace.headers() })
       if (!valid()) { void result.provider.disconnect().catch(() => {}); if (startupError) throw startupError; return }
       if (run.timeout) clearTimeout(run.timeout)
-      run.timeout = null; run.connected = result.provider
+      run.timeout = null
+      const config = { keyterms, sampleRate: rate, maxSpeakers: Math.max(1, Math.min(10, maxSpeakers)), signal: run.abort.signal, diagnosticHeaders: run.asrTrace.headers() }
+      const provider = new RecoveringTranscription(result, config,
+        (next, preferred) => connectWithFallback(next, undefined, (['Deepgram', 'AssemblyAI'].includes(preferred) ? preferred : 'auto') as ProviderChoice),
+        event => {
+          if (!valid()) return
+          if (event.state === 'reconnecting') { setPhase('reconnecting'); run.asrTrace?.event('retry', { attempts: event.attempt }) }
+          if (event.state === 'reconnected') { setPhase('recording'); setConnectionGeneration(value => value + 1); partials = 0; finals = 0; run.asrTrace?.event('ready', { attempts: event.attempt }) }
+          if (event.state === 'gap') { setRecoveryNotice('The transcription connection was interrupted. Some audio may be missing; verify the transcript and interviewer voice.'); run.asrTrace?.event('gap', { droppedMs: event.droppedMs }) }
+        })
+      run.connected = provider
+      run.unregisterTest = registerRecoveryTest(run.asrTrace.id, () => valid() && provider.testConnectionLoss())
+      setConnectionGeneration(value => value + 1)
       run.asrTrace.event('ready')
       const ingest = (event: TranscriptEvent) => {
         if (!mounted.current || runRef.current !== run || !run.acceptFinals) return
@@ -149,12 +166,12 @@ export function useInterviewRecorder() {
         rows.current = mergeSegments(rows.current, event).map((row) => ({ ...row, capturedAt: previous.get(row.id) ?? utteranceTime ?? Date.now() }))
         setSegments(rows.current)
       }
-      result.provider.onPartial(event => { if (mounted.current && runRef.current === run && run.acceptFinals) { if (!partials++) run.asrTrace?.event('first_partial') }; ingest(event) })
-      result.provider.onFinal(event => { if (mounted.current && runRef.current === run && run.acceptFinals) { if (!finals++) run.asrTrace?.event('first_final') }; ingest(event) })
-      result.provider.onStatus?.(({ error: message }) => { if (!valid()) return; run.asrTrace?.failure(message); setError(message); void stop() })
-      for (const chunk of pending) { if (!valid()) break; result.provider.sendAudio(chunk) }
+      provider.onPartial(event => { if (mounted.current && runRef.current === run && run.acceptFinals) { if (!partials++) run.asrTrace?.event('first_partial') }; ingest(event) })
+      provider.onFinal(event => { if (mounted.current && runRef.current === run && run.acceptFinals) { if (!finals++) run.asrTrace?.event('first_final') }; ingest(event) })
+      provider.onStatus?.(({ error: message }) => { if (!valid()) return; run.asrTrace?.failure(message); setError(message); void stop() })
+      for (const chunk of pending) { if (!valid()) break; provider.sendAudio(chunk) }
       pending.length = 0
-      if (valid()) setPhase('recording')
+      if (valid()) setPhase(provider.isRecovering ? 'reconnecting' : 'recording')
     } catch (cause) {
       if (!valid()) { if (startupError) throw startupError; return }
       if (run.asrTrace) run.asrTrace.failure(cause); else run.captureTrace.failure(cause)
@@ -169,7 +186,7 @@ export function useInterviewRecorder() {
     return () => { mounted.current = false; window.removeEventListener('pagehide', onPageHide); void stop() }
   }, [stop])
   const getSegments = useCallback(() => rows.current.slice(), [])
-  return { start, stop, phase, segments, error, level, getSegments }
+  return { start, stop, phase, segments, error, level, recoveryNotice, connectionGeneration, getSegments }
 }
 export function captureText(segments: CapturedSegment[]): string {
   return segments.filter((row) => row.text.trim()).map((row) => `${row.text}${row.isFinal ? '' : ' [Unfinalized transcription; verify]'}`).join('\n')

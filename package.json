@@ -1,10 +1,10 @@
 {
   "name": "app",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "node scripts/check-production-readiness.mjs && next build",
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
@@ -20,7 +20,8 @@
     "eval:repo:select": "REPO_BENCHMARK_ACTION=select vitest run --config evals/repo/vitest.config.ts manageBenchmark",
     "eval:vision": "vitest run --config evals/vision/vitest.config.ts",
     "eval:classifier": "vitest run --config evals/classifier/vitest.config.ts",
-    "test:simulator": "vitest run lib/coach/simulation/runner.test.ts"
+    "test:simulator": "vitest run lib/coach/simulation/runner.test.ts",
+    "test:live-acceptance": "node scripts/check-production-readiness.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.114.0",

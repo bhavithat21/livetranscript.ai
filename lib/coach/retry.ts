@@ -50,7 +50,7 @@ function abortable<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
     const aborted = () => { cleanup(); reject(signal.reason ?? new DOMException('Cancelled', 'AbortError')) }
     const cleanup = () => signal.removeEventListener('abort', aborted)
     signal.addEventListener('abort', aborted, { once: true })
-    work.then(value => { cleanup(); signal.aborted ? aborted() : resolve(value) }, error => { cleanup(); reject(error) })
+    work.then(value => { cleanup(); if (signal.aborted) aborted(); else resolve(value) }, error => { cleanup(); reject(error) })
     if (signal.aborted) aborted()
   })
 }

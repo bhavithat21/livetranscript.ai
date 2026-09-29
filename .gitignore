@@ -57,3 +57,6 @@ src-tauri/binaries/audio-capture-*
 
 # Generated self-hosted QA font CSS; never upload font assets.
 qa/refinement/generated-fonts.css
+
+# Generated proof only; never commit a fabricated readiness receipt.
+/public/release-readiness.json

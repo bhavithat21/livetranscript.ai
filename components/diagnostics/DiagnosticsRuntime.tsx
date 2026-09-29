@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { usePathname } from 'next/navigation'
 import { clearDiagnostics, exportDiagnostics, flushDiagnostics, getDiagnostics, getServerDiagnostics, initializeDiagnostics, recordDiagnostic, setDiagnosticsEnabled, subscribeDiagnostics } from '@/lib/diagnostics/client'
 import { diagnosticCode } from '@/lib/diagnostics/schema'
+import { ReadinessPanel } from './ReadinessPanel'
 import { RetryStatus } from './RetryStatus'
 import styles from './Diagnostics.module.css'
 
@@ -64,6 +65,7 @@ export function DiagnosticsRuntime({ release }: { release?: string }) {
         <button type="button" disabled={!state.enabled} onClick={() => { recordDiagnostic('transcription', 'feedback', { verdict: 'needs-work', category: 'correctness' }); setNotice('Transcript feedback recorded.') }}>Missing transcript</button>
       </div>
       <p role="status">{notice}</p>
+      <ReadinessPanel />
       <h3>Recent events</h3>
       <p>Start/ready does not prove data is flowing. Look for first frame, first final transcript, and a completed answer. Silence is not automatically an error. A missing stop event is not proof of a crash.</p>
       <div className={styles.timeline}><table><thead><tr><th>Time</th><th>Stage</th><th>Event</th><th>Metadata</th></tr></thead><tbody>{state.events.slice(-60).reverse().map(item => <tr key={`${item.sessionId}:${item.seq}`}><td>{new Date(item.at).toLocaleTimeString()}</td><td>{item.stage}</td><td>{item.event}</td><td><code>{JSON.stringify(item.attrs)}</code></td></tr>)}</tbody></table>{!state.events.length && <p>No diagnostic events recorded yet.</p>}</div>

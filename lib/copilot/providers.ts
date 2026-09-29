@@ -1,6 +1,6 @@
 import OpenAI from 'openai'
 import Anthropic from '@anthropic-ai/sdk'
-import { vendorForModel, fastFallbackModel, fallbackChain, type ThinkingConfig, type Effort } from './modes'
+import { vendorForModel, configuredDraftModel, fallbackChain, type ThinkingConfig, type Effort } from './modes'
 import { DRAFT_SENTINEL, REFINED_SENTINEL } from './draftProtocol'
 import { logError } from '@/lib/log'
 
@@ -93,7 +93,8 @@ async function* openaiTokens(p: AnswerParams, client: OpenAI): AsyncGenerator<st
     model: p.model,
     stream: true,
     temperature: p.temperature,
-    max_tokens: p.maxTokens ?? DEFAULT_MAX_TOKENS,
+    max_completion_tokens: p.maxTokens ?? DEFAULT_MAX_TOKENS,
+    ...(p.model.includes('gpt-oss') ? { reasoning_effort: 'low' as const } : {}),
     messages: [
       // Stable prefix first → OpenAI auto-caches it across follow-ups.
       { role: 'system', content: p.system },
@@ -230,94 +231,52 @@ async function* withFallbackChain(p: AnswerParams): AsyncGenerator<string> {
 // client (parseDraftStream) shows the draft badged as "Quick take" and cleanly
 // replaces it with the refined answer.
 async function* withSpeculativeDraft(p: AnswerParams): AsyncGenerator<string> {
+  const draftModel = configuredDraftModel()
+  if (!draftModel || draftModel === p.model) { yield* withFallbackChain(p); return }
   const deep = withFallbackChain(p)[Symbol.asyncIterator]()
-  // Kick off the deep answer's first token immediately (don't await yet). Track its
-  // outcome with a plain flag so the draft loop can stop the instant it settles —
-  // whether the deep answer succeeded OR failed. deepFailed records a first-token
-  // error (Anthropic 429/529/500 is common on the smart tier) so we can keep the
-  // draft the user is reading instead of swapping it for an error note.
-  let deepSettled = false
-  let deepFailed = false
   const firstDeep = deep.next()
-  // BOTH handlers attached: without an onRejected, a first-token rejection would
-  // become an unhandled promise rejection (can terminate the serverless invocation).
-  // The rejection is still surfaced through drainDeep()'s await below — this handler
-  // only records state, it doesn't swallow the error path.
-  void firstDeep.then(
-    () => { deepSettled = true },
-    () => { deepSettled = true; deepFailed = true },
-  )
-  const timer = new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), DRAFT_THRESHOLD_MS))
-  // Guard the race's readiness branch too, so a fast rejection here doesn't create a
-  // second unhandled leaf; a first-token error resolves the race as 'ready' and the
-  // error then surfaces through drainDeep().
-  const raced = await Promise.race([firstDeep.then(() => 'ready' as const, () => 'ready' as const), timer])
-
-  // Drain the deep generator from its already-started first token to exhaustion.
-  async function* drainDeep(): AsyncGenerator<string> {
-    const first = await firstDeep
-    if (!first.done && first.value) yield first.value
-    for (;;) {
-      const n = await deep.next()
-      if (n.done) return
-      if (n.value) yield n.value
-    }
-  }
-
-  if (raced === 'ready') {
-    // Deep answer's first token settled before the threshold — stream it straight,
-    // no draft/no swap. (If it settled as an ERROR, drainDeep rethrows and toReadable
-    // notes it — same as the non-draft path.)
-    yield* drainDeep()
-    return
-  }
-
-  // Deep answer is slow — fill the gap with a fast Groq draft, then swap. If the
-  // draft itself errors (Groq down/rate-limited), fall through and just wait on the
-  // deep answer with no draft rather than failing.
-  let draftEmitted = false
+  const deepReady = firstDeep.then(() => ({ kind: 'deep' as const }), () => ({ kind: 'deep' as const }))
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const start = await Promise.race([deepReady, new Promise<{ kind: 'timeout' }>(resolve => { timer = setTimeout(() => resolve({ kind: 'timeout' }), DRAFT_THRESHOLD_MS) })])
+  clearTimeout(timer)
+  const cancellation = new AbortController()
+  let draftShown = false
   try {
-    const draftModel = fastFallbackModelForDraft()
-    const draftGen = tokensFor({ ...p, model: draftModel, maxTokens: DRAFT_MAX_TOKENS, thinking: undefined, effort: undefined })
-    for await (const t of draftGen) {
-      // Stop drafting the moment the deep answer's first token settles (success or
-      // failure) — no point extending a draft we're about to replace or fall back to.
-      if (deepSettled) break
-      if (t) {
-        if (!draftEmitted) { draftEmitted = true; yield DRAFT_SENTINEL }
-        yield t
-      }
+    if (start.kind === 'timeout') {
+      const signal = p.signal ? AbortSignal.any([p.signal, cancellation.signal]) : cancellation.signal
+      // Vision stays on the deep path; a text-only draft must not receive images.
+      const draft = tokensFor({ ...p, image: null, model: draftModel, signal, maxTokens: DRAFT_MAX_TOKENS, thinking: undefined, effort: undefined })
+      try {
+        for (;;) {
+          const next = draft.next().then(value => ({ kind: 'draft' as const, value }), error => ({ kind: 'error' as const, error }))
+          const winner = await Promise.race([deepReady, next])
+          if (winner.kind === 'deep') break
+          if (winner.kind === 'error') throw winner.error
+          if (winner.value.done) break
+          if (winner.value.value) { if (!draftShown) { draftShown = true; yield DRAFT_SENTINEL }; yield winner.value.value }
+        }
+      } catch (error) { if (!p.signal?.aborted) logError('copilot/providers/draft', error) }
+      finally { cancellation.abort(); void draft.return(undefined).catch(() => {}) }
     }
-  } catch (e) {
-    logError('copilot/providers/draft', e)
-  }
-
-  // A draft is not a completed deep answer. Preserve any displayed draft, but
-  // propagate failure so callers show an incomplete state and can retry.
-  if (deepFailed) {
-    // No draft was shown — surface the deep error the normal way.
-    yield* drainDeep()
-    return
-  }
-
-  // Switch to the deep answer. Only emit REFINED_SENTINEL if a draft was shown
-  // (else the client is in 'final' phase and needs no swap marker).
-  if (draftEmitted) yield REFINED_SENTINEL
-  yield* drainDeep()
+    const first = await firstDeep
+    if (draftShown) yield REFINED_SENTINEL
+    if (!first.done && first.value) yield first.value
+    if (!first.done) for (;;) { const next = await deep.next(); if (next.done) break; if (next.value) yield next.value }
+  } finally { cancellation.abort(); void deep.return?.(undefined).catch(() => {}) }
 }
 
-// The draft always uses a fast model regardless of the deep tier's vendor: Groq if
-// keyed (fastest), else the standard fast fallback (Haiku/OpenAI).
-function fastFallbackModelForDraft(): string {
-  return process.env.GROQ_API_KEY ? 'llama-3.3-70b-versatile' : fastFallbackModel()
-}
-
-// Whether a mode/model should use the two-pass draft: only the smart tier benefits
-// (the fast tier is already sub-second, so a draft would just add a pointless swap).
 function shouldDraft(p: AnswerParams): boolean {
-  // Groq/OpenAI fast models: no draft. Anthropic smart models: draft. An image
-  // (vision) answer is inherently smart-tier and slow → also drafts.
-  return vendorForModel(p.model) === 'anthropic' && !!process.env.GROQ_API_KEY
+  return vendorForModel(p.model) === 'anthropic' && process.env.COPILOT_DRAFT_MODEL !== 'off'
+}
+
+/** Synthetic probes deliberately use the exact provider implementation without
+ * fallback or speculation, so an inaccessible primary cannot appear healthy. */
+export async function probeAnswerModel(model: string, signal: AbortSignal): Promise<void> {
+  let text = ''
+  for await (const part of tokensFor({ model, system: 'Reply with READY only.', question: 'Readiness check.', transcript: '', context: null, history: [], image: null, temperature: 0, maxTokens: 512, signal })) {
+    text += part; if (text.length > 2000) throw new Error('Probe output budget exceeded')
+  }
+  if (!text.trim()) throw new Error('Model returned no probe text')
 }
 
 // Stream a grounded answer from whichever vendor owns the model, with a fast-tier

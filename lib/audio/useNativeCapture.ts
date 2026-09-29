@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef } from 'react'
 import type { MicStreamOptions } from './useMicStream'
-import { logError } from '@/lib/log'
+import { diagnosticSpan } from '@/lib/diagnostics/client'
 
 // Coerce whatever the Tauri IPC channel delivered into an ArrayBuffer, or null
 // if it's not binary-shaped. Covers ArrayBuffer (docs), Uint8Array (observed on
@@ -40,6 +40,7 @@ type NativeSession = {
   cancelled: boolean
   start: Promise<number>
   stop: Promise<void> | null
+  trace: ReturnType<typeof diagnosticSpan>
 }
 
 // Native capture is a single OS resource. Serialize acquisition/retirement even
@@ -71,6 +72,7 @@ export function useNativeCapture() {
       if (nativeOwner !== session) return
       const { invoke } = await import('@tauri-apps/api/core')
       await invoke('stop_native_audio')
+      session.trace.end('stop')
       if (nativeOwner === session) nativeOwner = null
     })
     return session.stop
@@ -86,7 +88,7 @@ export function useNativeCapture() {
     if (!isTauri()) return Promise.resolve(0)
     const existing = sessionRef.current
     if (existing && !existing.cancelled) return existing.start
-    const session: NativeSession = { cancelled: false, start: Promise.resolve(0), stop: null }
+    const session: NativeSession = { cancelled: false, start: Promise.resolve(0), stop: null, trace: diagnosticSpan('audio', { source: 'native' }) }
     sessionRef.current = session
     session.start = serializeNative(async () => {
       if (session.cancelled) throw cancelError()
@@ -96,11 +98,23 @@ export function useNativeCapture() {
       let badShapeLogged = false
       channel.onmessage = (message) => {
         if (session.cancelled || nativeOwner !== session) return
+        if (message && typeof message === 'object' && 'kind' in message && message.kind === 'lt-audio-state') {
+          const state = message as { stage?: string; expected?: boolean; code?: number }
+          const allowed = ['starting', 'spawned', 'picker-requested', 'selection-received', 'picker-released', 'ready', 'first-frame', 'capture-error', 'ipc-failed', 'ended']
+          if (!state.stage || !allowed.includes(state.stage)) return
+          session.trace.event('native_stage', { nativeStage: state.stage, nativeCode: state.code })
+          if (state.stage === 'ended' && state.expected !== true) {
+            session.cancelled = true
+            session.trace.end('error', { code: 'native_ended' })
+            opts.onEnded?.('Native audio helper stopped unexpectedly. Retry call audio; the microphone and screen can remain active.')
+          }
+          return
+        }
         const pcm = toArrayBuffer(message)
         if (!pcm) {
           if (!badShapeLogged) {
             badShapeLogged = true
-            logError('nativeCapture/frame-shape', new Error(`unexpected channel payload: ${Object.prototype.toString.call(message)}`))
+            session.trace.event('error', { code: 'invalid_shape' })
           }
           return
         }
@@ -120,8 +134,10 @@ export function useNativeCapture() {
           if (nativeOwner === session) nativeOwner = null
           throw cancelError()
         }
+        session.trace.event('ready')
         return rate
       } catch (cause) {
+        session.trace.failure(cause)
         session.cancelled = true
         if (nativeOwner === session) {
           // Also retire a partially acquired native session after a start error.
