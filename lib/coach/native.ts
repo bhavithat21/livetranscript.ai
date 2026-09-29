@@ -16,10 +16,16 @@ export async function nativeDisplays(): Promise<NativeDisplay[]> {
 export async function nativeFrameSource(displayId: string): Promise<FrameSource> {
   const { leaseId } = await invoke<{ leaseId: string }>('coach_start', { displayId, approved: true })
   let stopped = false
+  // Prove the selected display can actually produce pixels before the UI reports screen awareness as live.
+  // This distinguishes permission/display failures from later vision-provider failures.
+  let firstSample: { pixels: number[]; width: number; height: number } | null
+  try { firstSample = await invoke<{ pixels: number[]; width: number; height: number }>('coach_sample', { leaseId }) }
+  catch (error) { await invoke('coach_stop', { leaseId }).catch(() => {}); throw new Error(`Native display capture could not read its first frame: ${error instanceof Error ? error.message : String(error)}`) }
   return {
     async signal() {
       if (stopped) return null
-      const sample = await invoke<{ pixels: number[]; width: number; height: number }>('coach_sample', { leaseId })
+      const sample = firstSample ?? await invoke<{ pixels: number[]; width: number; height: number }>('coach_sample', { leaseId })
+      firstSample = null
       if (sample.pixels.length !== sample.width * sample.height || sample.pixels.length > 640 * 640) throw new Error('Invalid native screen sample')
       const pixels = Uint8Array.from(sample.pixels)
       let key = ''
