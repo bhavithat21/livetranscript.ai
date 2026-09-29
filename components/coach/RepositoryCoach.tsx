@@ -100,13 +100,13 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
     }, 400)
     return () => clearInterval(timer)
   }, [controller, running])
-  async function selectScreen(native = false) {
+  async function selectScreen(useNative = nativeAvailable()) {
     setError(null); setSelecting(true)
     const token = ++generation.current
     try {
-      const source = native ? await nativeFrameSource(displayId) : await browserFrameSource(() => { if (mounted.current && token === generation.current) void screen.stop() })
+      const selectedDisplay = useNative ? (displayId || (await nativeDisplays())[0]?.id || '') : ''\n      if (useNative && !selectedDisplay) throw new Error('No desktop display is available for screen awareness.')\n      const source = useNative ? await nativeFrameSource(selectedDisplay) : await browserFrameSource(() => { if (mounted.current && token === generation.current) void screen.stop() })
       if (!mounted.current || token !== generation.current || controller.getSnapshot().status !== 'running') { await source.stop(); return }
-      await screen.attach(source, native ? 'native' : 'browser')
+      await screen.attach(source, useNative ? 'native' : 'browser')
       if (!mounted.current || token !== generation.current || controller.getSnapshot().status !== 'running') { await screen.stop(); return }
       screen.watch(true)
     } catch (failure) { if (mounted.current && token === generation.current) setError(failure instanceof Error ? failure.message : 'Screen sharing is unavailable.') }
@@ -154,7 +154,7 @@ function CoachWorkspace({ controller, screen, getQuestionTranscript = EMPTY_TRAN
     {state.status === 'idle' && <div className={styles.setup}><h3>Follow the code. Keep the conversation moving.</h3><p>Share only the screen or window you are allowed to show. The coach keeps observed code separate from suggestions, asks for missing evidence, and never edits files or runs commands for you.</p><label className={styles.label} htmlFor="coach-objective">Practice task</label><textarea id="coach-objective" className={styles.input} rows={3} maxLength={2000} value={objective} onChange={event => setObjective(event.target.value)} /><label className={styles.permission}><input type="checkbox" checked={consent} onChange={event => setConsent(event.target.checked)} /><span>I may share this code with the configured AI providers. This is practice or a session that explicitly permits external AI.</span></label><button className={`${styles.button} ${styles.primary}`} disabled={!consent || !objective.trim()} onClick={start}>Start repository practice</button></div>}
     {state.status !== 'idle' && <>
       <div className={styles.controls}>
-        <button className={styles.button} disabled={!running || selecting || reading || capture.reading} onClick={() => void selectScreen()}>{selecting ? 'Selecting…' : capture.sharing ? 'Change shared screen' : 'Share screen'}</button>
+        <button className={styles.button} disabled={!running || selecting || reading || capture.reading} onClick={() => void selectScreen(nativeAvailable())}>{selecting ? 'Connecting…' : capture.sharing ? 'Change display' : nativeAvailable() ? 'Start screen awareness' : 'Share screen'}</button>
         {capture.sharing && <><button className={styles.button} disabled={!running || reading} onClick={() => screen.watch(!capture.watching)}>{capture.watching ? 'Pause screen watch' : 'Watch changes'}</button><button className={styles.button} disabled={!running || capture.reading || reading} onClick={() => void screen.captureNow()}>Capture now</button><button className={styles.button} onClick={() => void screen.stop()}>Stop sharing</button></>}
         <button className={styles.button} disabled={!running || capture.reading || reading} onClick={() => screenshots.current?.click()}>Add screenshots</button><input hidden ref={screenshots} type="file" multiple accept="image/png,image/jpeg,image/webp" aria-label="Repository screenshots" onChange={event => void uploadScreens(event.target.files)} />
         {running ? <button className={styles.button} onClick={pause}>Pause coach</button> : state.status === 'paused' && <button className={styles.button} disabled={loadedReplay && !state.question} onClick={() => loadedReplay ? controller.analyzeReplay() : controller.resume()}>{loadedReplay ? 'Analyze replay with AI' : 'Resume coach'}</button>}
