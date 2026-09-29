@@ -601,7 +601,8 @@ pub fn run() {
 
                 // Easier lock escape: CmdOrCtrl+Shift+Space mirrors the L shortcut.
                 // It is deliberately global because a click-through window cannot receive clicks.
-                let lock_space = Shortcut::new(Some(Modifiers::SHIFT | primary), Code::Space);\n                let unlock_u = Shortcut::new(Some(Modifiers::SHIFT | primary), Code::KeyU);
+                let lock_space = Shortcut::new(Some(Modifiers::SHIFT | primary), Code::Space);
+                let unlock_u = Shortcut::new(Some(Modifiers::SHIFT | primary), Code::KeyU);
                 let space_registered = app.global_shortcut().on_shortcut(lock_space, move |app, shortcut, event| {
                         if event.state == ShortcutState::Pressed && shortcut == &lock_space {
                             let handle = app.clone(); std::thread::spawn(move || toggle_lock(&handle));
@@ -711,5 +712,3 @@ async fn run_update_check(app: tauri::AppHandle, manual: bool) {
         }
     }
 }
-                let lock_space = Shortcut::new(Some(Modifiers::SHIFT | primary), Code::Space);
-                let unlock_u = Shortcut::new(Some(Modifiers::SHIFT | primary), Code::KeyU);
