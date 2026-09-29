@@ -36,7 +36,7 @@ function saveFile(name: string, content: string) {
 }
 export function RepositoryCoach({ transport = httpCoachTransport, captureTransport = httpCapture, onReady, ...props }: RepositoryCoachProps) {
   const instructionRef = useRef(props.instructions ?? '')
-  instructionRef.current = props.instructions ?? ''
+  useEffect(() => { instructionRef.current = props.instructions ?? '' }, [props.instructions])
   const lessonPolicy = useLessonPolicy()
   const lessonRef = useRef(lessonPolicy?.state.active ?? [])
   useEffect(() => { lessonRef.current = lessonPolicy?.state.active ?? [] }, [lessonPolicy?.state.active])
