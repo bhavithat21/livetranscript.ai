@@ -1,9 +1,14 @@
-# Mock-Interview Validation — the 25-minute proof
+# Mock-interview validation — 25-minute smoke check
 
-Everything in the copilot was built + unit-tested by AI. This script is the one thing
-that proves it works **in a real interview** — run it once, against the live app, with
-a second person (or a recording) playing the interviewer. It converts ~20 shipped
-features from "should work" into "verified / here's the punch-list."
+Run this script in an authorized practice session against the live app, with a
+second person or a recording playing the interviewer. It checks the core product
+flow and produces a concrete punch-list. A passing run establishes only what was
+observed on that build, device and input configuration; it is not release certification.
+
+For native release acceptance, also complete the 45-minute Mac session, input
+routing, recovery, denied-permission and Stop checks in
+[Reliability v2](reliability-v2.md#device-acceptance-and-rollback). Automated tests
+and synthetic provider checks do not replace those real-device checks.
 
 ## Setup (5 min, before you start)
 1. Open **livetranscript.ai** (or the desktop app) → start a session.
@@ -12,7 +17,29 @@ features from "should work" into "verified / here's the punch-list."
 4. Turn **Auto on**. Share your screen for the coding round.
 5. Have the interviewer read questions aloud (or play a recorded set). You watch the panel.
 
-**What to record for each question:** a ✅/⚠️/❌ and one note. That's the whole method.
+## Capture evidence before scoring
+
+Record the hosted commit/deployment identifier, desktop version (if used), macOS
+version, selected microphone, call-audio output and screen source. Record start and
+end timestamps with a timezone offset. Hosted and desktop versions are separate:
+a new web deployment does not prove that the native binary was updated.
+
+For each question, record a ✅/⚠️/❌, the observation timestamp, expected versus
+observed behavior and an evidence filename. Mark unexecuted checks **not run**;
+do not infer a pass from a successful startup or a green automated test.
+
+- Capture the relevant UI state and displayed latency readout. Treat the latency
+  targets below as acceptance targets, not measured performance claims.
+- Export metadata diagnostics at the end and after a failure. Record the diagnostic
+  session ID and relevant operation IDs for correlation; see
+  [Session diagnostics](session-diagnostics.md#correlation-and-privacy).
+- For native capture failures, retain the applicable native log described in
+  [Reliability v2](reliability-v2.md#native-lifecycle-and-diagnostics).
+- Use synthetic practice content. Screenshots can contain private information even
+  when the diagnostics export is metadata-only; redact before sharing.
+
+A missing event is inconclusive by itself. Pair diagnostics with the visible
+behavior and timestamps, and retain failures in the punch-list.
 
 ---
 
@@ -69,4 +96,6 @@ real interview instead of guesses. Bring it back and we fix in priority order.
 1. **Auto-detect + auto-route + answer, hands-free** (R1 Q1) — the core loop.
 2. **Answer speed felt right** (TTFT readout) — the whole pitch.
 3. **Grounded in YOUR real story, no hallucination** (R1) — the trust axis.
-If those three are ✅, the product works. Everything else is polish.
+If those three are ✅, the core flow passed this smoke check. Record the remaining
+checks as passed, failed or not run; failures in capture, permissions, recovery or
+Stop remain release blockers until the required device acceptance is completed.
