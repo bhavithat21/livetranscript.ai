@@ -24,11 +24,38 @@ Local history is capped at 600 metadata events and 24 hours. Cloud batching is c
 
 Disable diagnostics to abort pending upload, clear the queue and local history. Already received server logs remain subject to backend retention. An in-flight upload can already have arrived before cancellation. Clear local history rotates the diagnostic session ID. Export diagnostics is metadata-only and separate from the source/transcript-bearing Repository Coach replay export.
 
+## Preserve evidence before clearing or disabling
+
+Export diagnostics **before** selecting Clear local history or disabling recording.
+Both operations empty the local event history and pending upload queue; exporting
+afterward cannot recover that evidence. Disabling also invalidates active diagnostic
+spans, so their later callbacks will not complete the old trace. Exporting downloads
+the retained metadata; it does not flush the pending queue or prove cloud delivery.
+
+For a failed session:
+
+1. Note the failure time with timezone offset and export the current bundle before
+   changing diagnostic settings. Keep the relevant operation IDs alongside the
+   visible symptom.
+2. If the app has already reloaded, export the restored history promptly. The
+   bundle's top-level `sessionId` identifies the current page lifetime, while
+   individual events may carry earlier session IDs. Search server logs using the
+   affected event's `sessionId` and `operationId`.
+3. Check delivery and loss evidence separately. A `sent` state acknowledges a
+   batch, not necessarily every event still pending. A positive `dropped` count
+   records pending-queue overflow; zero does not prove a complete trace because
+   history can also expire, reach its 600-event cap, or be lost on reload.
+4. After preserving the bundle, clear or disable diagnostics if needed. Previously
+   accepted server logs are unaffected by those local controls.
+
+These behaviors follow the [diagnostics client](../lib/diagnostics/client.ts).
+Restored history is available for export but is not re-enqueued for upload.
+
 ## Verification
 
 1. Open the current web UI, sign in, open Diagnostics and select Test cloud logging. Confirm the receipt and find the `upload_test` event in runtime logs.
 2. Run a permitted mock session. Verify native/browser capture ready AND first frames, finalized transcription, extracted screen evidence and completed guidance.
 3. Deny/cancel a screen or audio picker, disconnect the network, and stop a pending request. Verify the right stage/category without unmounting the diagnostic panel.
-4. Disable logging and verify no new diagnostic requests occur. Export a bundle and confirm it contains no capture content or credentials.
+4. Export a bundle before disabling logging and confirm it contains no capture content or credentials. Then disable logging and verify no new diagnostic requests occur; an export after disabling should contain no retained events.
 
 Unit/CI validation does not replace those real-device/live-provider checks. Missing final events alone cannot prove a native crash; process termination or a fully frozen webview may prevent last events from being sent. The persisted local ring can help on reopening, but native crash reports still need separate collection.
