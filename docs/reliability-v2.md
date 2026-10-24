@@ -14,6 +14,41 @@ Only unsent PCM is buffered in memory, capped at two seconds / 512 KB. Deepgram 
 
 Call audio and microphone failures are isolated. Each failed channel has its own Retry button that retains existing transcript rows and does not stop the healthy channel. Permission flows remain serialized. Reconnection clears interviewer assignment instead of assuming new diarization IDs identify the same person.
 
+### Worked example: what the recovery buffer can preserve
+
+The [recovery implementation](../lib/transcription/recovery.ts) calculates frame
+duration as `bytes / (sampleRate * 2)`, for mono 16-bit PCM. At 16 kHz,
+one second occupies 32,000 bytes and two seconds occupy 64,000 bytes. In this
+configuration the two-second limit is reached before the 512,000-byte limit.
+The buffer is bounded by captured audio duration, not a guarantee of two seconds
+of wall-clock outage coverage.
+
+For example, if capture keeps producing audio during a five-second disconnection,
+only the newest roughly two seconds of unsent audio can remain queued. Older
+frames are discarded as new frames arrive. Exact retained duration depends on
+frame boundaries; eviction removes whole frames. Audio already handed to the
+previous connection is excluded from this queue, even if its transcript never
+became final.
+
+Reconnecting does not instantly remove the backlog. Under ideal continuous
+capture at 1x realtime, draining a two-second backlog at the configured Deepgram
+rate of 1.25x leaves only 0.25 seconds per second of spare capacity:
+
+`catch-up time = 2 / (1.25 - 1) = 8 seconds`
+
+This is an illustrative lower-bound calculation, not a latency measurement:
+timer delays, frame sizes and queue eviction affect actual behavior. With the
+1x policy used for AssemblyAI and unknown adapters, continuous 1x input leaves no
+spare capacity to catch up; the remaining backlog can shrink if capture supplies
+fewer frames, including when capture stops sending frames. Silence encoded as PCM
+still occupies the queue.
+
+When reviewing a recovery, require a new finalized utterance after reconnection.
+A `reconnected` event establishes connection recovery, not transcript completeness.
+Likewise, `droppedMs` measures discarded queued audio; it cannot measure all words
+lost from audio previously accepted by the provider. Check the transcript around
+the interruption and retain the corresponding diagnostics.
+
 ## Native lifecycle and diagnostics
 
 Native macOS audio forwards allowlisted helper lifecycle events over the capture channel. Unexpected helper EOF reaches the UI. Errors use fixed stages, numeric codes and allowlisted domains, not localized messages or captured content. Local logs are at `~/Library/Logs/LiveTranscript/native-audio.log`, rotated at startup above 256 KB with one previous file and file permissions 0600. These improvements do not retrospectively establish the cause of the earlier Mac incident.
