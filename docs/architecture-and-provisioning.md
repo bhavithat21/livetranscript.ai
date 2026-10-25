@@ -181,3 +181,28 @@ Prioritized checklist. **[BLOCKING]** = work stops without it. **[OPTIONAL]** = 
 ---
 
 *Bottom line: you already made the hard low-latency/accuracy calls correctly. The money should go to four narrow things — the Anthropic model swap, native capture + overlay, the eval loop, and compliance — not a rewrite. That's what lets you out-execute a $20M-funded competitor whose own launch shipped at 5–90s latency.*
+
+## Implementation note: rate-limit scope and capacity
+
+The current [rate limiter](../lib/rateLimit.ts) stores token buckets in a
+process-local `Map`. Treat it as best-effort request throttling when estimating
+capacity or spend. Each serverless instance has independent state, and a fresh
+process starts with empty state.
+
+For an illustrative call to `rateLimit(key, 10, 60_000)`, a new key can consume
+ten tokens immediately. Tokens refill continuously at one token per six seconds,
+up to ten. This is a token bucket with burst capacity; it does not mean at most ten
+requests in every rolling minute. If the same key reaches three fresh instances,
+each can admit its own ten-request burst: thirty requests in total, assuming no
+other checks reject them. Instance count and routing determine the observed total.
+
+The `MAX_KEYS = 10_000` threshold triggers an idle-bucket cleanup; it is not a
+strict map-size cap. If existing entries are still active, cleanup may remove
+none and the new key is still inserted. Account for that distinction when
+reviewing memory growth under many distinct keys.
+
+A fleet-wide quota would require shared state and atomic admission, with an
+explicit policy for shared-store failures. Billing or spend enforcement also
+needs durable usage accounting appropriate to the operation. Neither guarantee
+follows from this helper alone. Any such implementation change is separate from
+this documentation note.
