@@ -14,7 +14,7 @@ a separate, free, self-generated key.
 Current state (checked into `src-tauri/tauri.conf.json`):
 - `bundle.createUpdaterArtifacts: true` ✅ (build emits the signed update bundles)
 - `plugins.updater.pubkey` is set ✅ (a keypair was generated at some point)
-- `plugins.updater.endpoints` → this repo's `releases/latest/download/latest.json` ✅
+- `plugins.updater.endpoints` → `https://livetranscript.ai/updates/latest.json`, the stable public redirect route in `app/updates/[...path]/route.ts` ✅
 - The **private** key matching that pubkey is **not on this machine** — it must be
   in the `TAURI_SIGNING_PRIVATE_KEY` GitHub secret, or it was lost (see Step 1).
 
@@ -66,12 +66,7 @@ git push origin v0.1.1
 Watch the run in the repo's **Actions** tab. On success the release has: the `.dmg`,
 the `.exe`/`.msi`, their `.sig` files, and `latest.json`.
 
-> The updater endpoint reads `releases/latest/download/latest.json`. If the repo is
-> **private**, GitHub blocks anonymous downloads of release assets, so the shipped
-> app's updater (unauthenticated) can't fetch them — auto-update silently fails.
-> For a private repo, either make releases public or host `latest.json` + artifacts
-> somewhere public (e.g. Vercel Blob, see `scripts/publish-installer.sh`) and point
-> the endpoint there.
+> The current updater endpoint is the stable public route `https://livetranscript.ai/updates/latest.json`, not a GitHub release asset. Making this repository public is not required for current binaries. The route needs production `UPDATES_BASE_URL` set to the public Blob base ending in `/updates`; the manifest and every referenced installer/signature asset must be present and publicly readable. GitHub release assets remain useful for manual downloads and older binaries that still target GitHub directly.
 
 ## Step 3 — How each user actually updates
 
@@ -134,7 +129,7 @@ the rewritten `latest.json` to Blob. Nothing shipped ever points at GitHub.
 ## Summary — to turn on updates for beta users right now
 
 1. Confirm/set `TAURI_SIGNING_PRIVATE_KEY` (+ password) in GitHub secrets (Step 1).
-2. If the repo is private, make release assets publicly fetchable (Step 2 note).
+2. Configure the stable updater channel: set production `UPDATES_BASE_URL` to the public Blob base ending in `/updates`, and ensure CI can publish through `BLOB_READ_WRITE_TOKEN` (see the private-repo-safe channel section).
 3. Bump version, `git tag v0.1.1 && git push origin v0.1.1` (Step 2).
 4. Replace the installers in `public/downloads/` and redeploy (Step 4).
 
