@@ -22,6 +22,41 @@ claiming full interview reliability. Changing prompts, effort, token budgets or
 retrieval requires another comparison. Token usage is measured when returned;
 missing usage is unknown, never zero. Published token prices are not measured bills.
 
+## Interpret vision scores
+
+Vision reports intentionally separate text fidelity from evidence location. The
+[scorer](../evals/vision/score.ts) identifies a source line by its file path and
+line anchor. A line containing the expected text at the wrong line number is
+therefore unsupported rather than an exact match. This prevents readable OCR from
+being mistaken for reliable file-and-line evidence.
+
+Use the metrics together:
+
+| Metric | What it answers |
+| --- | --- |
+| `characterAccuracy` | How close are anchored characters, including punctuation, whitespace and case? |
+| `exactLinePrecision` | What share of extracted lines exactly match the expected text at the expected anchor? |
+| `exactLineRecall` | What share of expected anchored lines were reproduced exactly? |
+| `anchorPrecision` / `anchorRecall` | Were the expected file-and-line locations extracted, even when their text differed? |
+| `pathPrecision` / `pathRecall` | Were visible file paths supported and complete? |
+| `unsupportedLines` / `inventedPaths` | How much evidence had no expected anchor or path? |
+| `falseEofClaims` / `missingEofClaims` | Were end-of-file claims made or omitted incorrectly? |
+| `terminalExact` / `requirementsExact` | Did non-editor evidence match exactly after the scorer's documented normalization? |
+| `conflictRetired` | On a follow-up frame, did merging retain the prior fragment as stale/conflicting evidence instead of silently presenting it as current? |
+
+For example, suppose the reference contains four anchored lines and a model emits
+five lines. Three match exactly, one uses the correct anchor with one wrong
+character, and one has no supported anchor. Exact-line precision is `3 / 5 = 0.60`;
+exact-line recall is `3 / 4 = 0.75`; anchor precision is `4 / 5 = 0.80`; and
+anchor recall is `4 / 4 = 1.00`. Character accuracy is computed separately from
+edit distance, so it cannot be inferred from those four ratios.
+
+An `exactFrame` result requires exact lines and paths, correct EOF claims, exact
+terminal and requirements evidence, and successful conflict handling when the
+fixture includes a previous frame. A high character score alone is therefore not
+a passing frame. Compare per-fixture results and raw evidence before selecting a
+vision model; averages can hide invented paths or one critical false EOF claim.
+
 ## Run from GitHub
 
 Open **Actions → Model benchmarks → Run workflow**. Select the suite, exact model
