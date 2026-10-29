@@ -17,17 +17,19 @@ Per-stage estimate for the live caption path:
 | 3 | Worklet → main thread | browser | ~1 ms | transferable `ArrayBuffer` (zero-copy) |
 | 4 | PCM encode (f32 → int16) | main thread | ~1 ms | `floatTo16BitPCM`, per 50 ms frame |
 | 5 | WebSocket send → ASR | network | 20–60 ms | client → provider directly (no app-server hop) |
-| 6 | ASR partial inference | provider | 80–200 ms | `no_delay=true`, `interim_results=true` |
+| 6 | ASR partial inference | provider | 80–200 ms | `interim_results=true` |
 | 7 | ASR partial → client | network | 20–60 ms | |
 | 8 | Parse + state merge | main thread | ~2 ms | `mergeSegments`, no-op guard skips identical re-emits |
 | 9 | Paint | browser | ~16 ms | one frame |
 | | **Total (interim caption)** | | **~200–400 ms** | dominated by stage 6 (ASR) |
-| +| Finalization (endpointing) | provider | +50 ms | `endpointing=50` commits a final 50 ms after a pause |
+| +| Finalization (endpointing) | provider | +300 ms Balanced / +500 ms Careful | silence threshold before the provider commits a final |
 
 **Key facts that keep this tight:**
 - **Client connects *directly* to the ASR WebSocket** (`wss://api.deepgram.com/...`); the app server only mints a short-lived token (`/api/token`). Audio never round-trips through our backend — removing an entire server hop (~50–150 ms each way) from the hot path.
 - **50 ms frame** is the floor set by the provider's minimum payload (AssemblyAI 50–1000 ms). Smaller frames flood threads and get rejected; larger frames add latency linearly.
-- **`no_delay=true` + `endpointing=50`** (Deepgram nova-3): emit partials immediately, commit finals 50 ms after a pause instead of the ~300 ms default.
+- **Mode-specific endpointing** (Deepgram nova-3): `interim_results=true` keeps partial captions flowing, while Balanced commits after 300 ms of silence and Careful waits 500 ms to reduce mid-phrase splits.
+
+Endpointing affects the final transcript boundary, not time to the first interim caption. For example, when speech ends at `t=0`, the silence detector alone cannot finalize before about `t=300 ms` in Balanced mode or `t=500 ms` in Careful mode; provider processing, the return trip, state merge, and paint add time after that threshold. Treat these values as configuration thresholds rather than end-to-end final-caption guarantees.
 
 ---
 
@@ -138,8 +140,7 @@ Per-stage estimate for the live caption path:
 | Knob | File | Effect |
 |---|---|---|
 | Frame size (50 ms) | `worklet-processor.js` | ↓ = lower latency but risks rejection/thread flood; 50 ms is the floor |
-| `endpointing` (50) | `deepgram.ts` | ↓ = faster finals, more mid-phrase splits |
-| `no_delay` | `deepgram.ts` | on = partials without smoothing delay |
+| Recognition mode | `deepgram.ts` | Balanced uses 300 ms endpointing; Careful uses 500 ms for fewer mid-phrase splits |
 | Interim throttle (100 ms) | `useRoom.ts` | rooms only; ↑ = less bandwidth, choppier peer view |
 | Keyterm count (≤100) | `keytermPacks.ts` | sent once; **no latency effect**, only accuracy/dilution |
 | Engine choice | picker | "fastest" (Deepgram) vs "highest accuracy" (AssemblyAI) |
