@@ -8,9 +8,9 @@ Controls: scenario, deterministic seed, Play/Pause, Next event, 0.5–4× speed,
 
 ## What is tested
 
-The 13 authored scenarios cover fragmented questions and candidate speech; duplicate screen/transcript events; follow-ups during streaming; a never-settling non-cooperative adapter; pause/resume; late screenshots; divergent edits and stale passing tests; interviewer hold; ending a session with in-flight work; unsupported patch targets; failure with explicit retry; mixed-system-audio role selection; and imported source that must not count as screen navigation.
+The 12 authored scenarios cover fragmented questions and candidate speech; duplicate screen/transcript events; follow-ups during streaming; a never-settling non-cooperative adapter; pause/resume; late screenshots; divergent edits and stale passing tests; interviewer hold; ending a session with in-flight work; unsupported patch targets; failure with explicit retry; and mixed-system-audio role selection.
 
-A seeded transport varies response timing; 25 seeds × 13 scenarios = **325 executions**, not 325 independently authored tasks. The virtual clock accelerates deterministic orchestration checks. Its timings are not real ASR, vision, network, or LLM performance measurements.
+A seeded transport varies response timing; 25 seeds × 12 scenarios = **300 executions**, not 300 independently authored tasks. The virtual clock accelerates deterministic orchestration checks. Its timings are not real ASR, vision, network, or LLM performance measurements.
 
 Run locally:
 
