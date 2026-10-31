@@ -19,6 +19,12 @@ Conversation and code guidance run concurrently. Talk streams independently; gui
 
 Context compilation uses bounded lexical/symbol-reference ranking plus observed paths, current view and test evidence. Cache keys depend on canonical observed content, not how overlapping screenshots were split. This is **not** a complete AST, type-resolved call graph, or proof of data flow. Budgets are measured in characters, not exact model tokens.
 
+### Worked example: context budget versus repository coverage
+
+The compiled packet has a 24,000-character ceiling and keeps an 800-character safety margin while assembling evidence. It can carry at most six files selected from the twelve highest-ranked candidates. A long observed fragment is reduced to a question-relevant window of at most 70 lines; test evidence is limited to the three most recent runs with at most 2,500 output characters per run.
+
+Suppose nine observed files are relevant and the first six consume the available budget. The remaining three may still appear in `knownPaths`, and up to 20 excluded paths are listed in `budget.omittedPaths`, but neither field supplies their source text. A model may request one of those files next; it must not treat a known or omitted path as evidence about that file's implementation. `usedCharacters` describes the serialized packet size, not token usage or repository coverage.
+
 Test output is observation, not a command-execution attestation. **Mark test start** records a command label and code revision; the user then runs it in their own environment. Only fresh subsequent output may link to that marker. Later edits make results stale. Incomplete new-run output supersedes older terminal summaries, and one passing package cannot erase an earlier failure in the same run. Supported summary patterns include Jest/Vitest, pytest, TAP, Maven/Surefire, JUnit, unittest, dotnet, Rust and Go; unfamiliar output stays incomplete.
 
 ## Models and budgets
