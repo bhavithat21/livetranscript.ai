@@ -1,43 +1,83 @@
-# Native macOS (+ Windows) System-Audio Capture — Build Spec
+# Native macOS and Windows system-audio capture
 
-**Status:** designed, not yet built. The one native capability that makes
-LiveTranscript match Cluely on macOS: **full-system audio capture**, which a web
-page cannot do on macOS (Apple sandboxes `getDisplayMedia` to tab-audio only).
-The app already bundles as a native `.app`/`.dmg` via Tauri; this adds the
-privileged native capture path.
+**Status:** implemented in source for the Tauri desktop app. macOS uses a
+ScreenCaptureKit Swift sidecar; Windows uses WASAPI loopback through `cpal`.
+Physical-device acceptance, signing/notarization, and stable installer promotion
+remain separate release gates.
 
-## Why it's needed (the macOS gap)
-- **Windows/web:** Chrome `getDisplayMedia` captures full-system loopback audio → hears the whole Zoom call. Works today.
-- **macOS/web:** WKWebView `getDisplayMedia` = **tab audio only** (Apple privacy rule). Can't hear the Zoom *desktop app*.
-- **Cluely's trick:** native app → **ScreenCaptureKit** (macOS 13+) with a one-time Screen-Recording permission reads system audio. Native code isn't sandboxed like a web page.
+## Why the native path is needed
 
-## Architecture (additive — web layer unchanged)
+- **Windows/web:** browser `getDisplayMedia` support depends on the selected
+  surface and browser.
+- **macOS/web:** a web page cannot reliably capture audio from desktop apps such
+  as Zoom.
+- **Desktop app:** a native, read-only tap can capture the selected system output
+  without routing audio through a new application server.
+
+## Implemented architecture
+
 ```
-[macOS] ScreenCaptureKit audio   → Rust capture engine → 16k mono PCM frames
-[Windows] WASAPI loopback        →   emits 'native-audio' tauri events
-                                         ▼
-  JS bridge (feature-detected): if (window.__TAURI__) useNativeCapture()
-                                else useMicStream()  (web fallback)
-                                         ▼
-  existing ASR pipeline (connectWithFallback) — UNCHANGED downstream
+macOS ScreenCaptureKit helper → Float32 mono PCM ┐
+                                                  ├→ Rust/Tauri → 16-bit PCM channel
+Windows WASAPI loopback      → mono PCM          ┘
+                                                            ↓
+                                             useNativeCapture()
+                                                            ↓
+                                      existing ASR provider pipeline
 ```
 
-## Steps
-1. **Crate/helper:** a small Swift `SystemAudioDump` (ScreenCaptureKit) piped over stdout for macOS audio (more mature than `scap` v0.0.x for audio today); `scap`/WASAPI for Windows.
-2. **Rust:** `#[tauri::command] start_native_audio(window)` spawns capture, downsamples to 16 kHz mono, emits ~50 ms frames via `window.emit("native-audio", ...)`; `stop_native_audio()` tears down.
-3. **Permissions:** macOS Screen-Recording entitlement + TCC prompt on first use; Windows WASAPI needs none.
-4. **JS bridge:** `lib/audio/useNativeCapture.ts` — feature-detected; feeds the same `onPcm` the worklet uses, else falls back to `useMicStream`. Browser build unchanged.
-5. **Non-disruptive:** ScreenCaptureKit + WASAPI loopback are read-only taps of the output mixer — never seize the mic/speaker device, so Zoom keeps working, no echo. Full-system on macOS (unlike web tab-only).
+The native path is additive. `lib/audio/useNativeCapture.ts` detects Tauri,
+serializes start/stop operations, forwards binary frames to the existing PCM
+callback, computes the same RMS level used by the browser meter, and ignores
+late frames from retired sessions. A normal web page receives no native
+capability.
 
-## Unblocks
-- macOS full-system audio (Zoom desktop app, not just a tab) → true Cluely parity.
-- Pairs with shipped `contentProtected` (hidden from screen share) + transparent window + the `lt-desktop` glass theme → the complete invisible native copilot.
+### macOS
 
-## Blocked on the founder
-- **Apple Developer ($99/yr)** to sign + notarize so the ScreenCaptureKit permission works for distributed users (unsigned local builds can test with a manual grant).
-- Decision: Swift helper vs `scap` for macOS audio (recommend Swift helper).
+- `src-tauri/binaries/audio-capture.swift` captures system audio with
+  ScreenCaptureKit. macOS 14 and later use the system content picker; macOS 13
+  uses the legacy Screen Recording grant.
+- The helper writes raw mono Float32 PCM to stdout and reports `RATE` followed
+  by `READY` on stderr. It excludes the app's own audio to avoid feedback.
+- `src-tauri/src/macos_capture.rs` waits up to 30 seconds for readiness,
+  converts samples to little-endian 16-bit PCM, emits roughly 50 ms frames, and
+  terminates the helper on stop or when the frontend channel disappears.
+- `scripts/build-audio-helper.sh` builds arm64, x86_64, and universal sidecars
+  consumed by the Tauri bundle.
 
-## Why not in this pass
-A real-time native audio engine + PCM bridge needs iterative compile-and-test on
-each OS; a stub that compiles but doesn't truly capture would read as done and
-fail live. Deferred as a focused next build, not an unverifiable half-implementation.
+### Windows
+
+- `src-tauri/src/windows_capture.rs` opens the default output device in WASAPI
+  loopback mode, downmixes to mono 16-bit PCM, and forwards bounded roughly
+  50 ms frames.
+- The callback-to-IPC queue holds at most 64 frames. A slow consumer drops whole
+  frames instead of allowing unbounded memory growth.
+- Stopping the session retires the capture thread and drops its stream.
+
+Both implementations return the actual device sample rate to the web layer.
+They are passive output-mixer taps: they do not seize the microphone or speaker
+device, and downstream provider selection remains unchanged.
+
+## Failure and lifecycle boundaries
+
+A successful native start means the platform capture reported ready; it does not
+prove that useful speech was present or transcribed. The macOS bridge exposes
+allowlisted lifecycle stages, and unexpected helper termination is surfaced to
+the UI so call audio can be retried without stopping microphone or screen
+capture. Native logs are stored locally under
+`~/Library/Logs/LiveTranscript/native-audio.log`, with bounded rotation and
+owner-only permissions.
+
+A hosted web deployment cannot add or replace native commands in an already
+installed shell. Changes to the Swift helper, Rust bridge, entitlements, or
+bundled sidecar require a newly built desktop installer.
+
+## Remaining release validation
+
+Before stable promotion, test a signed/notarized macOS installer and a Windows
+installer on physical devices. Verify first-run permission or picker flows,
+cancel and retry, actual Zoom/Teams system speech, simultaneous microphone
+capture, mute/unmute, Stop during startup, unexpected helper/device loss, and a
+new finalized utterance after recovery. A successful compile, synthetic PCM
+test, or `READY` event alone is not evidence that distributed capture works
+end to end.
