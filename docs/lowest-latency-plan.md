@@ -74,7 +74,7 @@ Maps ~1:1 onto existing interfaces:
 
 Kills per-minute cost *and* WS RTT, works offline.
 
-**Blocker first:** `src-tauri/tauri.conf.json` uses `frontendDist: "https://livetranscript.ai"` (remote origin) → `invoke` can't reach Rust. Enable remote-domain IPC access, or bundle the frontend for the desktop build, **before any engine work.**
+**IPC prerequisite is already satisfied:** the shell loads `https://livetranscript.ai`, and `src-tauri/capabilities/default.json` explicitly allowlists that origin for the `main` window. The Rust command handler already serves native audio and screen-capture calls from the web layer. A new local speech engine must still register its commands and permissions and ship in a newly built desktop installer; a hosted web deployment cannot add native code to an older shell.
 
 **Engine: sherpa-onnx streaming Zipformer transducer (int8) via official Rust bindings** — the only option that's genuinely streaming, real-time on plain CPU (RTF ~0.077, no NVIDIA), ships prebuilt Win/Mac/Linux binaries + a streaming-mic example, ~70 MB int8.
 
@@ -93,7 +93,7 @@ Keep Deepgram/AssemblyAI as opt-in **"high accuracy"** mode via `connectWithFall
 
 - **Phase A** — pure win. No accuracy cost, ~zero $, ~zero ops. Only real tradeoff: A6's provider-conditional frame size.
 - **Phase B** — big latency + cost win, at a ~60–80 MB one-time download, battery drain, and a worse *partial* accuracy floor that only tier-2 hides. **Mobile is the weak spot — don't default it there.**
-- **Phase C** — biggest cost/latency win + offline, but native Rust work, the IPC blocker, per-language bundled model, and **you lose diarization**. Highest ops.
+- **Phase C** — biggest cost/latency win + offline, but it still requires native model integration, per-language bundles, installer distribution, and a replacement for cloud diarization. Highest ops.
 
 **The honest catch across B & C:** on-device is Whisper-base/Zipformer class — behind nova-3 on exactly the hard/jargon audio the keyterm feature targets. The two-tier design makes this acceptable *only if tier-2 correction lands fast and reliably*.
 
@@ -103,7 +103,7 @@ Keep Deepgram/AssemblyAI as opt-in **"high accuracy"** mode via `connectWithFall
 
 **Weeks 2–4 (Phase B):** `OnDeviceProvider` (Moonshine Base, WebGPU + WASM fallback), opt-in "Instant / offline", tier-2 nova-3 re-ASR on finals via `applyCorrection`, cloud-only on mobile. Measure latency + WER before defaulting.
 
-**Later (Phase C):** clear the `frontendDist` IPC blocker → sherpa-onnx Zipformer behind `LocalProvider`, cloud kept as opt-in accuracy mode.
+**Later (Phase C):** add sherpa-onnx Zipformer behind `LocalProvider`, register the native commands/capabilities, ship a new installer, and keep cloud ASR as the opt-in accuracy mode.
 
 The async-correction track and the `TranscriptionProvider` interface already in the codebase mean **every phase is re-wiring, not re-architecting.**
 
