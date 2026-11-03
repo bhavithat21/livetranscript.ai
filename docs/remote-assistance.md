@@ -18,6 +18,12 @@ Ably carries connection signaling only. Screen frames and input travel over the 
 
 The application creates a random 128-bit room ID and independent 96-bit actor IDs. Session credentials expire 30 minutes after creation. A late join keeps the original expiry. Ably tokens are issued for at most five minutes, and refreshing them cannot renew the session. Both participants must remain signed in to refresh their tokens.
 
+### Worked example: independent expiry and backpressure boundaries
+
+The server session, signaling token, and native control lease use independent clocks. Suppose a host creates a session at 10:00. Refreshing an Ably token at 10:04:59 only replaces a signaling credential; it does not move the session's 10:30 expiry. The native host asks for a heartbeat every second and expires its control lease after five seconds without a successful heartbeat, so a lost browser or blocked event loop cannot preserve input authority merely because the server credential is still valid. The native policy also has a one-hour absolute ceiling, although the current 30-minute server session ends first. Clients must treat any one of these expirations as terminal and create a new session rather than trying to extend another clock.
+
+Native capture and input are bounded independently of transport congestion. Capture runs at no more than five frames per second, each encoded frame is limited to 524,288 bytes, and input passes through a 64-command queue with a two-second acknowledgement timeout. The native policy accepts at most 240 input events in a one-second window. A helper should coalesce pointer moves and stop sending after an acknowledgement, lease, or session failure instead of replaying a burst; sequence validation will reject duplicate or old events.
+
 | Actor | Requests channel | Peer channel |
 | --- | --- | --- |
 | Host | Subscribe to `remote:<room>:requests` | Publish to `remote:<room>:peer:*` |
