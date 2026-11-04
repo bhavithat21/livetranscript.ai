@@ -63,7 +63,9 @@ Copy `.env.example` to `.env.local` and provide your own values. **Never commit 
 | `ANTHROPIC_API_KEY` | Claude screenshot transcription + default repository specialists | for repository AI |
 | `COPILOT_REPO_MODEL_*` | Per-role vision, requirements, implementation, debugger, reviewer and synthesis models | optional; [configuration and benchmarks](evals/repo/README.md) |
 | `GROQ_API_KEY` | Groq-hosted specialist model overrides | for Groq models |
-| `ABLY_API_KEY` | Realtime for meeting rooms | for rooms |
+| `ABLY_API_KEY` | Realtime for meeting rooms and remote-assistance signaling; also the fallback source for remote session signing | for rooms or remote assistance |
+| `REMOTE_SESSION_SECRET` | Dedicated remote-session signing secret (at least 32 UTF-8 bytes); when absent, a domain-separated key is derived from `ABLY_API_KEY` | optional; recommended for remote assistance |
+| `REMOTE_TURN_URLS` + relay credentials | TURN relay URLs with either `REMOTE_TURN_SECRET` (at least 16 characters) or static `REMOTE_TURN_USERNAME` / `REMOTE_TURN_CREDENTIAL`; see the [remote-assistance guide](docs/remote-assistance.md) | optional; recommended across restrictive networks |
 | `DATABASE_URL` | Neon Postgres connection | for saved sessions |
 | `NEXT_PUBLIC_APP_URL` | Base URL for share links | recommended |
 | `NEXT_PUBLIC_POSTHOG_KEY` / `NEXT_PUBLIC_POSTHOG_HOST` | Analytics (public) | optional |
