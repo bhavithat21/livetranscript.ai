@@ -107,10 +107,11 @@ npm run test:watch   # vitest watch mode
 
 For transcribing a **call** (Zoom, Meet, etc.), choose **System sound** rather than the microphone — it taps the audio digitally, so there's no speaker→mic echo and cleaner accuracy. Mic mode is for your own voice / the room you're in.
 
-- **Windows:** System sound can capture full-system audio (share Entire Screen with "share system audio"), so the Zoom **desktop app** or a browser tab both work.
-- **macOS:** browsers capture **tab** audio only, so run the call in a browser tab and capture that tab.
+- **Windows web:** System sound can capture full-system audio when the browser and selected surface expose "share system audio", so a desktop call or browser tab can work.
+- **macOS web:** browsers capture tab audio only; run the call in a browser tab and capture that tab.
+- **Desktop preview:** the Tauri app has native system-output capture implemented with ScreenCaptureKit on macOS and WASAPI loopback on Windows. This path requires the operating system's capture permission and a desktop installer; [physical-device release validation is still pending](docs/native-macos-capture.md).
 
-The picker in-app shows this guidance inline.
+The picker in-app shows guidance for the active platform and capture path.
 
 ## Deployment
 
