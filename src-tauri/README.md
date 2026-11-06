@@ -1,13 +1,20 @@
 # LiveTranscript Desktop (Tauri v2)
 
-A thin native shell (Windows + macOS) that loads the deployed web app
-(`https://livetranscript.ai`) in a native window. **The web app is untouched** —
-this is an additive wrapper: `frontendDist` in `tauri.conf.json` points at the
-remote URL, so there are no bundled frontend assets and no changes to `app/`.
+A Windows and macOS shell whose main window loads the deployed web app from
+`https://livetranscript.ai`. `frontendDist` in `tauri.conf.json` points at
+that remote URL, so interface assets remain hosted while Rust/Tauri supplies
+operating-system capabilities through feature-detected bridges.
 
-Mic and screen/tab-audio permission prompts are handled by the platform webview
-(WebView2 on Windows, WKWebView on macOS), so transcription works exactly as in
-the browser.
+| Runtime layer | Responsibilities | Delivery boundary |
+| --- | --- | --- |
+| Hosted web app | Interface, browser microphone, and browser screen/tab-audio capture | A web deployment updates this layer |
+| Native shell | System-output audio, selected-monitor capture, optional remote input, tray/shortcut handling, and desktop updates | Native command or permission changes require a new desktop package |
+
+WebView2 on Windows and WKWebView on macOS still handle browser microphone and
+screen/tab-audio prompts. System-output capture is a separate path:
+`useNativeCapture()` detects Tauri, invokes `start_native_audio`, and receives
+PCM through an IPC channel. A normal browser never receives those native
+capabilities and continues to use its browser capture path.
 
 ## Prerequisites (on the build machine)
 
