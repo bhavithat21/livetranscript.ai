@@ -27,6 +27,34 @@ answers are not silently rewritten. Server validation accepts only the documente
 choices. Repository specialists retain their full evidence; preferences affect
 the final synthesis. Unsupported assertions must remain marked unknown.
 
+## Context bounds for long sessions
+
+The streaming answer endpoint applies fixed bounds before selecting a provider.
+Discarded material is not summarized automatically, and each field has its own
+retention direction.
+
+| Input | Bound | Retained portion |
+|---|---:|---|
+| Current question | 2,000 characters | Beginning |
+| Live transcript | 60,000 characters | Most recent tail |
+| Explicit context | 60,000 characters | Beginning |
+| Chat history | 8 valid user/assistant turns, 8,000 characters each | Most recent turns; beginning of each turn |
+| Additional instructions | 4,000 characters | Beginning |
+| Live calibration | 1,500 characters | Beginning |
+| Optional image data URL | 1,200,000 characters | Whole value or no image |
+
+For example, a request with 12 valid chat turns and a 75,000-character transcript
+keeps turns 5 through 12 and the newest 60,000 transcript characters. If turn 5 is
+10,000 characters long, only its first 8,000 characters remain. Put a critical
+constraint in the current question or near the start of explicit context; do not
+assume an older answer or the discarded transcript prefix will still reach the
+model.
+
+The complete JSON upload is limited to 1,600,000 bytes as received, independent
+of a caller-supplied `Content-Length`, and must finish within ten seconds. These
+request limits protect memory and upload time; they are not a claim about any
+provider's model context window.
+
 Capture starts only after a click. Cancel works while a permission dialog or
 provider connection is pending. Late streams and providers are retired rather
 than attached to a stopped session. Navigation releases audio; closing or clearing
