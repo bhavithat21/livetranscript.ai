@@ -22,6 +22,28 @@ claiming full interview reliability. Changing prompts, effort, token budgets or
 retrieval requires another comparison. Token usage is measured when returned;
 missing usage is unknown, never zero. Published token prices are not measured bills.
 
+## Interpret usage cost estimates
+
+The production answer path records `input_chars`, the resolved vendor and an
+`est_cost_usd` value for spend trends. It estimates input tokens as
+`input_chars / 4` and assumes 500 output tokens because the event is emitted
+before the streamed answer finishes. The calculation is:
+
+`((estimated input tokens × input price) + (500 × output price)) / 1,000,000`
+
+For example, the in-code `claude-sonnet-5` assumptions are $3 per million input
+tokens and $15 per million output tokens. A request containing 20,000 input
+characters is treated as 5,000 input tokens, producing
+`(5,000 × 3 + 500 × 15) / 1,000,000 = $0.0225`. The recorded value is rounded to
+six decimal places.
+
+This is useful for relative trends, not invoice reconciliation. Actual tokenization
+varies by content, and an answer shorter or longer than 500 tokens does not change
+this pre-stream estimate. A model absent from the price table uses the nonzero
+default of $1 input / $5 output per million tokens so an unknown model is not
+silently reported as free. Update the internal price table when routing changes,
+and use provider usage records and invoices for billing decisions.
+
 ## Interpret vision scores
 
 Vision reports intentionally separate text fidelity from evidence location. The
