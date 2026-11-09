@@ -42,6 +42,27 @@ The profile currently applies to `/interview` Live (not the separate `/record`
 route). The Repository Interview multi-agent path bypasses ordinary copilot
 answers and is explicitly outside this calibration scope.
 
+### Worked example: rollback creates a new revision
+
+Profile history stores the active profile and one previous snapshot. Suppose
+revision 2 contains instructions A. Publishing instructions B creates revision 3,
+with revision 2 retained as the previous snapshot. Rolling back then creates
+revision 4 containing instructions A; it does not restore revision 2 as the active
+revision number.
+
+| Operation | Active profile | Previous snapshot |
+| --- | --- | --- |
+| Starting state | Revision 2: A | Earlier value or none |
+| Publish B | Revision 3: B | Revision 2: A |
+| Roll back | Revision 4: A | Revision 3: B |
+| Roll back again | Revision 5: B | Revision 4: A |
+
+This makes every change monotonic and leaves the immediately replaced value
+available, but it is not an audit log. Older revisions beyond the single previous
+snapshot are not retained by this profile state. With no previous snapshot,
+rollback is a no-op. A rollback still needs review as the newly active profile
+before relying on it in Live.
+
 ## Live and feedback
 
 Live supports separate call/system audio and candidate microphone capture,
