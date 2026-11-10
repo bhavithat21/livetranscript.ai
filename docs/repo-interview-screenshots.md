@@ -12,6 +12,28 @@ Overlapping captures merge by line number. A disagreement invalidates earlier li
 
 Screenshots and selected evidence go to the configured model provider. Raw screenshots and the reconstruction are session-only and disappear on reload. Common credential filenames are excluded from parsed evidence; this is not comprehensive secret detection inside ordinary source or screenshots. The question ledger is stored locally and can be cleared independently.
 
+### Worked example: why one changed line retires older fragments
+
+Suppose one capture observes lines 20–22, and a later capture of the same range
+shows a new statement at line 21. Lines 21 and 22 now disagree with their previous
+anchors. The merger increments that file's revision, moves all active fragments
+for the file into bounded stale history, records the conflicting text, and starts
+the new revision with only the later capture.
+
+| Evidence after the conflict | May be used as current code? |
+| --- | --- |
+| Later capture of lines 20–22 | Yes, as partial current evidence |
+| Earlier overlapping lines | No; retained only in conflict history |
+| Earlier non-overlapping fragments, such as lines 40–50 | No; the insertion may have shifted their line numbers |
+| File name in the visible tree | No; it establishes navigation only |
+
+This deliberately sacrifices apparent coverage rather than combining text from
+two possible file revisions. Navigation then asks for the current file from line
+1 through EOF. A continuous capture with no unanchored fragments, every line
+present, confidence of at least 0.9, and observed EOF can mark the conflicts
+resolved. The conflict records remain as history; resolution does not prove the
+new OCR text or program behavior is correct.
+
 ## Live assistance
 
 Question capture continues while analysis runs. Auto mode drains settled questions in order. Follow-up transcription revisions reset the settle timer and cannot be marked answered by a stale response. Failed questions remain available for explicit retry. Clicking a question pins it; answer history retains the last 30 completed or failed analyses in this session.
