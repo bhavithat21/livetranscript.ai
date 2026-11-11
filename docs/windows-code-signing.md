@@ -1,88 +1,66 @@
-# Windows code signing (kill the "virus detected" warning)
+# Windows code signing
 
-The `/download` Windows `.exe` is **unsigned** (CI job is literally
-"Windows build (unsigned)"). Chrome Safe Browsing + Windows SmartScreen flag any
-unsigned installer with no download reputation as "virus detected" / "not
-commonly downloaded." It is not a real virus — just missing an Authenticode
-signature. This doc is the turnkey fix.
+The desktop release workflow already supports Azure Trusted Signing. Signing is
+conditional: a release build is signed only when its Azure credentials are
+present, while ordinary local builds and the separate fast Windows build remain
+unsigned. Do not infer an artifact's signing state from a successful workflow;
+verify the downloaded installer itself.
 
-## Why not a physical EV USB token
+For account creation, identity validation, and the parallel macOS setup, use the
+[code-signing runbook](code-signing-runbook.md). This page describes the Windows
+path that is currently checked into the repository.
 
-Since 2023-06-01, all new OV **and** EV certs keep the private key on a hardware
-token or cloud HSM — the key can't be exported to a file. A **physical EV token
-can't be plugged into a GitHub Actions runner**, so it would force manual signing
-on a local Windows box every release. Our pipeline is CI-based, so a token is the
-wrong tool.
+## Current release path
 
-## Use Azure Trusted Signing instead (CI-compatible, same trust)
+1. The Windows release job checks whether `AZURE_CLIENT_ID` is available.
+2. When configured, it exports the Azure credentials, sets
+   `LT_WINDOWS_SIGN=1`, and adds
+   `--config src-tauri/tauri.windows-sign.conf.json` to the Tauri build.
+3. That overlay adds `bundle.windows.signCommand` without changing the base
+   Tauri configuration.
+4. Tauri invokes `scripts/sign-windows.ps1` for each Windows artifact. The
+   script authenticates with the service principal, signs with
+   `azuresigntool`, and requests an RFC 3161 SHA-256 timestamp.
+5. A signing command failure fails the release instead of silently publishing an
+   artifact as signed.
 
-- Same **instant SmartScreen trust** as EV — warning gone immediately, no
-  reputation wait.
-- **~$9.99/month** vs ~$300/yr for an EV token.
-- Signs **inside CI** via a cloud HSM — no physical token.
-- Tauri v2 supports it natively through `bundle.windows.signCommand`.
-- Requirement: identity validation needs an org/individual **3+ years old**.
+If Azure credentials are absent, the overlay is not merged and no signing command
+runs. This keeps unsigned developer and preview builds possible without weakening
+the signed release path.
 
-### Human-gated setup (only the account owner can do these)
+## Required repository secrets
 
-1. Create an **Azure account** + a **Trusted Signing** account and a
-   **certificate profile** (portal: "Trusted Signing Accounts").
-2. Complete **identity validation** (3+ years old requirement).
-3. Create a service principal / app registration and grant it the
-   **Trusted Signing Certificate Profile Signer** role on the signing account.
-4. Note: endpoint region (e.g. `https://wus2.codesigning.azure.net`), account
-   name, profile name.
+The conditional release path reads these six Action secrets:
 
-### Turnkey code changes (apply once the account exists)
+- `AZURE_TENANT_ID`
+- `AZURE_CLIENT_ID`
+- `AZURE_CLIENT_SECRET`
+- `AZURE_TS_ENDPOINT`
+- `AZURE_TS_ACCOUNT`
+- `AZURE_TS_CERT_PROFILE`
 
-**1. `src-tauri/tauri.conf.json`** — add `windows.signCommand` under `bundle`
-(replace the three `My*` placeholders with your account/profile/app name):
+Treat the set as one configuration unit. A present client ID enables the signing
+step, so missing companion values cause signing to fail rather than falling back
+to an unsigned release.
 
-```jsonc
-  "bundle": {
-    "active": true,
-    "targets": "all",
-    "windows": {
-      "signCommand": "artifact-signing-cli -e https://wus2.codesigning.azure.net -a MyAccount -c MyProfile -d LiveTranscript %1"
-    },
-    // ...existing externalBin, icon, etc.
-  }
+## Verify the installer
+
+Inspect the exact installer downloaded from the release or download page:
+
+```powershell
+Get-AuthenticodeSignature .\LiveTranscript_x.y.z_x64-setup.exe |
+  Select-Object Status, StatusMessage, SignerCertificate, TimeStamperCertificate
 ```
 
-**2. `.github/workflows/desktop-release.yml`** — install the signing CLI on the
-Windows matrix leg before the build step, and pass Azure creds:
+The status must be `Valid`, and the signer must match the intended certificate
+profile. As a second check on a Windows SDK machine:
 
-```yaml
-      - name: Install Azure signing CLI (Windows)
-        if: matrix.platform == 'windows-latest'
-        run: cargo install artifact-signing-cli
-
-      # ...in the tauri-action `env:` block, add:
-        env:
-          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+```powershell
+signtool verify /pa /v .\LiveTranscript_x.y.z_x64-setup.exe
 ```
 
-**3. Repo secrets** — add `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`,
-`AZURE_CLIENT_SECRET` (from the service principal in step 3 above).
-
-### Do NOT apply #1/#2 before the account is live
-
-A live `signCommand` with no Azure account will **fail every Windows build** and
-turn the currently-green CI red. Apply only after secrets are set.
-
-## Interim: click-through (works today, warning still shows)
-
-Until signing is live, beta testers can bypass:
-- **Chrome download bar:** the ⌄ next to the blocked file → **Keep**.
-- **SmartScreen on run:** **More info** → **Run anyway**.
-
-## macOS note
-
-The Mac build is signed with an **Apple _Development_** cert
-(`Authority=Apple Development: Revanth...`), not a Developer ID distribution cert,
-so Gatekeeper still warns (right-click → Open to bypass). Proper Mac distribution
-needs a **Developer ID Application** cert + notarization — the
-`desktop-release.yml` env block already has the `APPLE_*` secret slots wired for
-tauri-action; they just need real values.
+Also open **Properties → Digital Signatures** and inspect the signature and
+timestamp. A release page, successful build, updater signature, file hash, or the
+presence of Azure secrets is not evidence that a particular installer passed
+Authenticode verification. Tauri updater signing proves update-package integrity;
+it is separate from Windows publisher trust.
